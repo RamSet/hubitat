@@ -7,6 +7,7 @@ metadata {
 	attribute "AQI", "number"
 	command "setVariable"
 	}
+}
 def installed() {
     log.warn "installed..."
     airQualityIndex(0)
@@ -25,4 +26,5 @@ def setVariable(str) {
     def descriptionText = "${device.displayName} variable is ${str}"
     if (txtEnable) log.info "${descriptionText}"
     sendEvent(name: "variable", value: str, descriptionText: descriptionText)
+}
 }
