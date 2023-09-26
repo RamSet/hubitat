@@ -11,20 +11,3 @@ metadata {
 	command "airQualityIndex", ["Number"]
 	}
 }
-
-def getLatestData(){
-    parent.getLatestAQIDataCommand(this)
-}
-   
-def updated(){
-	getLatestAQIData()
-}
-
-def installed(){
-	getLatestAQIData()
-}
-
-def refresh() {
-	log.debug "Executing 'refresh'"
-    getLatestAQIData()
-}
