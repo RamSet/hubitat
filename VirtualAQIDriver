@@ -2,9 +2,10 @@ import java.text.DecimalFormat
 
 metadata {
 	definition (name: "Virtual AQI Driver", namespace: "RamSet", author: "RamSet") {
+	capability "AirQuality"
 	capability "Temperature Measurement"
-	command "setVariable"
-	attribute "AQI", "number"
+	command "AQI"
+	attribute "airQualityIndex", "number"
 	}
 }
 def installed() {
@@ -21,8 +22,8 @@ def updated() {
 def parse(String description) {
 }
 
-def setVariable(str) {
-    def descriptionText = "${device.displayName} variable is ${str}"
+def AQI(str) {
+    def descriptionText = "${device.displayName} AQI is ${str}"
     if (txtEnable) log.info "${descriptionText}"
-    sendEvent(name: "variable", value: str, descriptionText: descriptionText, isStateChange: true)
+    sendEvent(name: "AQI", value: airQualityIndex, descriptionText: descriptionText, isStateChange: true)
 }
