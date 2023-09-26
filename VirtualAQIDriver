@@ -4,7 +4,8 @@ metadata {
 	definition (name: "Virtual AQI Driver", namespace: "RamSet", author: "RamSet") {
 	capability "Temperature Measurement"
 	attribute "AirQuality"
-	command "setVariable"
+	command "AQI"
+	attribute "AQI", "number"
 	}
 }
 def installed() {
