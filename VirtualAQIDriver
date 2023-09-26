@@ -3,7 +3,7 @@ import java.text.DecimalFormat
 metadata {
 	definition (name: "Virtual AQI Driver", namespace: "RamSet", author: "RamSet") {
 	capability "Temperature Measurement"
-	command "AQI"
+	command "setVariable"
 	attribute "AQI", "number"
 	}
 }
