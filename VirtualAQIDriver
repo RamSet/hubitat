@@ -4,9 +4,7 @@ metadata {
 	definition (name: "Virtual AQI Driver", namespace: "RamSet", author: "RamSet") {
 	capability "AirQuality"
 	capability "Temperature Measurement"
-	command "setVariable", ["Number"]
 	command "airQualityIndex", ["Number"]
-	attribute "airQualityIndex"
 	}
 }
 def installed() {
@@ -23,11 +21,6 @@ def updated() {
 def parse(String description) {
 }
 
-def setVariable(str) {
-    def descriptionText = "${device.displayName} variable is ${str}"
-    if (txtEnable) log.info "${descriptionText}"
-    sendEvent(name: "Variable", value: str, descriptionText: descriptionText)
-}
 def airQualityIndex {
     def descriptionText = "${device.displayName} AQI is ${str}"
     if (txtEnable) log.info "${descriptionText}"
