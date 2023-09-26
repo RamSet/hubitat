@@ -24,6 +24,6 @@ def parse(String description) {
 def airQualityIndex(str) {
     def descriptionText = "${device.displayName} AQI is ${str}"
     if (txtEnable) log.info "${descriptionText}"
-    sendEvent(name: "AQI", value: str, descriptionText: descriptionText)
+    sendEvent(name: "airQualityIndex", value: str, descriptionText: descriptionText)
 }
 
