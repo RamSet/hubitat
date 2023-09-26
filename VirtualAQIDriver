@@ -10,4 +10,9 @@ metadata {
 	attribute "AQI", "number"
 	command "airQualityIndex", ["Number"]
 	}
+def airQualityIndex() {
+    def descriptionText = "${airQualityIndex} AQI"
+    if (txtEnable) log.info "${descriptionText}"
+    sendEvent(name: "AQI", value: "AQI",descriptionText: descriptionText)
+}
 }
