@@ -1,0 +1,27 @@
+import java.text.DecimalFormat
+
+metadata {
+	definition (name: "Virtual AQI Driver", namespace: "RamSet", author: "RamSet") {
+  capability "Temperature Measurement"
+	capability "Relative Humidity Measurement"
+  capability "CarbonDioxideMeasurement"
+	attribute "AQI", "number"
+	}
+}
+
+def getLatestData(){
+    parent.getLatestAQIDataCommand(this)
+}
+   
+def updated(){
+	getLatestAQIData()
+}
+
+def installed(){
+	getLatestAQIData()
+}
+
+def refresh() {
+	log.debug "Executing 'refresh'"
+    getLatestAQIData()
+}
