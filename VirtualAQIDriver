@@ -18,7 +18,7 @@
  */
 
 metadata {
-	definition (name: "Virtual AQI Driver", namespace: "RamSet", author: "RamSet") {
+	definition (name: "Virtual Air Quality (AQI) Driver", namespace: "RamSet", author: "RamSet") {
 	capability "AirQuality"
 	capability "Sensor"
 	capability "Temperature Measurement"
