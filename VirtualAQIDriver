@@ -14,6 +14,15 @@
  *
  * Simple way of processing a numeric value into an Air Quality sensor for integration with HomeKit
  *
+ * Homekit thresholds (value):
+ *
+ * < 500 Unknown (Out of range)
+ * 0-50 Excellent
+ * 51-100 Good
+ * 101-150 Fair
+ * 151-200 Inferior
+ * 201-500 Poor
+ * > 500 Unknown (Out of range)
  * ver. 1.0.0  2023-09-26 RamSet  - Initial release version
  */
 
