@@ -16,7 +16,7 @@
  *
  * Homekit thresholds (value):
  *
- * < 500 Unknown (Out of range)
+ * < 0 Unknown (Out of range)
  * 0-50 Excellent
  * 51-100 Good
  * 101-150 Fair
