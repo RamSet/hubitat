@@ -68,13 +68,12 @@ def checkNow() {
 def checkConnectivity() {
     def internetHost = settings.internetHost?.trim() ?: "https://www.google.com"
     def lanHost = settings.lanHost?.trim() ?: "http://192.168.1.1"
-    def customHost = settings.custoHost?.trim() ?: "http://192.168.1.100"
 
     
     // Preemptively mark Internet, LAN and custom host as offline
     sendEvent(name: "internet", value: "offline", descriptionText: "No response yet")
     sendEvent(name: "lan", value: "offline", descriptionText: "No response yet")
-    sendEvent(name: "custom", value: "offline", descriptionText: "No response yet")
+    //sendEvent(name: "custom", value: "offline", descriptionText: "No response yet")
      
     // Check Internet connectivity
     try {
