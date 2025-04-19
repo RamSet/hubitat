@@ -8,9 +8,9 @@
  *  If a response is received, the corresponding attribute is updated to "online."
  *  If no response is received, the attribute remains "offline."
  *
- *  Additionally, it optionally monitors Hub connectivity.
- *  If the Hub check is enabled, it sends an HTTP GET request to the defined Hub host.
- *  If the Hub check is disabled, the hub attribute is set to "disabled."
+ *  Additionally, it optionally monitors Custom Host connectivity.
+ *  If the Custom Host check is enabled, it sends an HTTP GET request to the defined custom host.
+ *  If the Custom Host check is disabled, the custom host attribute is set to "disabled."
  *
  *  Author: RamSet
  *  Date: 2025-04-01
@@ -21,15 +21,15 @@ metadata {
         capability "Actuator"  // Required for custom commands
         attribute "internet", "string"
         attribute "lan", "string"
-        attribute "hub", "string"
+        attribute "custom", "string"
         command "checkNow"  // Manually trigger a network check
     }
     
     preferences {
         input("internetHost", "text", title: "Internet Host", description: "URL to check for Internet connectivity (e.g., https://www.google.com)", required: true, defaultValue: "https://www.google.com")
         input("lanHost", "text", title: "LAN Host", description: "URL to check for LAN connectivity (e.g., http://192.168.1.1)", required: true, defaultValue: "http://192.168.1.1")
-        input("checkHub", "bool", title: "Check Hub?", description: "Enable checking of Hub connectivity", required: true, defaultValue: true)
-        input("hubHost", "text", title: "Hub Host", description: "URL to check for Hub connectivity (e.g., http://192.168.1.100)", required: false, defaultValue: "")
+        input("checkCustom", "bool", title: "Check Custom Host?", description: "Enable checking of custom host connectivity", required: true, defaultValue: true)
+        input("customHost", "text", title: "Custom Host", description: "URL to check for Custom Host connectivity (e.g., http://192.168.1.100)", required: false, defaultValue: "")
         input("checkInterval", "number", title: "Check Interval (seconds)", description: "Interval between connectivity checks", required: true, defaultValue: 300)
     }
 }
@@ -68,11 +68,14 @@ def checkNow() {
 def checkConnectivity() {
     def internetHost = settings.internetHost?.trim() ?: "https://www.google.com"
     def lanHost = settings.lanHost?.trim() ?: "http://192.168.1.1"
+    def customHost = settings.custoHost?.trim() ?: "http://192.168.1.100"
+
     
-    // Preemptively mark Internet and LAN as offline
+    // Preemptively mark Internet, LAN and custom host as offline
     sendEvent(name: "internet", value: "offline", descriptionText: "No response yet")
     sendEvent(name: "lan", value: "offline", descriptionText: "No response yet")
-    
+    sendEvent(name: "custom", value: "offline", descriptionText: "No response yet")
+     
     // Check Internet connectivity
     try {
         httpGet(internetHost) { response ->
@@ -95,28 +98,28 @@ def checkConnectivity() {
         log.warn "Failed to reach LAN host ${lanHost}: ${e.message}"
     }
     
-    // Check Hub connectivity if enabled
-    if (settings.checkHub) {
-        def hubHost = settings.hubHost?.trim()
+    // Check Custom Host connectivity if enabled
+    if (settings.checkCustom) {
+        def customHost = settings.customHost?.trim()
         if (hubHost) {
-            // Preemptively mark Hub as offline
-            sendEvent(name: "hub", value: "offline", descriptionText: "No response yet")
+            // Preemptively mark Custom Host as offline
+            sendEvent(name: "custom", value: "offline", descriptionText: "No response yet")
             try {
-                httpGet(hubHost) { response ->
+                httpGet(customHost) { response ->
                     if (response.status == 200) {
-                        sendEvent(name: "hub", value: "online", descriptionText: "HTTP response received from ${hubHost}")
+                        sendEvent(name: "custom", value: "online", descriptionText: "HTTP response received from ${customHost}")
                     }
                 }
             } catch (Exception e) {
-                log.warn "Failed to reach Hub host ${hubHost}: ${e.message}"
+                log.warn "Failed to reach Custom host ${customHost}: ${e.message}"
             }
         } else {
-            log.warn "Hub check enabled but no Hub host specified."
-            sendEvent(name: "hub", value: "offline", descriptionText: "Hub host not specified")
+            log.warn "Custom Host check enabled but no host specified."
+            sendEvent(name: "custom", value: "offline", descriptionText: "Custom host not specified")
         }
     } else {
-        // If Hub check is disabled, mark hub attribute as "disabled"
-        sendEvent(name: "hub", value: "disabled", descriptionText: "Hub check is disabled")
+        // If custom host check is disabled, mark custom host attribute as "disabled"
+        sendEvent(name: "custom", value: "disabled", descriptionText: "Custom host check is disabled")
     }
 
     // Schedule the next check based on the checkInterval preference
