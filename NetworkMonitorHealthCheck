@@ -1,0 +1,126 @@
+/**
+ *  Network Monitor HealthCheck (HTTP)
+ *
+ *  This driver monitors both Internet and LAN connectivity using HTTP requests.
+ *  It implements the HealthCheck capability with a user-defined checkInterval.
+ *
+ *  The driver sends an HTTP GET request to both a defined Internet and LAN host.
+ *  If a response is received, the corresponding attribute is updated to "online."
+ *  If no response is received, the attribute remains "offline."
+ *
+ *  Additionally, it optionally monitors Hub connectivity.
+ *  If the Hub check is enabled, it sends an HTTP GET request to the defined Hub host.
+ *  If the Hub check is disabled, the hub attribute is set to "disabled."
+ *
+ *  Author: RamSet
+ *  Date: 2025-04-01
+ */
+metadata {
+    definition(name: "Network Monitor HealthCheck (HTTP)", namespace: "Mezel", author: "RamSet") {
+        capability "Sensor"
+        capability "Actuator"  // Required for custom commands
+        attribute "internet", "string"
+        attribute "lan", "string"
+        attribute "hub", "string"
+        command "checkNow"  // Manually trigger a network check
+    }
+    
+    preferences {
+        input("internetHost", "text", title: "Internet Host", description: "URL to check for Internet connectivity (e.g., https://www.google.com)", required: true, defaultValue: "https://www.google.com")
+        input("lanHost", "text", title: "LAN Host", description: "URL to check for LAN connectivity (e.g., http://192.168.1.1)", required: true, defaultValue: "http://192.168.1.1")
+        input("checkHub", "bool", title: "Check Hub?", description: "Enable checking of Hub connectivity", required: true, defaultValue: true)
+        input("hubHost", "text", title: "Hub Host", description: "URL to check for Hub connectivity (e.g., http://192.168.1.100)", required: false, defaultValue: "")
+        input("checkInterval", "number", title: "Check Interval (seconds)", description: "Interval between connectivity checks", required: true, defaultValue: 300)
+    }
+}
+
+def installed() {
+    log.info "Network Monitor HealthCheck (HTTP) installed"
+    initialize()
+}
+
+def updated() {
+    log.info "Network Monitor HealthCheck (HTTP) updated"
+    unschedule()
+    initialize()
+}
+
+def initialize() {
+    // Set the HealthCheck checkInterval attribute
+    if (settings.checkInterval) {
+        sendEvent(name: "checkInterval", value: settings.checkInterval, unit: "sec")
+    }
+    // Start the connectivity check immediately
+    checkConnectivity()
+}
+
+/**
+ * Manually triggered network check via button
+ */
+def checkNow() {
+    log.info "Manual network check triggered"
+    checkConnectivity()
+}
+
+/**
+ * Sends HTTP requests to the Internet, LAN, and optionally Hub hosts.
+ */
+def checkConnectivity() {
+    def internetHost = settings.internetHost?.trim() ?: "https://www.google.com"
+    def lanHost = settings.lanHost?.trim() ?: "http://192.168.1.1"
+    
+    // Preemptively mark Internet and LAN as offline
+    sendEvent(name: "internet", value: "offline", descriptionText: "No response yet")
+    sendEvent(name: "lan", value: "offline", descriptionText: "No response yet")
+    
+    // Check Internet connectivity
+    try {
+        httpGet(internetHost) { response ->
+            if (response.status == 200) {
+                sendEvent(name: "internet", value: "online", descriptionText: "HTTP response received from ${internetHost}")
+            }
+        }
+    } catch (Exception e) {
+        log.warn "Failed to reach Internet host ${internetHost}: ${e.message}"
+    }
+    
+    // Check LAN connectivity
+    try {
+        httpGet(lanHost) { response ->
+            if (response.status == 200) {
+                sendEvent(name: "lan", value: "online", descriptionText: "HTTP response received from ${lanHost}")
+            }
+        }
+    } catch (Exception e) {
+        log.warn "Failed to reach LAN host ${lanHost}: ${e.message}"
+    }
+    
+    // Check Hub connectivity if enabled
+    if (settings.checkHub) {
+        def hubHost = settings.hubHost?.trim()
+        if (hubHost) {
+            // Preemptively mark Hub as offline
+            sendEvent(name: "hub", value: "offline", descriptionText: "No response yet")
+            try {
+                httpGet(hubHost) { response ->
+                    if (response.status == 200) {
+                        sendEvent(name: "hub", value: "online", descriptionText: "HTTP response received from ${hubHost}")
+                    }
+                }
+            } catch (Exception e) {
+                log.warn "Failed to reach Hub host ${hubHost}: ${e.message}"
+            }
+        } else {
+            log.warn "Hub check enabled but no Hub host specified."
+            sendEvent(name: "hub", value: "offline", descriptionText: "Hub host not specified")
+        }
+    } else {
+        // If Hub check is disabled, mark hub attribute as "disabled"
+        sendEvent(name: "hub", value: "disabled", descriptionText: "Hub check is disabled")
+    }
+
+    // Schedule the next check based on the checkInterval preference
+    if (settings.checkInterval) {
+        runIn(settings.checkInterval as Integer, checkConnectivity)
+    }
+}
