@@ -23,7 +23,7 @@ metadata {
         attribute "lan", "string"
         attribute "custom", "string"
         command "checkNow"
-        importURL "https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/NetworkMonitorHealthCheck"
+        importURL: "https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/NetworkMonitorHealthCheck"
     }
 
     preferences {
