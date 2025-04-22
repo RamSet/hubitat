@@ -16,7 +16,12 @@
  *  Date: 2025-04-01
  */
 metadata {
-    definition(name: "Network Monitor HealthCheck (HTTP)", namespace: "Mezel", author: "RamSet", importURL: "https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/NetworkMonitorHealthCheck.groovy") {
+    definition(
+        name: "Network Monitor HealthCheck (HTTP)",
+        namespace: "Mezel",
+        author: "RamSet",
+        importURL: "https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/NetworkMonitorHealthCheck.groovy"
+    ) {
         capability "Sensor"
         capability "Actuator"
         attribute "internet", "string"
