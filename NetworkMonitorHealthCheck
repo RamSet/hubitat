@@ -16,14 +16,13 @@
  *  Date: 2025-04-01
  */
 metadata {
-    definition(name: "Network Monitor HealthCheck (HTTP)", namespace: "Mezel", author: "RamSet") {
+    definition(name: "Network Monitor HealthCheck (HTTP)", namespace: "Mezel", author: "RamSet", importURL: "https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/NetworkMonitorHealthCheck") {
         capability "Sensor"
         capability "Actuator"
         attribute "internet", "string"
         attribute "lan", "string"
         attribute "custom", "string"
         command "checkNow"
-        importURL: "https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/NetworkMonitorHealthCheck"
     }
 
     preferences {
