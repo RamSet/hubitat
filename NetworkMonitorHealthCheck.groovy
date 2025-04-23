@@ -9,16 +9,16 @@
  *  Last Updated: 2025-04-23
  *
  *  CHANGELOG:
- *  v1.4 (2025-04-23)
+ *  v1.4
  *   - Added toggle to treat "connection refused" as online.
  *   - Only unreachable hosts are considered offline if toggle is enabled.
  *
- *  v1.3 (2025-04-23)
+ *  v1.3
  *   - Added logging preferences (info, debug, warn, or off).
  *   - Prevented default LAN Host value from being used when checks are off.
  *   - Fixed behavior where LAN Host was required even if LAN check was disabled.
  *
- *  v1.2 (2025-04-22)
+ *  v1.2
  *   - Added option to disable LAN check just like custom check.
  *   - Avoid repeated event triggers unless value actually changes.
  *   - Retained previous changelog entries and enhancements.
