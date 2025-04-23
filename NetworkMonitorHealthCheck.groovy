@@ -1,20 +1,16 @@
 /**
- *  Network Monitor HealthCheck (HTTP)
+ *  Network Monitor HealthCheck (HTTP) - v1.2
  *
- *  This driver monitors Internet, LAN, and optionally Custom host connectivity using HTTP requests.
- *  It implements the HealthCheck capability with a user-defined checkInterval.
+ *  CHANGELOG:
+ *  - v1.1: Added optional Custom Host check with toggle.
+ *  - v1.2:
+ *    - Added optional LAN Host check with toggle.
+ *    - Prevents redundant 'offline' events to avoid false triggers.
+ *    - Added logging preferences: info, debug, warn, or off.
+ *    - Defaults undefined booleans (checkLAN/checkCustom) to true during initialization.
  *
  *  Author: RamSet
- *  Version: 1.2
  *  Date: 2025-04-22
- *
- *  Change Log:
- *  - v1.1: Added support for custom host check with toggle
- *  - v1.2:
- *    - Made LAN check optional via toggle (same as custom host)
- *    - Improved logic to treat any HTTP status code (e.g., 403, 404) as online
- *    - Only considers host offline when no HTTP code is returned (i.e., unreachable)
- *    - Avoids triggering sendEvent unless the value has changed (prevents false alarms in Rule Machine)
  */
 
 metadata {
@@ -35,67 +31,68 @@ metadata {
     preferences {
         input("internetHost", "text", title: "Internet Host", required: true, defaultValue: "https://www.google.com")
         input("checkLAN", "bool", title: "Check LAN Host?", defaultValue: true)
-        input("lanHost", "text", title: "LAN Host", required: false, defaultValue: "http://192.168.1.1")
+        input("lanHost", "text", title: "LAN Host", required: true, defaultValue: "http://192.168.1.1")
         input("checkCustom", "bool", title: "Check Custom Host?", defaultValue: true)
         input("customHost", "text", title: "Custom Host", required: false, defaultValue: "")
         input("checkInterval", "number", title: "Check Interval (seconds)", required: true, defaultValue: 300)
+        input("logLevel", "enum", title: "Logging Level", defaultValue: "info", options: ["off", "info", "debug", "warn"])
     }
 }
 
 def installed() {
-    log.info "Network Monitor HealthCheck (HTTP) installed"
+    logInfo "Network Monitor HealthCheck (HTTP) installed"
     initialize()
 }
 
 def updated() {
-    log.info "Network Monitor HealthCheck (HTTP) updated"
+    logInfo "Network Monitor HealthCheck (HTTP) updated"
     unschedule()
     initialize()
 }
 
 def initialize() {
+    // Ensure undefined boolean preferences are treated as true
+    if (settings.checkLAN == null) device.updateSetting("checkLAN", [value: "true", type: "bool"])
+    if (settings.checkCustom == null) device.updateSetting("checkCustom", [value: "true", type: "bool"])
+
+    // Set HealthCheck interval
     if (settings.checkInterval) {
         sendEvent(name: "checkInterval", value: settings.checkInterval, unit: "sec")
     }
+
     checkConnectivity()
 }
 
 def checkNow() {
-    log.info "Manual network check triggered"
+    logInfo "Manual network check triggered"
     checkConnectivity()
 }
 
 def checkConnectivity() {
-    // Internet
+    // Internet check is always required
     checkHost("internet", settings.internetHost?.trim() ?: "https://www.google.com")
 
-    // LAN
+    // LAN check only if enabled
     if (settings.checkLAN) {
-        def lanHost = settings.lanHost?.trim()
-        if (lanHost) {
-            checkHost("lan", lanHost)
-        } else {
-            log.warn "LAN check enabled but no LAN host specified"
-            updateAttr("lan", "offline", "LAN host not specified")
-        }
+        checkHost("lan", settings.lanHost?.trim() ?: "http://192.168.1.1")
     } else {
-        updateAttr("lan", "disabled", "LAN host check is disabled")
+        updateAttribute("lan", "disabled", "LAN host check is disabled")
     }
 
-    // Custom
+    // Custom host check only if enabled
     if (settings.checkCustom) {
         def customHost = settings.customHost?.trim()
         if (customHost) {
             checkHost("custom", customHost)
         } else {
-            log.warn "Custom check enabled but no host specified"
-            updateAttr("custom", "offline", "Custom host not specified")
+            logWarn "Custom host check enabled but no host specified"
+            updateAttribute("custom", "offline", "Custom host not specified")
         }
     } else {
-        updateAttr("custom", "disabled", "Custom host check is disabled")
+        updateAttribute("custom", "disabled", "Custom host check is disabled")
     }
 
-    // Schedule next check
+    // Reschedule next check
     if (settings.checkInterval) {
         runIn(settings.checkInterval as Integer, checkConnectivity)
     }
@@ -104,30 +101,32 @@ def checkConnectivity() {
 def checkHost(attrName, url) {
     try {
         httpGet([uri: url, ignoreSSLIssues: true]) { response ->
-            def code = response?.getStatus()
-            log.debug "Host ${url} responded with HTTP ${code}"
-            updateAttr(attrName, "online", "Online - HTTP ${code}")
+            def statusCode = response?.getStatus()
+            logDebug "Host ${url} responded with status ${statusCode}"
+            updateAttribute(attrName, "online", "Online - HTTP ${statusCode}")
         }
     } catch (Exception e) {
         def msg = e.message ?: "Unknown error"
         def codeMatch = msg =~ /status code: (\d{3})/
         if (codeMatch) {
             def code = codeMatch[0][1]
-            log.debug "Host ${url} returned HTTP error ${code}, considering it online"
-            updateAttr(attrName, "online", "Online - HTTP ${code}")
+            logDebug "Host ${url} returned error code ${code}, treating as online"
+            updateAttribute(attrName, "online", "Online - HTTP ${code}")
         } else {
-            log.warn "Host ${url} is unreachable: ${msg}"
-            updateAttr(attrName, "offline", "Offline - ${msg}")
+            logWarn "Host ${url} is unreachable: ${msg}"
+            updateAttribute(attrName, "offline", "Offline - ${msg}")
         }
     }
 }
 
-// Only update attribute if value has changed
-def updateAttr(name, value, description) {
-    def current = device.currentValue(name)
-    if (current != value) {
-        sendEvent(name: name, value: value, descriptionText: description)
-    } else {
-        log.debug "No change for ${name} (still ${value})"
+private updateAttribute(attr, value, description = null) {
+    if (device.currentValue(attr) != value) {
+        sendEvent(name: attr, value: value, descriptionText: description ?: value)
+        logInfo "Attribute '${attr}' set to '${value}'${description ? " (${description})" : ""}"
     }
 }
+
+// Logging helpers
+private logInfo(msg)  { if (settings.logLevel in ["info", "debug"])  log.info  msg }
+private logDebug(msg) { if (settings.logLevel == "debug")            log.debug msg }
+private logWarn(msg)  { if (settings.logLevel in ["warn", "debug"])  log.warn  msg }
