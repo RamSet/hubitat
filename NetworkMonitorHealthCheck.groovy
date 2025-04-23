@@ -32,7 +32,7 @@ metadata {
         name: "Network Monitor HealthCheck (HTTP)",
         namespace: "Mezel",
         author: "RamSet",
-        importURL: "https://raw.githubusercontent.com/RamSet/hubitat/main/NetworkMonitorHealthCheck.groovyNetworkMonitorHealthCheck.groovy"
+        importURL: "https://raw.githubusercontent.com/RamSet/hubitat/main/NetworkMonitorHealthCheck.groovy"
     ) {
         capability "Sensor"
         capability "Actuator"
