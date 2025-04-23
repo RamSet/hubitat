@@ -1,30 +1,35 @@
 /**
  *  Network Monitor HealthCheck (HTTP)
  *
- *  This driver monitors Internet, LAN, and optionally Custom host connectivity using HTTP requests.
- *  It implements the HealthCheck capability with a user-defined checkInterval.
+ *  This driver monitors Internet, LAN, and optionally a Custom Host's connectivity via HTTP requests.
+ *  It updates attributes based on reachability and supports a manual check command.
  *
+ *  Version: 1.4
  *  Author: RamSet
- *  Version: 1.3.1
- *  Last Updated: 2025-04-21
+ *  Last Updated: 2025-04-23
  *
- *  Changelog:
- *  v1.3.1 - Fixes:
- *    - LAN host is no longer required or defaulted if LAN checks are disabled.
- *    - Prevents saving errors when 'Check LAN Host?' is off and field is empty.
+ *  CHANGELOG:
+ *  v1.4 (2025-04-23)
+ *   - Added toggle to treat "connection refused" as online.
+ *   - Only unreachable hosts are considered offline if toggle is enabled.
  *
- *  v1.3 - Additions:
- *    - Logging level preference added (info, debug, warn, off)
- *    - Attributes no longer reset to 'offline' unless value changes (reduces event noise)
- *    - LAN check can now be disabled, like Custom host check
+ *  v1.3 (2025-04-23)
+ *   - Added logging preferences (info, debug, warn, or off).
+ *   - Prevented default LAN Host value from being used when checks are off.
+ *   - Fixed behavior where LAN Host was required even if LAN check was disabled.
  *
- *  v1.2 - Improvements:
- *    - Improved offline/online detection
- *    - Only considers host 'offline' if unreachable or no HTTP code is received
+ *  v1.2 (2025-04-22)
+ *   - Added option to disable LAN check just like custom check.
+ *   - Avoid repeated event triggers unless value actually changes.
+ *   - Retained previous changelog entries and enhancements.
  *
- *  v1.1 - Added importURL for Hubitat Package Manager compatibility
+ *  v1.1
+ *   - Improved error handling for unreachable hosts.
+ *   - Responses with any status code are considered online unless no code is returned.
+ *   - Custom host check now works properly with empty/invalid URLs.
  *
- *  v1.0 - Initial release
+ *  v1.0 (2025-04-01)
+ *   - Initial release with Internet, LAN, and optional custom host checks.
  */
 
 metadata {
@@ -49,30 +54,33 @@ metadata {
         input("checkCustom", "bool", title: "Check Custom Host?", defaultValue: true)
         input("customHost", "text", title: "Custom Host", required: false, defaultValue: "")
         input("checkInterval", "number", title: "Check Interval (seconds)", required: true, defaultValue: 300)
+        input("treatRefusedAsOnline", "bool", title: "Treat 'Connection Refused' as Online?",
+              description: "If enabled, only unreachable hosts are considered offline. All other responses, including connection refused, are considered online.",
+              defaultValue: false)
         input("logLevel", "enum", title: "Logging Level", options: ["info", "debug", "warn", "off"], defaultValue: "info")
     }
 }
 
 def installed() {
-    logInfo "Network Monitor HealthCheck (HTTP) installed"
+    logInfo "Installed"
     initialize()
 }
 
 def updated() {
-    logInfo "Network Monitor HealthCheck (HTTP) updated"
+    logInfo "Updated"
     unschedule()
     initialize()
 }
 
 def initialize() {
-    // Set checkInterval event
     if (settings.checkInterval) {
         sendEvent(name: "checkInterval", value: settings.checkInterval, unit: "sec")
     }
 
-    // Default undefined toggles to true for backward compatibility
-    if (settings.checkLAN == null) app.updateSetting("checkLAN", [type: "bool", value: "true"])
-    if (settings.checkCustom == null) app.updateSetting("checkCustom", [type: "bool", value: "true"])
+    // Default undefined boolean toggles to true
+    if (checkLAN == null) app.updateSetting("checkLAN", [type: "bool", value: true])
+    if (checkCustom == null) app.updateSetting("checkCustom", [type: "bool", value: true])
+    if (treatRefusedAsOnline == null) app.updateSetting("treatRefusedAsOnline", [type: "bool", value: false])
 
     checkConnectivity()
 }
@@ -83,7 +91,7 @@ def checkNow() {
 }
 
 def checkConnectivity() {
-    checkHost("internet", settings.internetHost?.trim())
+    checkHost("internet", settings.internetHost?.trim() ?: "https://www.google.com")
 
     if (settings.checkLAN) {
         def lan = settings.lanHost?.trim()
@@ -91,10 +99,10 @@ def checkConnectivity() {
             checkHost("lan", lan)
         } else {
             logWarn "LAN check enabled but no host specified"
-            sendEvent(name: "lan", value: "offline", descriptionText: "LAN host not specified")
+            sendEventIfChanged("lan", "offline", "LAN host not specified")
         }
     } else {
-        sendEvent(name: "lan", value: "disabled", descriptionText: "LAN check is disabled")
+        sendEventIfChanged("lan", "disabled", "LAN check is disabled")
     }
 
     if (settings.checkCustom) {
@@ -102,11 +110,11 @@ def checkConnectivity() {
         if (custom) {
             checkHost("custom", custom)
         } else {
-            logWarn "Custom host check enabled but no host specified"
-            sendEvent(name: "custom", value: "offline", descriptionText: "Custom host not specified")
+            logWarn "Custom check enabled but no host specified"
+            sendEventIfChanged("custom", "offline", "Custom host not specified")
         }
     } else {
-        sendEvent(name: "custom", value: "disabled", descriptionText: "Custom host check is disabled")
+        sendEventIfChanged("custom", "disabled", "Custom check is disabled")
     }
 
     if (settings.checkInterval) {
@@ -114,40 +122,48 @@ def checkConnectivity() {
     }
 }
 
-def checkHost(attrName, url) {
-    if (!url) return
-
+def checkHost(attr, url) {
     try {
-        httpGet([uri: url, ignoreSSLIssues: true]) { response ->
-            def statusCode = response?.getStatus()
-            logDebug "Host ${url} responded with status ${statusCode}"
-            updateIfChanged(attrName, "online", "Online - HTTP ${statusCode}")
+        httpGet([uri: url, ignoreSSLIssues: true]) { resp ->
+            def statusCode = resp?.getStatus()
+            logDebug "Host ${url} responded with ${statusCode}"
+            sendEventIfChanged(attr, "online", "Online - HTTP ${statusCode}")
         }
-    } catch (Exception e) {
-        def errorMessage = e.message ?: "Unknown error"
-        def codeMatch = errorMessage =~ /status code: (\d{3})/
+    } catch (e) {
+        def msg = e.message ?: "Unknown error"
+        def codeMatch = msg =~ /status code: (\d{3})/
         if (codeMatch) {
             def code = codeMatch[0][1]
-            logDebug "Host ${url} returned HTTP error code ${code}, considered online"
-            updateIfChanged(attrName, "online", "Online - HTTP ${code}")
+            logDebug "Host ${url} error code ${code} treated as online"
+            sendEventIfChanged(attr, "online", "Online - HTTP ${code}")
+        } else if (msg.toLowerCase().contains("connection refused") && settings.treatRefusedAsOnline) {
+            logDebug "Host ${url} refused connection but treated as online"
+            sendEventIfChanged(attr, "online", "Online - Connection refused")
         } else {
-            logWarn "Host ${url} is unreachable: ${errorMessage}"
-            updateIfChanged(attrName, "offline", "Offline - ${errorMessage}")
+            logWarn "Host ${url} unreachable: ${msg}"
+            sendEventIfChanged(attr, "offline", "Offline - ${msg}")
         }
     }
 }
 
-def updateIfChanged(attrName, newValue, desc) {
-    def current = device.currentValue(attrName)
-    if (current != newValue) {
-        sendEvent(name: attrName, value: newValue, descriptionText: desc)
-        logInfo "${attrName.toUpperCase()} changed to '${newValue}' - ${desc}"
+def sendEventIfChanged(name, value, desc) {
+    def current = device.currentValue(name)
+    if (current != value) {
+        sendEvent(name: name, value: value, descriptionText: desc)
+        logInfo "Updated ${name} to ${value} (${desc})"
     } else {
-        logDebug "${attrName.toUpperCase()} unchanged (${newValue})"
+        logDebug "No change for ${name}, remains ${value}"
     }
 }
 
-// Logging helpers
-private logInfo(msg)  { if (settings.logLevel in ["info", "debug"])  log.info msg }
-private logDebug(msg) { if (settings.logLevel == "debug")           log.debug msg }
-private logWarn(msg)  { if (settings.logLevel != "off")             log.warn msg }
+def logInfo(msg) {
+    if (logLevel in ["info", "debug"]) log.info msg
+}
+
+def logDebug(msg) {
+    if (logLevel == "debug") log.debug msg
+}
+
+def logWarn(msg) {
+    if (logLevel in ["warn", "debug"]) log.warn msg
+}
