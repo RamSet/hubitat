@@ -1,16 +1,30 @@
 /**
- *  Network Monitor HealthCheck (HTTP) - v1.2
+ *  Network Monitor HealthCheck (HTTP)
  *
- *  CHANGELOG:
- *  - v1.1: Added optional Custom Host check with toggle.
- *  - v1.2:
- *    - Added optional LAN Host check with toggle.
- *    - Prevents redundant 'offline' events to avoid false triggers.
- *    - Added logging preferences: info, debug, warn, or off.
- *    - Defaults undefined booleans (checkLAN/checkCustom) to true during initialization.
+ *  Monitors Internet, LAN, and optionally Custom Host connectivity using HTTP requests.
+ *  Includes HealthCheck capability, with status attributes for each check.
  *
  *  Author: RamSet
- *  Date: 2025-04-22
+ *  Version: 1.3
+ *  Date: 2025-04-23
+ *
+ *  Changelog:
+ *  v1.3
+ *  - Added logging preferences (info, debug, warn, off).
+ *  - LAN check made optional via `checkLAN` toggle.
+ *  - Fixed boolean preference default issue after update (preserves user settings).
+ *  - Prevents unnecessary events if values haven't changed.
+ *  - Description text shows actual HTTP status code or error.
+ * 
+ *  v1.2
+ *  - Added optional toggle for LAN checks (checkLAN).
+ *  - Avoids sending "offline" event if value hasn't changed, to prevent RM false triggers.
+ *  - Ensured preferences default properly during initialization.
+ *
+ *  v1.1
+ *  - Handles host unreachable errors more clearly.
+ *  - Any HTTP code is now considered a successful response unless no code is returned.
+ *  - Custom host check can now be disabled.
  */
 
 metadata {
