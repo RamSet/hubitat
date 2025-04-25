@@ -10,20 +10,17 @@
  * Date: 2025-04-25
  *
  * Changelog:
- *  v1.2.0 - Added timestamp parsing using ZonedDateTime/DateTimeFormatter for specific fields.
- *          - Optional toggle to limit attribute updates to essential fields only.
- *          - Essential attributes include: humidity, lightIntensity, tempC/F, windSpeed, uvIndex, and realtimeStatus.
- *          - All other attributes update only if "Pull All Fields" toggle is enabled.
- *          - Added disclaimer for potential event load when pulling all fields.
- * 
+ *  v1.2.0 - Added timestamp formatting using ZonedDateTime.
+ *          - Optional toggle to limit updates to high-interest weather fields.
+ *          - All values fetched during initialization.
+ *
  * v1.1.0 - Added system health check from /api/system/health endpoint.
- *          - Fetches system status, realtime status, and database info first.
- *          - Weather data updated after health check.
- *          - New attributes: systemStatus, realtimeStatus, databaseInfo.
+ *          - Fetches system status and realtime status.
+ *          - Improved logging and handling of attribute updates.
  * 
  * v1.0.0 - Initial release.
  *          - Driver that pulls values from Acuparse API, including weather data.
- *          - Attributes for temperature, humidity, wind speed, light intensity, UV index, and lightning strike count.
+ *          - Attributes for temperature, humidity, wind speed, light intensity, UV index.
  *          - Fully configurable polling interval and host/port settings.
  *          - Includes logging options (Debug, Info, Warn).
  *
@@ -55,11 +52,9 @@ metadata {
         attribute "windSpeedKMH", "number"
         attribute "lightIntensity", "number"
         attribute "uvIndex", "number"
-        attribute "lightningStrikeCount", "number"
         attribute "lastUpdated", "string"
         attribute "systemStatus", "string"
         attribute "realtimeStatus", "string"
-        attribute "databaseInfo", "string"
     }
 
     preferences {
@@ -67,7 +62,7 @@ metadata {
         input name: "port", type: "number", title: "Port (default 80)", required: false
         input name: "updateInterval", type: "number", title: "Polling interval (seconds)", defaultValue: 60
         input name: "logLevel", type: "enum", title: "Logging Level", options: ["Off", "Info", "Debug", "Warn"], defaultValue: "Info"
-        input name: "pullAllFields", type: "bool", title: "Pull All Fields (May Generate Many Events)", defaultValue: false
+        input name: "fullData", type: "bool", title: "Enable full data polling (may generate many events)", defaultValue: false
     }
 }
 
@@ -86,8 +81,8 @@ def initialize() {
         logDebug "Debug logging will auto-disable in 5 minutes."
         runIn(300, disableDebugLogging)
     }
-    scheduleNextPoll()
     poll()
+    scheduleNextPoll()
 }
 
 def refresh() {
@@ -116,7 +111,6 @@ def poll() {
                 def healthData = healthResp.data
                 updateAttr("systemStatus", healthData?.status)
                 updateAttr("realtimeStatus", healthData?.realtime)
-                updateAttr("databaseInfo", healthData?.database)
                 pollWeatherData(weatherUri)
             } else {
                 logWarn "Failed to fetch health data - Status: ${healthResp?.status}"
@@ -133,36 +127,35 @@ private pollWeatherData(weatherUri) {
         httpGet(params) { resp ->
             if (resp?.status == 200 && resp?.data) {
                 def data = resp.data
-                def coreFields = [
-                    "main_tempC", "main_tempF", "main_relH", "atlas_lightIntensity",
-                    "atlas_uvIndex", "main_windSpeedKMH", "main_windSpeedMPH", "realtimeStatus"
+                def interestedFields = [
+                    "humidity", "lightIntensity", "tempC", "tempF",
+                    "windSpeedKMH", "windSpeedMPH", "realtime", "uvIndex"
                 ]
                 def timestampFields = [
-                    "atlas_lastUpdated", "lastUpdated", "lightning_last_strike_ts", "lightning_last_update",
-                    "main_high_temp_recorded", "main_lastUpdated", "main_low_temp_recorded",
-                    "main_moon_lastFull", "main_moon_lastNew", "main_moon_nextFull", "main_moon_nextNew",
-                    "main_moonrise", "main_moonset", "main_sunrise", "main_sunset",
-                    "main_windSpeed_peak_recorded"
+                    "atlas_lastUpdated", "lastUpdated", "lightning_last_strike_ts",
+                    "lightning_last_update", "main_high_temp_recorded", "main_lastUpdated",
+                    "main_low_temp_recorded", "main_moon_lastFull", "main_moon_lastNew",
+                    "main_moon_nextFull", "main_moon_nextNew", "main_moonrise",
+                    "main_moonset", "main_sunrise", "main_sunset", "main_windSpeed_peak_recorded"
                 ]
 
                 ["main", "atlas", "lightning"].each { section ->
                     data[section]?.each { key, value ->
-                        def attrName = "${section}_${key}".replaceAll("\\s", "")
-                        if (!settings.pullAllFields && !(attrName in coreFields)) return
-
-                        if (timestampFields.contains(attrName) && value) {
+                        def attrName = "${section}_${key}".replaceAll(/\s/, "")
+                        if (timestampFields.contains(attrName)) {
                             try {
                                 def zdt = ZonedDateTime.parse(value.toString())
-                                def formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss z")
-                                value = zdt.format(formatter)
-                            } catch (e) {
-                                logWarn "Timestamp parse failed for ${attrName}: ${e.message}"
-                            }
+                                value = zdt.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss z"))
+                            } catch (ignored) { }
                         }
-                        updateAttr(attrName, value)
+
+                        if (settings.fullData || interestedFields.contains(key)) {
+                            updateAttr(attrName, value)
+                        }
                     }
                 }
 
+                // Core simplified fields
                 updateAttr("temperatureF", data?.main?.tempF)
                 updateAttr("temperatureC", data?.main?.tempC)
                 updateAttr("humidity", data?.main?.relH)
@@ -171,7 +164,6 @@ private pollWeatherData(weatherUri) {
                 updateAttr("windSpeedKMH", data?.main?.windSpeedKMH)
                 updateAttr("lightIntensity", data?.atlas?.lightIntensity)
                 updateAttr("uvIndex", data?.atlas?.uvIndex)
-                updateAttr("lightningStrikeCount", data?.lightning?.strikecount)
                 updateAttr("lastUpdated", data?.main?.lastUpdated)
             } else {
                 logWarn "Failed to fetch weather data - Status: ${resp?.status}"
