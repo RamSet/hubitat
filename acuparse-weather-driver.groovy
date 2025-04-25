@@ -6,18 +6,26 @@
  *   Designed for use with Hubitat Package Manager (HPM).
  *
  * Author: RamSet
- * Version: 1.3.0
+ * Version: 1.2.0
  * Date: 2025-04-25
  *
  * Changelog:
- *  v1.3.0 - Suppressed duplicate fields using preferred sources.
- *          - Parsed 'lastUpdated' into separate date and time fields.
- *          - Retained all relevant fields and core 1.2.0 behavior.
  *  v1.2.0 - Added timestamp parsing using ZonedDateTime/DateTimeFormatter for specific fields.
  *          - Optional toggle to limit attribute updates to essential fields only.
  *          - Essential attributes include: humidity, lightIntensity, tempC/F, windSpeed, uvIndex, and realtimeStatus.
- *  v1.1.0 - Added system health check from /api/system/health endpoint.
- *  v1.0.0 - Initial release.
+ *          - All other attributes update only if "Pull All Fields" toggle is enabled.
+ *          - Added disclaimer for potential event load when pulling all fields.
+ * 
+ * v1.1.0 - Added system health check from /api/system/health endpoint.
+ *          - Fetches system status, realtime status, and database info first.
+ *          - Weather data updated after health check.
+ *          - New attributes: systemStatus, realtimeStatus, databaseInfo.
+ * 
+ * v1.0.0 - Initial release.
+ *          - Driver that pulls values from Acuparse API, including weather data.
+ *          - Attributes for temperature, humidity, wind speed, light intensity, UV index, and lightning strike count.
+ *          - Fully configurable polling interval and host/port settings.
+ *          - Includes logging options (Debug, Info, Warn).
  *
  * HPM Metadata:
  * {
@@ -47,13 +55,9 @@ metadata {
         attribute "windSpeedKMH", "number"
         attribute "lightIntensity", "number"
         attribute "uvIndex", "number"
-        attribute "lightningStrikeCount", "number"
         attribute "lastUpdated", "string"
-        attribute "lastUpdatedDate", "string"
-        attribute "lastUpdatedTime", "string"
         attribute "systemStatus", "string"
         attribute "realtimeStatus", "string"
-        attribute "databaseInfo", "string"
     }
 
     preferences {
@@ -102,7 +106,7 @@ def poll() {
     def targetPort = settings.port ?: 80
     def healthUri = "http://${settings.host}:${targetPort}/api/system/health"
     def weatherUri = "http://${settings.host}:${targetPort}/api/v1/json/dashboard/?main"
-
+    
     def healthParams = [ uri: healthUri, contentType: "application/json" ]
     try {
         httpGet(healthParams) { healthResp ->
@@ -110,7 +114,6 @@ def poll() {
                 def healthData = healthResp.data
                 updateAttr("systemStatus", healthData?.status)
                 updateAttr("realtimeStatus", healthData?.realtime)
-                updateAttr("databaseInfo", healthData?.database)
                 pollWeatherData(weatherUri)
             } else {
                 logWarn "Failed to fetch health data - Status: ${healthResp?.status}"
@@ -128,7 +131,8 @@ private pollWeatherData(weatherUri) {
             if (resp?.status == 200 && resp?.data) {
                 def data = resp.data
                 def coreFields = [
-                    "main_tempC", "main_tempF", "main_relH", "main_windSpeedKMH", "main_windSpeedMPH", "realtimeStatus"
+                    "main_tempC", "main_tempF", "main_relH", "atlas_lightIntensity",
+                    "atlas_uvIndex", "main_windSpeedKMH", "main_windSpeedMPH", "realtimeStatus"
                 ]
                 def timestampFields = [
                     "atlas_lastUpdated", "lastUpdated", "lightning_last_strike_ts", "lightning_last_update",
@@ -137,17 +141,15 @@ private pollWeatherData(weatherUri) {
                     "main_moonrise", "main_moonset", "main_sunrise", "main_sunset",
                     "main_windSpeed_peak_recorded"
                 ]
-                def preferredSources = [
-                    "lightIntensity": "atlas_lightIntensity",
-                    "uvIndex": "atlas_uvIndex"
-                ]
-
-                def preferredAttrs = preferredSources.values() as Set
 
                 ["main", "atlas", "lightning"].each { section ->
                     data[section]?.each { key, value ->
                         def attrName = "${section}_${key}".replaceAll("\\s", "")
-                        if (!settings.pullAllFields && !(attrName in coreFields || preferredAttrs.contains(attrName))) return
+
+                        // Suppress duplicates if covered by preferred field
+                        if (section == "atlas" && ["lightIntensity", "uvIndex"].contains(key)) return
+
+                        if (!settings.pullAllFields && !(attrName in coreFields)) return
 
                         if (timestampFields.contains(attrName) && value) {
                             try {
@@ -158,14 +160,7 @@ private pollWeatherData(weatherUri) {
                                 logWarn "Timestamp parse failed for ${attrName}: ${e.message}"
                             }
                         }
-
-                        // Skip preferred duplicates
-                        if (preferredSources.containsValue(attrName)) {
-                            // Allow through
-                            updateAttr(attrName, value)
-                        } else if (!(attrName in preferredAttrs)) {
-                            updateAttr(attrName, value)
-                        }
+                        updateAttr(attrName, value)
                     }
                 }
 
@@ -175,26 +170,9 @@ private pollWeatherData(weatherUri) {
                 updateAttr("pressure_inHg", data?.main?.pressure_inHg)
                 updateAttr("windSpeedMPH", data?.main?.windSpeedMPH)
                 updateAttr("windSpeedKMH", data?.main?.windSpeedKMH)
-
-                def li = data?.atlas?.lightIntensity
-                if (li != null) updateAttr("lightIntensity", li)
-
-                def uv = data?.atlas?.uvIndex
-                if (uv != null) updateAttr("uvIndex", uv)
-
-                updateAttr("lightningStrikeCount", data?.lightning?.strikecount)
-
-                def rawUpdated = data?.main?.lastUpdated
-                updateAttr("lastUpdated", rawUpdated)
-                if (rawUpdated) {
-                    try {
-                        def zdt = ZonedDateTime.parse(rawUpdated.toString())
-                        updateAttr("lastUpdatedDate", zdt.toLocalDate().toString())
-                        updateAttr("lastUpdatedTime", zdt.toLocalTime().toString().substring(0, 8))
-                    } catch (e) {
-                        logWarn "Failed to split lastUpdated timestamp: ${e.message}"
-                    }
-                }
+                updateAttr("lightIntensity", data?.atlas?.lightIntensity)
+                updateAttr("uvIndex", data?.atlas?.uvIndex)
+                updateAttr("lastUpdated", data?.main?.lastUpdated)
             } else {
                 logWarn "Failed to fetch weather data - Status: ${resp?.status}"
             }
