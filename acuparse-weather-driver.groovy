@@ -10,13 +10,16 @@
  * Date: 2025-04-24
  *
  * Changelog:
- *  v1.2.0 - Timestamp fields automatically converted from ISO8601 to 'yyyy-MM-dd HH:mm:ss' format.
- *          - Conversion is applied in-place during each refresh, using Java ZonedDateTime.
+ *  v1.2.0 - Converts ISO8601 timestamp fields to readable local time format.
+ *          - Applies to all known timestamp fields including wind speed peak.
+ *          - Formatting happens inline during refresh; no new attributes created.
+ *
  *  v1.1.0 - Added system health check from /api/system/health endpoint.
  *          - Fetches system status, realtime status, and database info first.
  *          - Weather data updated after health check.
  *          - New attributes: systemStatus, realtimeStatus, databaseInfo.
  *          - Improved logging and handling of attribute updates.
+ *
  *  v1.0.0 - Initial release.
  *          - Driver that pulls values from Acuparse API, including weather data.
  *          - Attributes for temperature, humidity, wind speed, light intensity, UV index, and lightning strike count.
@@ -36,6 +39,7 @@
 
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
+import java.time.format.DateTimeParseException
 
 metadata {
     definition(name: "Acuparse Weather Station", namespace: "custom", author: "RamSet") {
@@ -101,7 +105,8 @@ def poll() {
     def targetPort = settings.port ?: 80
     def healthUri = "http://${settings.host}:${targetPort}/api/system/health"
     def weatherUri = "http://${settings.host}:${targetPort}/api/v1/json/dashboard/?main"
-    
+
+    // First, check system health status
     def healthParams = [ uri: healthUri, contentType: "application/json" ]
     try {
         httpGet(healthParams) { healthResp ->
@@ -110,6 +115,7 @@ def poll() {
                 updateAttr("systemStatus", healthData?.status)
                 updateAttr("realtimeStatus", healthData?.realtime)
                 updateAttr("databaseInfo", healthData?.database)
+
                 pollWeatherData(weatherUri)
             } else {
                 logWarn "Failed to fetch health data - Status: ${healthResp?.status}"
@@ -126,34 +132,24 @@ private pollWeatherData(weatherUri) {
         httpGet(params) { resp ->
             if (resp?.status == 200 && resp?.data) {
                 def data = resp.data
-                def formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
-
                 def timestampFields = [
-                    "atlas_last Updated",
-                    "lastUpdated",
-                    "lightning_last_strike_ts",
-                    "lightning_last_update",
-                    "main_high_temp_recorded",
-                    "main_last Updated",
-                    "main_low_temp_recorded",
-                    "main_moon_last Full",
-                    "main_moon_last New",
-                    "main_moon_next Full",
-                    "main_moon_next New",
-                    "main_moonrise",
-                    "main_moonset",
-                    "main_sunrise",
-                    "main_sunset"
+                    "atlas_lastUpdated", "lastUpdated", "lightning_last_strike_ts", "lightning_last_update",
+                    "main_high_temp_recorded", "main_lastUpdated", "main_low_temp_recorded",
+                    "main_moon_lastFull", "main_moon_lastNew", "main_moon_nextFull", "main_moon_nextNew",
+                    "main_moonrise", "main_moonset", "main_sunrise", "main_sunset", "main_windSpeed_peak_recorded"
                 ]
 
                 ["main", "atlas", "lightning"].each { section ->
                     data[section]?.each { key, value ->
-                        def attrName = "${section}_${key}"
-                        def formattedValue = (attrName in timestampFields) ? formatTimestamp(value, formatter) : value
-                        updateAttr(attrName, formattedValue)
+                        def attrName = "${section}_${key}".replaceAll(" ", "")
+                        if (timestampFields.contains(attrName) && value instanceof String) {
+                            value = formatTimestamp(value)
+                        }
+                        updateAttr(attrName, value)
                     }
                 }
 
+                // Update simplified attributes
                 updateAttr("temperatureF", data?.main?.tempF)
                 updateAttr("humidity", data?.main?.relH)
                 updateAttr("pressure_inHg", data?.main?.pressure_inHg)
@@ -161,9 +157,7 @@ private pollWeatherData(weatherUri) {
                 updateAttr("lightIntensity", data?.atlas?.lightIntensity)
                 updateAttr("uvIndex", data?.atlas?.uvIndex)
                 updateAttr("lightningStrikeCount", data?.lightning?.strikecount)
-
-                def formattedLastUpdated = formatTimestamp(data?.main?.lastUpdated, formatter)
-                updateAttr("lastUpdated", formattedLastUpdated)
+                updateAttr("lastUpdated", formatTimestamp(data?.main?.lastUpdated))
             } else {
                 logWarn "Failed to fetch weather data - Status: ${resp?.status}"
             }
@@ -171,16 +165,16 @@ private pollWeatherData(weatherUri) {
     } catch (e) {
         logWarn "Weather poll error: ${e.message}"
     }
-    
+
     scheduleNextPoll()
 }
 
-private String formatTimestamp(raw, formatter) {
+private String formatTimestamp(String isoTimestamp) {
     try {
-        return ZonedDateTime.parse(raw).format(formatter)
-    } catch (Exception e) {
-        logDebug "Timestamp parse failed for value: ${raw}"
-        return raw
+        return ZonedDateTime.parse(isoTimestamp).format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss z"))
+    } catch (DateTimeParseException e) {
+        logWarn "Timestamp parsing failed for value: ${isoTimestamp}"
+        return isoTimestamp
     }
 }
 
