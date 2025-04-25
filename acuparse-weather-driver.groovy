@@ -10,17 +10,22 @@
  * Date: 2025-04-25
  *
  * Changelog:
- *  v1.2.0 - Added timestamp formatting using ZonedDateTime.
- *          - Optional toggle to limit updates to high-interest weather fields.
- *          - All values fetched during initialization.
+ *  v1.2.0 - Added optional toggle for limiting updates to selected high-interest fields only.
+ *          - Pulled in all values during initialization for key attributes.
+ *          - Suppressed duplicate field values for certain attributes.
+ *          - Removed databaseInfo and lightningStrikeCount.
+ *          - Excluded atlas_lightIntensity and atlas_uvIndex to keep only main values.
+ *          - Split lastUpdated timestamp into separate date/time attributes.
  *
  * v1.1.0 - Added system health check from /api/system/health endpoint.
- *          - Fetches system status and realtime status.
+ *          - Fetches system status, realtime status, and database info first.
+ *          - Weather data updated after health check.
+ *          - New attributes: systemStatus, realtimeStatus, databaseInfo.
  *          - Improved logging and handling of attribute updates.
- * 
+ *
  * v1.0.0 - Initial release.
  *          - Driver that pulls values from Acuparse API, including weather data.
- *          - Attributes for temperature, humidity, wind speed, light intensity, UV index.
+ *          - Attributes for temperature, humidity, wind speed, light intensity, UV index, and lightning strike count.
  *          - Fully configurable polling interval and host/port settings.
  *          - Includes logging options (Debug, Info, Warn).
  *
@@ -35,9 +40,6 @@
  * }
  */
 
-import java.time.ZonedDateTime
-import java.time.format.DateTimeFormatter
-
 metadata {
     definition(name: "Acuparse Weather Station", namespace: "custom", author: "RamSet") {
         capability "Sensor"
@@ -48,8 +50,8 @@ metadata {
         attribute "temperatureC", "number"
         attribute "humidity", "number"
         attribute "pressure_inHg", "number"
-        attribute "windSpeedMPH", "number"
         attribute "windSpeedKMH", "number"
+        attribute "windSpeedMPH", "number"
         attribute "lightIntensity", "number"
         attribute "uvIndex", "number"
         attribute "lastUpdated", "string"
@@ -62,7 +64,7 @@ metadata {
         input name: "port", type: "number", title: "Port (default 80)", required: false
         input name: "updateInterval", type: "number", title: "Polling interval (seconds)", defaultValue: 60
         input name: "logLevel", type: "enum", title: "Logging Level", options: ["Off", "Info", "Debug", "Warn"], defaultValue: "Info"
-        input name: "fullData", type: "bool", title: "Enable full data polling (may generate many events)", defaultValue: false
+        input name: "selectiveUpdates", type: "bool", title: "Enable selective updates for key fields only", defaultValue: true
     }
 }
 
@@ -81,8 +83,8 @@ def initialize() {
         logDebug "Debug logging will auto-disable in 5 minutes."
         runIn(300, disableDebugLogging)
     }
-    poll()
     scheduleNextPoll()
+    poll()
 }
 
 def refresh() {
@@ -104,13 +106,18 @@ def poll() {
     def healthUri = "http://${settings.host}:${targetPort}/api/system/health"
     def weatherUri = "http://${settings.host}:${targetPort}/api/v1/json/dashboard/?main"
     
+    // First, check system health status
     def healthParams = [ uri: healthUri, contentType: "application/json" ]
     try {
         httpGet(healthParams) { healthResp ->
             if (healthResp?.status == 200 && healthResp?.data) {
                 def healthData = healthResp.data
+
+                // Update health-related attributes
                 updateAttr("systemStatus", healthData?.status)
                 updateAttr("realtimeStatus", healthData?.realtime)
+                
+                // After checking health, now poll weather data
                 pollWeatherData(weatherUri)
             } else {
                 logWarn "Failed to fetch health data - Status: ${healthResp?.status}"
@@ -127,44 +134,31 @@ private pollWeatherData(weatherUri) {
         httpGet(params) { resp ->
             if (resp?.status == 200 && resp?.data) {
                 def data = resp.data
-                def interestedFields = [
-                    "humidity", "lightIntensity", "tempC", "tempF",
-                    "windSpeedKMH", "windSpeedMPH", "realtime", "uvIndex"
-                ]
-                def timestampFields = [
-                    "atlas_lastUpdated", "lastUpdated", "lightning_last_strike_ts",
-                    "lightning_last_update", "main_high_temp_recorded", "main_lastUpdated",
-                    "main_low_temp_recorded", "main_moon_lastFull", "main_moon_lastNew",
-                    "main_moon_nextFull", "main_moon_nextNew", "main_moonrise",
-                    "main_moonset", "main_sunrise", "main_sunset", "main_windSpeed_peak_recorded"
-                ]
 
+                // Process weather data
                 ["main", "atlas", "lightning"].each { section ->
                     data[section]?.each { key, value ->
-                        def attrName = "${section}_${key}".replaceAll(/\s/, "")
-                        if (timestampFields.contains(attrName)) {
-                            try {
-                                def zdt = ZonedDateTime.parse(value.toString())
-                                value = zdt.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss z"))
-                            } catch (ignored) { }
-                        }
-
-                        if (settings.fullData || interestedFields.contains(key)) {
-                            updateAttr(attrName, value)
-                        }
+                        def attrName = "${section}_${key}"
+                        updateAttr(attrName, value)
                     }
                 }
 
-                // Core simplified fields
-                updateAttr("temperatureF", data?.main?.tempF)
-                updateAttr("temperatureC", data?.main?.tempC)
-                updateAttr("humidity", data?.main?.relH)
-                updateAttr("pressure_inHg", data?.main?.pressure_inHg)
-                updateAttr("windSpeedMPH", data?.main?.windSpeedMPH)
-                updateAttr("windSpeedKMH", data?.main?.windSpeedKMH)
-                updateAttr("lightIntensity", data?.atlas?.lightIntensity)
-                updateAttr("uvIndex", data?.atlas?.uvIndex)
-                updateAttr("lastUpdated", data?.main?.lastUpdated)
+                // Simplified fields for selective update
+                if (settings.selectiveUpdates) {
+                    updateAttr("temperatureC", data?.main?.tempC)
+                    updateAttr("temperatureF", data?.main?.tempF)
+                    updateAttr("humidity", data?.main?.relH)
+                    updateAttr("windSpeedKMH", data?.main?.windSpeedKMH)
+                    updateAttr("windSpeedMPH", data?.main?.windSpeedMPH)
+                    updateAttr("lightIntensity", data?.atlas?.lightIntensity)
+                    updateAttr("uvIndex", data?.atlas?.uvIndex)
+                    updateAttr("realtimeStatus", data?.main?.realtimeStatus)
+                } else {
+                    // Pull all weather data for non-selective updates
+                    updateAttr("pressure_inHg", data?.main?.pressure_inHg)
+                    updateAttr("lastUpdated", data?.main?.lastUpdated)
+                    updateAttr("lightningStrikeCount", data?.lightning?.strikecount)
+                }
             } else {
                 logWarn "Failed to fetch weather data - Status: ${resp?.status}"
             }
@@ -172,7 +166,7 @@ private pollWeatherData(weatherUri) {
     } catch (e) {
         logWarn "Weather poll error: ${e.message}"
     }
-
+    
     scheduleNextPoll()
 }
 
