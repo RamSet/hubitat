@@ -1,40 +1,67 @@
-/**
- * Acuparse Weather Station Driver - v1.2.1
+/*
+ * Acuparse Weather Station
+ *
+ * Description:
+ *   Polls Acuparse API JSON data and updates Hubitat attributes.
+ *   Designed for use with Hubitat Package Manager (HPM).
+ *
+ * Author: RamSet
+ * Version: 1.3.0
+ * Date: 2025-04-25
  *
  * Changelog:
- * 1.2.1 - Suppresses duplicate fields from "main_" and "atlas_" when base field exists
- * 1.2.0 - Parses ISO8601 timestamps, adds essential-only toggle, and improves attribute handling
- * 1.1.0 - Adds health check, dashboard JSON polling, and HPM compatibility
+ *  v1.3.0 - Suppressed duplicate fields using preferred sources.
+ *          - Parsed 'lastUpdated' into separate date and time fields.
+ *          - Retained all relevant fields and core 1.2.0 behavior.
+ *  v1.2.0 - Added timestamp parsing using ZonedDateTime/DateTimeFormatter for specific fields.
+ *          - Optional toggle to limit attribute updates to essential fields only.
+ *          - Essential attributes include: humidity, lightIntensity, tempC/F, windSpeed, uvIndex, and realtimeStatus.
+ *  v1.1.0 - Added system health check from /api/system/health endpoint.
+ *  v1.0.0 - Initial release.
+ *
+ * HPM Metadata:
+ * {
+ *   "package": "Acuparse Weather Station",
+ *   "author": "RamSet",
+ *   "namespace": "custom",
+ *   "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/acuparse-weather-driver.groovy",
+ *   "description": "Weather driver for polling Acuparse JSON data",
+ *   "required": true
+ * }
  */
 
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 
 metadata {
-    definition(name: "Acuparse Weather Station", namespace: "custom", author: "user") {
+    definition(name: "Acuparse Weather Station", namespace: "custom", author: "RamSet") {
         capability "Sensor"
         capability "Polling"
+        capability "Refresh"
 
-        attribute "temperatureC", "number"
         attribute "temperatureF", "number"
+        attribute "temperatureC", "number"
         attribute "humidity", "number"
-        attribute "windSpeedKMH", "number"
-        attribute "windSpeedMPH", "number"
         attribute "pressure_inHg", "number"
+        attribute "windSpeedMPH", "number"
+        attribute "windSpeedKMH", "number"
         attribute "lightIntensity", "number"
         attribute "uvIndex", "number"
-        attribute "realtimeStatus", "string"
-        attribute "systemStatus", "string"
+        attribute "lightningStrikeCount", "number"
         attribute "lastUpdated", "string"
         attribute "lastUpdatedDate", "string"
         attribute "lastUpdatedTime", "string"
+        attribute "systemStatus", "string"
+        attribute "realtimeStatus", "string"
+        attribute "databaseInfo", "string"
     }
 
     preferences {
-        input name: "acuparseIP", type: "text", title: "Acuparse IP Address", required: true
-        input name: "pollInterval", type: "number", title: "Polling Interval (minutes)", defaultValue: 5
-        input name: "pullAllFields", type: "bool", title: "Update all available fields", defaultValue: false
-        input name: "logLevel", type: "enum", title: "Log Level", options: ["info", "debug", "warn", "off"], defaultValue: "info"
+        input name: "host", type: "string", title: "Device IP or Hostname", required: true
+        input name: "port", type: "number", title: "Port (default 80)", required: false
+        input name: "updateInterval", type: "number", title: "Polling interval (seconds)", defaultValue: 60
+        input name: "logLevel", type: "enum", title: "Logging Level", options: ["Off", "Info", "Debug", "Warn"], defaultValue: "Info"
+        input name: "pullAllFields", type: "bool", title: "Pull All Fields (May Generate Many Events)", defaultValue: false
     }
 }
 
@@ -48,99 +75,162 @@ def updated() {
 }
 
 def initialize() {
-    logInfo "Initializing..."
-    runIn(5, refresh)
-    schedule("0 */${settings.pollInterval} * * * ?", refresh)
+    logInfo "Initializing with interval: ${settings.updateInterval} seconds"
+    if (settings.logLevel == "Debug") {
+        logDebug "Debug logging will auto-disable in 5 minutes."
+        runIn(300, disableDebugLogging)
+    }
+    scheduleNextPoll()
+    poll()
 }
 
 def refresh() {
-    pollSystemStatus("http://${settings.acuparseIP}/api/system/health")
-    pollWeatherData("http://${settings.acuparseIP}/api/v1/json/dashboard/?main")
+    poll()
 }
 
-private pollSystemStatus(uri) {
+def scheduleNextPoll() {
+    int seconds = settings.updateInterval ?: 60
+    runIn(seconds, poll)
+}
+
+def poll() {
+    if (!settings.host) {
+        logWarn "Host/IP not configured."
+        return
+    }
+
+    def targetPort = settings.port ?: 80
+    def healthUri = "http://${settings.host}:${targetPort}/api/system/health"
+    def weatherUri = "http://${settings.host}:${targetPort}/api/v1/json/dashboard/?main"
+
+    def healthParams = [ uri: healthUri, contentType: "application/json" ]
     try {
-        httpGet(uri) { resp ->
-            if (resp?.status == 200 && resp?.data) {
-                updateAttr("systemStatus", resp.data?.status ?: "Unknown")
+        httpGet(healthParams) { healthResp ->
+            if (healthResp?.status == 200 && healthResp?.data) {
+                def healthData = healthResp.data
+                updateAttr("systemStatus", healthData?.status)
+                updateAttr("realtimeStatus", healthData?.realtime)
+                updateAttr("databaseInfo", healthData?.database)
+                pollWeatherData(weatherUri)
             } else {
-                logWarn "System health check failed with status ${resp?.status}"
+                logWarn "Failed to fetch health data - Status: ${healthResp?.status}"
             }
         }
     } catch (e) {
-        logWarn "System health poll error: ${e.message}"
+        logWarn "Health check error: ${e.message}"
     }
 }
 
-private pollWeatherData(uri) {
-    def params = [ uri: uri, contentType: "application/json" ]
+private pollWeatherData(weatherUri) {
+    def params = [ uri: weatherUri, contentType: "application/json" ]
     try {
         httpGet(params) { resp ->
             if (resp?.status == 200 && resp?.data) {
                 def data = resp.data
-
-                def preferredFields = [
-                    temperatureC: data?.main?.tempC,
-                    temperatureF: data?.main?.tempF,
-                    humidity:     data?.main?.relH,
-                    windSpeedKMH: data?.main?.windSpeedKMH,
-                    windSpeedMPH: data?.main?.windSpeedMPH,
-                    lightIntensity: data?.atlas?.lightIntensity,
-                    uvIndex:      data?.atlas?.uvIndex,
-                    pressure_inHg: data?.main?.pressure_inHg
+                def coreFields = [
+                    "main_tempC", "main_tempF", "main_relH", "main_windSpeedKMH", "main_windSpeedMPH", "realtimeStatus"
+                ]
+                def timestampFields = [
+                    "atlas_lastUpdated", "lastUpdated", "lightning_last_strike_ts", "lightning_last_update",
+                    "main_high_temp_recorded", "main_lastUpdated", "main_low_temp_recorded",
+                    "main_moon_lastFull", "main_moon_lastNew", "main_moon_nextFull", "main_moon_nextNew",
+                    "main_moonrise", "main_moonset", "main_sunrise", "main_sunset",
+                    "main_windSpeed_peak_recorded"
+                ]
+                def preferredSources = [
+                    "lightIntensity": "atlas_lightIntensity",
+                    "uvIndex": "atlas_uvIndex"
                 ]
 
-                preferredFields.each { attr, value ->
-                    updateAttr(attr, value)
-                }
+                def preferredAttrs = preferredSources.values() as Set
 
-                def lastUpdated = data?.main?.lastUpdated
-                if (lastUpdated) {
-                    updateAttr("lastUpdated", lastUpdated)
-                    try {
-                        def zdt = ZonedDateTime.parse(lastUpdated.toString())
-                        updateAttr("lastUpdatedDate", zdt.toLocalDate().toString())
-                        updateAttr("lastUpdatedTime", zdt.toLocalTime().toString())
-                    } catch (e) {
-                        logWarn "Failed to parse lastUpdated: ${e.message}"
-                    }
-                }
+                ["main", "atlas", "lightning"].each { section ->
+                    data[section]?.each { key, value ->
+                        def attrName = "${section}_${key}".replaceAll("\\s", "")
+                        if (!settings.pullAllFields && !(attrName in coreFields || preferredAttrs.contains(attrName))) return
 
-                def skipList = preferredFields.keySet().collect { field ->
-                    ["main_${field}", "atlas_${field}"]
-                }.flatten()
+                        if (timestampFields.contains(attrName) && value) {
+                            try {
+                                def zdt = ZonedDateTime.parse(value.toString())
+                                def formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss z")
+                                value = zdt.format(formatter)
+                            } catch (e) {
+                                logWarn "Timestamp parse failed for ${attrName}: ${e.message}"
+                            }
+                        }
 
-                if (settings.pullAllFields) {
-                    ["main", "atlas"].each { section ->
-                        data[section]?.each { k, v ->
-                            def attrName = "${section}_${k}".replaceAll("\\s", "")
-                            if (attrName in skipList) return
-                            if (k == "lastUpdated") return
-                            updateAttr(attrName, v)
+                        // Skip preferred duplicates
+                        if (preferredSources.containsValue(attrName)) {
+                            // Allow through
+                            updateAttr(attrName, value)
+                        } else if (!(attrName in preferredAttrs)) {
+                            updateAttr(attrName, value)
                         }
                     }
                 }
 
-                updateAttr("realtimeStatus", "online")
+                updateAttr("temperatureF", data?.main?.tempF)
+                updateAttr("temperatureC", data?.main?.tempC)
+                updateAttr("humidity", data?.main?.relH)
+                updateAttr("pressure_inHg", data?.main?.pressure_inHg)
+                updateAttr("windSpeedMPH", data?.main?.windSpeedMPH)
+                updateAttr("windSpeedKMH", data?.main?.windSpeedKMH)
 
+                def li = data?.atlas?.lightIntensity
+                if (li != null) updateAttr("lightIntensity", li)
+
+                def uv = data?.atlas?.uvIndex
+                if (uv != null) updateAttr("uvIndex", uv)
+
+                updateAttr("lightningStrikeCount", data?.lightning?.strikecount)
+
+                def rawUpdated = data?.main?.lastUpdated
+                updateAttr("lastUpdated", rawUpdated)
+                if (rawUpdated) {
+                    try {
+                        def zdt = ZonedDateTime.parse(rawUpdated.toString())
+                        updateAttr("lastUpdatedDate", zdt.toLocalDate().toString())
+                        updateAttr("lastUpdatedTime", zdt.toLocalTime().toString().substring(0, 8))
+                    } catch (e) {
+                        logWarn "Failed to split lastUpdated timestamp: ${e.message}"
+                    }
+                }
             } else {
-                logWarn "Weather data fetch failed with status ${resp?.status}"
+                logWarn "Failed to fetch weather data - Status: ${resp?.status}"
             }
         }
     } catch (e) {
         logWarn "Weather poll error: ${e.message}"
     }
+
+    scheduleNextPoll()
 }
 
-private updateAttr(String name, value) {
-    if (value == null) return
+private updateAttr(name, value) {
     def current = device.currentValue(name)
-    if (current?.toString() != value.toString()) {
+    if (current?.toString() != value?.toString()) {
         sendEvent(name: name, value: value)
-        logDebug "Updated ${name} = ${value}"
+        logInfo "Updated ${name} = ${value}"
+    } else {
+        logDebug "No change for ${name}"
     }
 }
 
-private logInfo(msg)  { if (settings.logLevel == "info")  log.info msg }
-private logDebug(msg) { if (settings.logLevel == "debug") log.debug msg }
-private logWarn(msg)  { if (settings.logLevel in ["warn", "debug", "info"]) log.warn msg }
+private logDebug(msg) {
+    if (settings.logLevel == "Debug") log.debug "[Acuparse] ${msg}"
+}
+
+private logInfo(msg) {
+    if (settings.logLevel in ["Info", "Debug"]) log.info "[Acuparse] ${msg}"
+}
+
+private logWarn(msg) {
+    if (settings.logLevel in ["Warn", "Debug"]) log.warn "[Acuparse] ${msg}"
+}
+
+def disableDebugLogging() {
+    if (settings.logLevel == "Debug") {
+        device.updateSetting("logLevel", [value: "Info", type: "enum"])
+        logInfo "Debug logging disabled automatically after 5 minutes."
+    }
+}
