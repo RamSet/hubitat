@@ -14,14 +14,9 @@
  *          - Fetches system status, realtime status, and database info first.
  *          - Weather data updated after health check.
  *          - New attributes: systemStatus, realtimeStatus, databaseInfo.
- *          - Added timestamp splitting for several fields into date and time.
- *          - Fields with timestamp data include:
- *            - atlas_lastUpdated, lightning_last_strike_ts, lightning_last_update
- *            - main_high_temp_recorded, main_lastUpdated, main_low_temp_recorded
- *            - main_moon_lastFull, main_moon_lastNew, main_moon_nextFull
- *            - main_moon_nextNew, main_moonrise, main_moonset
- *            - main_sunrise, main_sunset
  *          - Improved logging and handling of attribute updates.
+ *          - Split timestamp fields into separate date and time attributes.
+ *          - Added visual section headers in Current States for main, atlas, and lightning.
  * 
  * v1.0.0 - Initial release.
  *          - Driver that pulls values from Acuparse API, including weather data.
@@ -40,6 +35,10 @@
  * }
  */
 
+import java.time.ZonedDateTime
+import java.time.format.DateTimeFormatter
+import java.time.ZoneId
+
 metadata {
     definition(name: "Acuparse Weather Station", namespace: "custom", author: "RamSet") {
         capability "Sensor"
@@ -57,36 +56,11 @@ metadata {
         attribute "systemStatus", "string"
         attribute "realtimeStatus", "string"
         attribute "databaseInfo", "string"
-        
-        // New attributes for split date and time
-        attribute "atlas_lastUpdated_date", "string"
-        attribute "atlas_lastUpdated_time", "string"
-        attribute "lightning_last_strike_ts_date", "string"
-        attribute "lightning_last_strike_ts_time", "string"
-        attribute "lightning_last_update_date", "string"
-        attribute "lightning_last_update_time", "string"
-        attribute "main_high_temp_recorded_date", "string"
-        attribute "main_high_temp_recorded_time", "string"
-        attribute "main_lastUpdated_date", "string"
-        attribute "main_lastUpdated_time", "string"
-        attribute "main_low_temp_recorded_date", "string"
-        attribute "main_low_temp_recorded_time", "string"
-        attribute "main_moon_lastFull_date", "string"
-        attribute "main_moon_lastFull_time", "string"
-        attribute "main_moon_lastNew_date", "string"
-        attribute "main_moon_lastNew_time", "string"
-        attribute "main_moon_nextFull_date", "string"
-        attribute "main_moon_nextFull_time", "string"
-        attribute "main_moon_nextNew_date", "string"
-        attribute "main_moon_nextNew_time", "string"
-        attribute "main_moonrise_date", "string"
-        attribute "main_moonrise_time", "string"
-        attribute "main_moonset_date", "string"
-        attribute "main_moonset_time", "string"
-        attribute "main_sunrise_date", "string"
-        attribute "main_sunrise_time", "string"
-        attribute "main_sunset_date", "string"
-        attribute "main_sunset_time", "string"
+
+        // Dummy attributes for visual section headers
+        attribute "section_main", "string"
+        attribute "section_atlas", "string"
+        attribute "section_lightning", "string"
     }
 
     preferences {
@@ -165,32 +139,29 @@ private pollWeatherData(weatherUri) {
             if (resp?.status == 200 && resp?.data) {
                 def data = resp.data
 
-                // Process weather data
+                def timestampFields = [
+                    main: [
+                        "high_temp_recorded", "last Updated", "low_temp_recorded",
+                        "moon_last Full", "moon_last New", "moon_next Full",
+                        "moon_next New", "moonrise", "moonset", "sunrise", "sunset"
+                    ],
+                    atlas: ["last Updated"],
+                    lightning: ["last_strike_ts", "last_update"]
+                ]
+
                 ["main", "atlas", "lightning"].each { section ->
+                    updateAttr("section_${section}", "=== ${section.toUpperCase()} DATA ===")
                     data[section]?.each { key, value ->
-                        def attrName = "${section}_${key}"
+                        def attrName = "${section}_${key.replaceAll(" ", "_")}"
                         updateAttr(attrName, value)
+
+                        if (key in timestampFields[section]) {
+                            processTimestampField(attrName, value)
+                        }
                     }
                 }
 
-                // Example of specific fields to process
-                // Make sure to process the fields correctly and split timestamps
-                processTimestampField("atlas_lastUpdated", data?.atlas?.lastUpdated)
-                processTimestampField("lightning_last_strike_ts", data?.lightning?.last_strike_ts)
-                processTimestampField("lightning_last_update", data?.lightning?.last_update)
-                processTimestampField("main_high_temp_recorded", data?.main?.high_temp_recorded)
-                processTimestampField("main_lastUpdated", data?.main?.lastUpdated)
-                processTimestampField("main_low_temp_recorded", data?.main?.low_temp_recorded)
-                processTimestampField("main_moon_lastFull", data?.main?.moon_lastFull)
-                processTimestampField("main_moon_lastNew", data?.main?.moon_lastNew)
-                processTimestampField("main_moon_nextFull", data?.main?.moon_nextFull)
-                processTimestampField("main_moon_nextNew", data?.main?.moon_nextNew)
-                processTimestampField("main_moonrise", data?.main?.moonrise)
-                processTimestampField("main_moonset", data?.main?.moonset)
-                processTimestampField("main_sunrise", data?.main?.sunrise)
-                processTimestampField("main_sunset", data?.main?.sunset)
-
-                // Update simplified attributes
+                // Simplified attributes
                 updateAttr("temperatureF", data?.main?.tempF)
                 updateAttr("humidity", data?.main?.relH)
                 updateAttr("pressure_inHg", data?.main?.pressure_inHg)
@@ -198,6 +169,11 @@ private pollWeatherData(weatherUri) {
                 updateAttr("lightIntensity", data?.atlas?.lightIntensity)
                 updateAttr("uvIndex", data?.atlas?.uvIndex)
                 updateAttr("lightningStrikeCount", data?.lightning?.strikecount)
+
+                if (data?.main?.lastUpdated) {
+                    updateAttr("lastUpdated", data.main.lastUpdated)
+                    processTimestampField("lastUpdated", data.main.lastUpdated)
+                }
             } else {
                 logWarn "Failed to fetch weather data - Status: ${resp?.status}"
             }
@@ -209,26 +185,17 @@ private pollWeatherData(weatherUri) {
     scheduleNextPoll()
 }
 
-private processTimestampField(fieldName, timestamp) {
-    if (timestamp) {
-        try {
-            // Parse the full timestamp string into a Date object
-            def sdf = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssZ")
-            Date date = sdf.parse(timestamp)
+private processTimestampField(attrName, timestamp) {
+    try {
+        def zdt = ZonedDateTime.parse(timestamp)
+        def localZdt = zdt.withZoneSameInstant(ZoneId.systemDefault())
+        def dateStr = localZdt.format(DateTimeFormatter.ofPattern("yyyy-MM-dd"))
+        def timeStr = localZdt.format(DateTimeFormatter.ofPattern("HH:mm:ss"))
 
-            // Format date and time separately
-            def dateFormat = new SimpleDateFormat("yyyy-MM-dd")
-            def timeFormat = new SimpleDateFormat("HH:mm:ss")
-
-            def dateStr = dateFormat.format(date)
-            def timeStr = timeFormat.format(date)
-
-            // Send the updated date and time to the device
-            sendEvent(name: "${fieldName}_date", value: dateStr)
-            sendEvent(name: "${fieldName}_time", value: timeStr)
-        } catch (Exception e) {
-            logWarn "Failed to process timestamp for ${fieldName}: ${e.message}"
-        }
+        updateAttr("${attrName}_date", dateStr)
+        updateAttr("${attrName}_time", timeStr)
+    } catch (Exception e) {
+        logWarn "Failed to parse timestamp '${timestamp}' for '${attrName}': ${e.message}"
     }
 }
 
