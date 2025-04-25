@@ -6,17 +6,26 @@
  *   Designed for use with Hubitat Package Manager (HPM).
  *
  * Author: RamSet
- * Version: 1.1.0
+ * Version: 1.1.1
  * Date: 2025-04-24
  *
  * Changelog:
+ *  v1.1.1 - Split timestamp fields into separate date and time attributes.
+ *          - Added new attributes for date and time based on timestamp fields:
+ *            Atlas_lastUpdated, LastUpdated, Lightning_last_strike_ts, Lightning_last_update,
+ *            Main_high_temp_recorded, Main_lastUpdated, Main_low_temp_recorded, Main_moon_lastFull,
+ *            Main_moon_lastNew, Main_moon_nextFull, Main_moon_nextNew, Main_moonrise,
+ *            Main_moonset, Main_sunrise, Main_sunset.
+ *          - Timestamps are now split into date (yyyy-MM-dd) and time (HH:mm:ss), with timezone considered.
+ *          - Each timestamp field will now create two new attributes: *_date and *_time.
+ * 
  *  v1.1.0 - Added system health check from /api/system/health endpoint.
  *          - Fetches system status, realtime status, and database info first.
  *          - Weather data updated after health check.
  *          - New attributes: systemStatus, realtimeStatus, databaseInfo.
  *          - Improved logging and handling of attribute updates.
  * 
- * v1.0.0 - Initial release.
+ *  v1.0.0 - Initial release.
  *          - Driver that pulls values from Acuparse API, including weather data.
  *          - Attributes for temperature, humidity, wind speed, light intensity, UV index, and lightning strike count.
  *          - Fully configurable polling interval and host/port settings.
@@ -50,6 +59,36 @@ metadata {
         attribute "systemStatus", "string"
         attribute "realtimeStatus", "string"
         attribute "databaseInfo", "string"
+        attribute "Atlas_lastUpdated_date", "string"
+        attribute "Atlas_lastUpdated_time", "string"
+        attribute "LastUpdated_date", "string"
+        attribute "LastUpdated_time", "string"
+        attribute "Lightning_last_strike_ts_date", "string"
+        attribute "Lightning_last_strike_ts_time", "string"
+        attribute "Lightning_last_update_date", "string"
+        attribute "Lightning_last_update_time", "string"
+        attribute "Main_high_temp_recorded_date", "string"
+        attribute "Main_high_temp_recorded_time", "string"
+        attribute "Main_lastUpdated_date", "string"
+        attribute "Main_lastUpdated_time", "string"
+        attribute "Main_low_temp_recorded_date", "string"
+        attribute "Main_low_temp_recorded_time", "string"
+        attribute "Main_moon_lastFull_date", "string"
+        attribute "Main_moon_lastFull_time", "string"
+        attribute "Main_moon_lastNew_date", "string"
+        attribute "Main_moon_lastNew_time", "string"
+        attribute "Main_moon_nextFull_date", "string"
+        attribute "Main_moon_nextFull_time", "string"
+        attribute "Main_moon_nextNew_date", "string"
+        attribute "Main_moon_nextNew_time", "string"
+        attribute "Main_moonrise_date", "string"
+        attribute "Main_moonrise_time", "string"
+        attribute "Main_moonset_date", "string"
+        attribute "Main_moonset_time", "string"
+        attribute "Main_sunrise_date", "string"
+        attribute "Main_sunrise_time", "string"
+        attribute "Main_sunset_date", "string"
+        attribute "Main_sunset_time", "string"
     }
 
     preferences {
@@ -157,12 +196,58 @@ private pollWeatherData(weatherUri) {
 }
 
 private updateAttr(name, value) {
-    def current = device.currentValue(name)
-    if (current?.toString() != value?.toString()) {
-        sendEvent(name: name, value: value)
-        logInfo "Updated ${name} = ${value}"
+    // Define timestamp fields that need to be split into date and time
+    def timestampFields = [
+        "Atlas_lastUpdated", "LastUpdated", 
+        "Lightning_last_strike_ts", "Lightning_last_update",
+        "Main_high_temp_recorded", "Main_lastUpdated",
+        "Main_low_temp_recorded", "Main_moon_lastFull",
+        "Main_moon_lastNew", "Main_moon_nextFull",
+        "Main_moon_nextNew", "Main_moonrise", 
+        "Main_moonset", "Main_sunrise", "Main_sunset"
+    ]
+
+    if (name in timestampFields) {
+        // Parse the timestamp and split into date and time
+        def formattedData = parseTimestamp(value)
+        
+        // Define new attributes for date and time
+        def dateName = "${name}_date"
+        def timeName = "${name}_time"
+
+        // Update date and time attributes separately
+        updateAttr(dateName, formattedData.date)
+        updateAttr(timeName, formattedData.time)
     } else {
-        logDebug "No change for ${name}"
+        // For non-timestamp fields, update normally
+        def current = device.currentValue(name)
+        if (current?.toString() != value?.toString()) {
+            sendEvent(name: name, value: value)
+            logInfo "Updated ${name} = ${value}"
+        } else {
+            logDebug "No change for ${name}"
+        }
+    }
+}
+
+private parseTimestamp(String timestamp) {
+    // Example: 2025-04-24T23:53:00-06:00
+    def dateTimeFormat = "yyyy-MM-dd'T'HH:mm:ssXXX"
+    def dateFormat = new SimpleDateFormat("yyyy-MM-dd")
+    def timeFormat = new SimpleDateFormat("HH:mm:ss")
+
+    try {
+        def date = new Date().parse(dateTimeFormat, timestamp)
+
+        // Date and Time
+        def formattedDate = dateFormat.format(date)
+        def formattedTime = timeFormat.format(date)
+
+        // Return as a map
+        return [date: formattedDate, time: formattedTime]
+    } catch (Exception e) {
+        logWarn "Failed to parse timestamp: ${timestamp}. Error: ${e.message}"
+        return [date: null, time: null] // Return null values in case of failure
     }
 }
 
