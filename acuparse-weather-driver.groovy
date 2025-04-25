@@ -50,8 +50,6 @@ metadata {
         attribute "systemStatus", "string"
         attribute "realtimeStatus", "string"
         attribute "databaseInfo", "string"
-        attribute "lastUpdatedDate", "string"
-        attribute "lastUpdatedTime", "string"
     }
 
     preferences {
@@ -146,15 +144,7 @@ private pollWeatherData(weatherUri) {
                 updateAttr("lightIntensity", data?.atlas?.lightIntensity)
                 updateAttr("uvIndex", data?.atlas?.uvIndex)
                 updateAttr("lightningStrikeCount", data?.lightning?.strikecount)
-
-                // Format the lastUpdated timestamp and split into date/time
-                def lastUpdatedTimestamp = data?.main?.lastUpdated
-                if (lastUpdatedTimestamp) {
-                    def formattedDateTime = formatTimestamp(lastUpdatedTimestamp)
-                    updateAttr("lastUpdated", formattedDateTime.fullDateTime)
-                    updateAttr("lastUpdatedDate", formattedDateTime.date)
-                    updateAttr("lastUpdatedTime", formattedDateTime.time)
-                }
+                updateAttr("lastUpdated", data?.main?.lastUpdated)
             } else {
                 logWarn "Failed to fetch weather data - Status: ${resp?.status}"
             }
@@ -174,17 +164,6 @@ private updateAttr(name, value) {
     } else {
         logDebug "No change for ${name}"
     }
-}
-
-private formatTimestamp(timestamp) {
-    def datePattern = "yyyy-MM-dd'T'HH:mm:ssZ"
-    def dateFormatter = new java.text.SimpleDateFormat(datePattern)
-    def date = dateFormatter.parse(timestamp)
-    
-    def dateFormatted = new java.text.SimpleDateFormat("yyyy-MM-dd").format(date)
-    def timeFormatted = new java.text.SimpleDateFormat("HH:mm:ss").format(date)
-
-    return [fullDateTime: timestamp, date: dateFormatted, time: timeFormatted]
 }
 
 private logDebug(msg) {
