@@ -148,6 +148,7 @@ private pollWeatherData(weatherUri) {
 
                         // Suppress duplicates if covered by preferred field
                         if (section == "atlas" && ["lightIntensity", "uvIndex"].contains(key)) return
+                        if (section == "main" && ["windSpeedKMH", "windSpeedMPH", "temperatureC", "temperatureF", "humidity", "pressure_inHg"].contains(key)) return
 
                         if (!settings.pullAllFields && !(attrName in coreFields)) return
 
