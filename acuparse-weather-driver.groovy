@@ -1,7 +1,68 @@
+/*
+ * Acuparse Weather Station
+ *
+ * Description:
+ *   Polls Acuparse API JSON data and updates Hubitat attributes.
+ *   Designed for use with Hubitat Package Manager (HPM).
+ *
+ * Author: RamSet
+ * Version: 1.2.0
+ * Date: 2025-04-24
+ *
+ * Changelog:
+ *  v1.2.0 - Timestamp fields automatically converted from ISO8601 to 'yyyy-MM-dd HH:mm:ss' format.
+ *          - Conversion is applied in-place during each refresh, using Java ZonedDateTime.
+ *  v1.1.0 - Added system health check from /api/system/health endpoint.
+ *          - Fetches system status, realtime status, and database info first.
+ *          - Weather data updated after health check.
+ *          - New attributes: systemStatus, realtimeStatus, databaseInfo.
+ *          - Improved logging and handling of attribute updates.
+ *  v1.0.0 - Initial release.
+ *          - Driver that pulls values from Acuparse API, including weather data.
+ *          - Attributes for temperature, humidity, wind speed, light intensity, UV index, and lightning strike count.
+ *          - Fully configurable polling interval and host/port settings.
+ *          - Includes logging options (Debug, Info, Warn).
+ *
+ * HPM Metadata:
+ * {
+ *   "package": "Acuparse Weather Station",
+ *   "author": "RamSet",
+ *   "namespace": "custom",
+ *   "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/acuparse-weather-driver.groovy",
+ *   "description": "Weather driver for polling Acuparse JSON data",
+ *   "required": true
+ * }
+ */
+
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 
-// [metadata and preferences remain unchanged]
+metadata {
+    definition(name: "Acuparse Weather Station", namespace: "custom", author: "RamSet") {
+        capability "Sensor"
+        capability "Polling"
+        capability "Refresh"
+
+        attribute "temperatureF", "number"
+        attribute "humidity", "number"
+        attribute "pressure_inHg", "number"
+        attribute "windSpeedMPH", "number"
+        attribute "lightIntensity", "number"
+        attribute "uvIndex", "number"
+        attribute "lightningStrikeCount", "number"
+        attribute "lastUpdated", "string"
+        attribute "systemStatus", "string"
+        attribute "realtimeStatus", "string"
+        attribute "databaseInfo", "string"
+    }
+
+    preferences {
+        input name: "host", type: "string", title: "Device IP or Hostname", required: true
+        input name: "port", type: "number", title: "Port (default 80)", required: false
+        input name: "updateInterval", type: "number", title: "Polling interval (seconds)", defaultValue: 60
+        input name: "logLevel", type: "enum", title: "Logging Level", options: ["Off", "Info", "Debug", "Warn"], defaultValue: "Info"
+    }
+}
 
 def installed() {
     initialize()
