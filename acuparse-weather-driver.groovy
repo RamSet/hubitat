@@ -1,13 +1,40 @@
 /*
  * Acuparse Weather Station
  *
+ * Description:
+ *   Polls Acuparse API JSON data and updates Hubitat attributes.
+ *   Supports dynamic discovery of available fields. User can select additional fields via comma-separated list.
+ *   Designed for use with Hubitat Package Manager (HPM).
+ *
  * Author: RamSet
- * Version: 1.3.2
+ * Version: 1.4.0
  * Date: 2025-04-25
  *
  * Changelog:
- *  v1.3.2 - Multiselect dropdown for extra fields fully fixed using inline static string list.
- *           Now reliably supports multiple selection in Hubitat preferences UI.
+ *  v1.4.0 - NEW: Dynamic discovery of available fields from the latest API response.
+ *           - Lists available fields via logs.
+ *           - Allows selection of additional fields via comma-separated input.
+ *           - Pull All Fields toggle still overrides and pulls everything.
+ *
+ *  v1.3.2 - Fixed multi-select support using static list.
+ *  v1.3.1 - Multi-select fully patched.
+ *  v1.3.0 - Added manual selection of extra fields.
+ *  v1.2.3 - Added *_date and *_time breakdowns for timestamps.
+ *  v1.2.2 - Timestamp formatting using ZonedDateTime with timezone.
+ *  v1.2.1 - Filtered redundant main_* fields.
+ *  v1.2.0 - Core/optional field filtering logic.
+ *  v1.1.0 - System health integration.
+ *  v1.0.0 - Initial release.
+ *
+ * HPM Metadata:
+ * {
+ *   "package": "Acuparse Weather Station",
+ *   "author": "RamSet",
+ *   "namespace": "custom",
+ *   "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/acuparse-weather-driver.groovy",
+ *   "description": "Weather driver for polling Acuparse JSON data",
+ *   "required": true
+ * }
  */
 
 import java.time.ZonedDateTime
@@ -40,24 +67,8 @@ metadata {
         input name: "updateInterval", type: "number", title: "Polling interval (seconds)", defaultValue: 60
         input name: "logLevel", type: "enum", title: "Logging Level", options: ["Off", "Info", "Debug", "Warn"], defaultValue: "Info"
         input name: "pullAllFields", type: "bool", title: "Pull All Fields (Overrides Manual Selection)", defaultValue: false
-        input name: "extraFields", type: "enum", title: "Additional Fields to Pull", multiple: true,
-            options: [
-                "main_pressure_inHg", "main_pressure_kPa", "main_pressure_trend",
-                "main_tempF_avg", "main_tempF_high", "main_tempF_low", "main_tempF_trend",
-                "main_tempC_avg", "main_tempC_high", "main_tempC_low",
-                "main_rainIN", "main_rainMM", "main_rainTotalIN_today", "main_rainTotalMM_today",
-                "main_relH_trend", "main_sunrise", "main_sunset",
-                "main_moon_nextNew", "main_moonrise", "main_moonset",
-                "main_windAvgKMH", "main_windAvgMPH", "main_windBeaufort",
-                "main_windDEG", "main_windDEG_peak", "main_windDIR", "main_windDIR_peak",
-                "main_windGustDIR", "main_windGustDIRPeak", "main_windSpeedKMH_peak", "main_windSpeedMPH_peak",
-                "main_windSpeed_peak_recorded",
-                "lightning_strikecount", "lightning_currentstrikes", "lightning_dailystrikes",
-                "lightning_interference", "lightning_last_strike_distance_M", "lightning_last_strike_distance_KM",
-                "lightning_last_strike_ts", "lightning_last_update",
-                "atlas_lightSeconds", "atlas_lightHours", "atlas_lightIntensity_text", "atlas_uvIndex_text"
-            ], required: false,
-            description: "Optional: Select additional attributes if Pull All Fields is off"
+        input name: "extraFieldsText", type: "string", title: "Additional Fields (comma-separated)", required: false,
+              description: "Enter extra fields, separated by commas. Example: main_pressure_inHg, lightning_last_strike_ts"
     }
 }
 
@@ -120,13 +131,26 @@ private pollWeatherData(weatherUri) {
         "main_windSpeed_peak_recorded"
     ]
 
-    def userExtras = (settings.extraFields ?: []) as List
+    def userExtras = (settings.extraFieldsText ?: "")
+                        .split(",")
+                        .collect { it.trim() }
+                        .findAll { it }
 
     def params = [ uri: weatherUri, contentType: "application/json" ]
     try {
         httpGet(params) { resp ->
             if (resp?.status == 200 && resp?.data) {
                 def data = resp.data
+
+                def discoveredFields = []
+                ["main", "atlas", "lightning"].each { section ->
+                    data[section]?.each { key, _ ->
+                        def attrName = "${section}_${key}".replaceAll("\\s", "")
+                        discoveredFields << attrName
+                    }
+                }
+                state.availableFields = discoveredFields.unique().sort()
+                logInfo "Discovered Available Fields: ${state.availableFields.join(', ')}"
 
                 ["main", "atlas", "lightning"].each { section ->
                     data[section]?.each { key, value ->
