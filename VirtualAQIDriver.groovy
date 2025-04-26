@@ -1,6 +1,12 @@
 /**
  *  Virtual Air Quality Sensor - Device Driver for Hubitat Elevation
  *
+ *  Driver Location:
+ *  https://raw.githubusercontent.com/RamSet/hubitat/main/VirtualAQIDriver.groovy
+ *
+ *  HPM Manifest:
+ *  https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/manifest-aqi.json
+ *
  *  Licensed under the Apache License, Version 2.0
  *  See: http://www.apache.org/licenses/LICENSE-2.0
  */
