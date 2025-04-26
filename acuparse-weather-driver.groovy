@@ -3,28 +3,37 @@
  *
  * Description:
  *   Polls Acuparse API JSON data and updates Hubitat attributes.
- *   Supports dynamic discovery of available fields. User can select additional fields via comma-separated list.
  *   Designed for use with Hubitat Package Manager (HPM).
  *
  * Author: RamSet
- * Version: 1.4.0
+ * Version: 1.2.3
  * Date: 2025-04-25
  *
  * Changelog:
- *  v1.4.0 - NEW: Dynamic discovery of available fields from the latest API response.
- *           - Lists available fields via logs.
- *           - Allows selection of additional fields via comma-separated input.
- *           - Pull All Fields toggle still overrides and pulls everything.
+ *  v1.2.3 - For all timestamp attributes, adds companion *_date and *_time attributes.
+ *           Example: lastUpdated_date = 2025-04-25, lastUpdated_time = 19:39:20 MDT
  *
- *  v1.3.2 - Fixed multi-select support using static list.
- *  v1.3.1 - Multi-select fully patched.
- *  v1.3.0 - Added manual selection of extra fields.
- *  v1.2.3 - Added *_date and *_time breakdowns for timestamps.
- *  v1.2.2 - Timestamp formatting using ZonedDateTime with timezone.
- *  v1.2.1 - Filtered redundant main_* fields.
- *  v1.2.0 - Core/optional field filtering logic.
- *  v1.1.0 - System health integration.
+ *  v1.2.2 - Applies unified timestamp formatting to all date/time fields using a centralized method.
+ *
+ *  v1.2.1 - Filters redundant main_* fields already mapped to top-level attributes.
+ *          - Parses and formats all timestamp fields using ZonedDateTime with timezone.
+ *
+ *  v1.2.0 - Added timestamp parsing using ZonedDateTime/DateTimeFormatter for specific fields.
+ *          - Optional toggle to limit attribute updates to essential fields only.
+ *          - Essential attributes include: humidity, lightIntensity, tempC/F, windSpeed, uvIndex, and realtimeStatus.
+ *          - All other attributes update only if "Pull All Fields" toggle is enabled.
+ *          - Added disclaimer for potential event load when pulling all fields.
+ *
+ *  v1.1.0 - Added system health check from /api/system/health endpoint.
+ *          - Fetches system status, realtime status, and database info first.
+ *          - Weather data updated after health check.
+ *          - New attributes: systemStatus, realtimeStatus, databaseInfo.
+ *
  *  v1.0.0 - Initial release.
+ *          - Driver that pulls values from Acuparse API, including weather data.
+ *          - Attributes for temperature, humidity, wind speed, light intensity, UV index, and lightning strike count.
+ *          - Fully configurable polling interval and host/port settings.
+ *          - Includes logging options (Debug, Info, Warn).
  *
  * HPM Metadata:
  * {
@@ -36,7 +45,6 @@
  *   "required": true
  * }
  */
-
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 
@@ -66,9 +74,7 @@ metadata {
         input name: "port", type: "number", title: "Port (default 80)", required: false
         input name: "updateInterval", type: "number", title: "Polling interval (seconds)", defaultValue: 60
         input name: "logLevel", type: "enum", title: "Logging Level", options: ["Off", "Info", "Debug", "Warn"], defaultValue: "Info"
-        input name: "pullAllFields", type: "bool", title: "Pull All Fields (Overrides Manual Selection)", defaultValue: false
-        input name: "extraFieldsText", type: "string", title: "Additional Fields (comma-separated)", required: false,
-              description: "Enter extra fields, separated by commas. Example: main_pressure_inHg, lightning_last_strike_ts"
+        input name: "pullAllFields", type: "bool", title: "Pull All Fields (May Generate Many Events)", defaultValue: false
     }
 }
 
@@ -121,8 +127,8 @@ def poll() {
 
 private pollWeatherData(weatherUri) {
     def coreFields = [
-        "humidity", "lightIntensity", "uvIndex", "temperatureC", "temperatureF",
-        "windSpeedKMH", "windSpeedMPH", "realtimeStatus"
+        "main_tempC", "main_tempF", "main_relH", "atlas_lightIntensity",
+        "atlas_uvIndex", "main_windSpeedKMH", "main_windSpeedMPH", "realtimeStatus"
     ]
 
     def timestampFields = [
@@ -131,37 +137,23 @@ private pollWeatherData(weatherUri) {
         "main_windSpeed_peak_recorded"
     ]
 
-    def userExtras = (settings.extraFieldsText ?: "")
-                        .split(",")
-                        .collect { it.trim() }
-                        .findAll { it }
-
     def params = [ uri: weatherUri, contentType: "application/json" ]
     try {
         httpGet(params) { resp ->
             if (resp?.status == 200 && resp?.data) {
                 def data = resp.data
 
-                def discoveredFields = []
-                ["main", "atlas", "lightning"].each { section ->
-                    data[section]?.each { key, _ ->
-                        def attrName = "${section}_${key}".replaceAll("\\s", "")
-                        discoveredFields << attrName
-                    }
-                }
-                state.availableFields = discoveredFields.unique().sort()
-                logInfo "Discovered Available Fields: ${state.availableFields.join(', ')}"
-
                 ["main", "atlas", "lightning"].each { section ->
                     data[section]?.each { key, value ->
                         def attrName = "${section}_${key}".replaceAll("\\s", "")
 
+                        // Prevent redundancy
                         if ((section == "main" && ["tempC", "tempF", "relH", "windSpeedKMH", "windSpeedMPH", "pressure_inHg"].contains(key)) ||
                             (section == "atlas" && ["lightIntensity", "uvIndex"].contains(key))) {
                             return
                         }
 
-                        if (!settings.pullAllFields && !(attrName in coreFields || userExtras.contains(attrName))) return
+                        if (!settings.pullAllFields && !(attrName in coreFields)) return
 
                         if (timestampFields.contains(attrName) && value) {
                             def ts = formatTimestamp(value, attrName)
@@ -174,6 +166,7 @@ private pollWeatherData(weatherUri) {
                     }
                 }
 
+                // Explicit mapping for top-level attributes
                 updateAttr("temperatureF", data?.main?.tempF)
                 updateAttr("temperatureC", data?.main?.tempC)
                 updateAttr("humidity", data?.main?.relH)
