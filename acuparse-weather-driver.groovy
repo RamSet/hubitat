@@ -142,28 +142,39 @@ private pollWeatherData(weatherUri) {
                     "main_windSpeed_peak_recorded"
                 ]
 
-                ["main", "atlas", "lightning"].each { section ->
-                    data[section]?.each { key, value ->
-                        def attrName = "${section}_${key}".replaceAll("\\s", "")
+   ["main", "atlas", "lightning"].each { section ->
+    data[section]?.each { key, value ->
+        def attrName = "${section}_${key}".replaceAll("\\s", "")
 
-                        // Suppress duplicates if covered by preferred field
-                        if (section == "atlas" && ["lightIntensity", "uvIndex"].contains(key)) return
-                        if (section == "main" && ["windSpeedKMH", "windSpeedMPH", "temperatureC", "temperatureF", "humidity", "pressure_inHg"].contains(key)) return
+        // Skip known redundant fields that are already top-level
+        if ((section == "main" && ["tempC", "tempF", "relH", "windSpeedKMH", "windSpeedMPH", "pressure_inHg"].contains(key)) ||
+            (section == "atlas" && ["lightIntensity", "uvIndex"].contains(key))) {
+            return
+        }
 
-                        if (!settings.pullAllFields && !(attrName in coreFields)) return
+        if (!settings.pullAllFields && !(attrName in coreFields)) return
 
-                        if (timestampFields.contains(attrName) && value) {
-                            try {
-                                def zdt = ZonedDateTime.parse(value.toString())
-                                def formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss z")
-                                value = zdt.format(formatter)
-                            } catch (e) {
-                                logWarn "Timestamp parse failed for ${attrName}: ${e.message}"
-                            }
-                        }
-                        updateAttr(attrName, value)
-                    }
+        if (timestampFields.contains(attrName) && value) {
+            try {
+                ZonedDateTime zdt
+                if (value.toString() =~ /\d{4}-\d{2}-\d{2}T/) {
+                    // ISO 8601
+                    zdt = ZonedDateTime.parse(value.toString())
+                } else {
+                    // Handle "yyyy-MM-dd HH:mm:ss Z"
+                    def formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss Z")
+                    zdt = ZonedDateTime.parse(value.toString(), formatter)
                 }
+                def outputFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss z")
+                value = zdt.format(outputFormatter)
+            } catch (e) {
+                logWarn "Timestamp parse failed for ${attrName}: ${e.message}"
+            }
+        }
+
+        updateAttr(attrName, value)
+    }
+}
 
                 updateAttr("temperatureF", data?.main?.tempF)
                 updateAttr("temperatureC", data?.main?.tempC)
