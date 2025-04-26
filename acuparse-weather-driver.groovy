@@ -27,7 +27,7 @@
  * {
  *   "package": "Acuparse Weather Station",
  *   "author": "RamSet",
- *   "namespace": "custom",
+ *   "namespace": "Mezel",
  *   "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/acuparse-weather-driver.groovy",
  *   "description": "Weather driver for polling Acuparse JSON data with capabilities integration.",
  *   "required": true,
