@@ -6,10 +6,13 @@
  *   Designed for use with Hubitat Package Manager (HPM).
  *
  * Author: RamSet
- * Version: 1.2.2
+ * Version: 1.2.3
  * Date: 2025-04-25
  *
  * Changelog:
+ *  v1.2.3 - For all timestamp attributes, adds companion *_date and *_time attributes.
+ *           E.g., lastUpdated_date = 2025-04-25, lastUpdated_time = 19:39:20 MDT
+ *
  *  v1.2.2 - Applies unified timestamp formatting to all date/time fields using a centralized method.
  *
  *  v1.2.1 - Filters redundant main_* fields already mapped to top-level attributes.
@@ -19,7 +22,6 @@
  *          - Optional toggle to limit attribute updates to essential fields only.
  *          - Essential attributes include: humidity, lightIntensity, tempC/F, windSpeed, uvIndex, and realtimeStatus.
  *          - All other attributes update only if "Pull All Fields" toggle is enabled.
- *          - Added disclaimer for potential event load when pulling all fields.
  *
  *  v1.1.0 - Added system health check from /api/system/health endpoint.
  *          - Fetches system status, realtime status, and database info first.
@@ -61,6 +63,8 @@ metadata {
         attribute "lightIntensity", "number"
         attribute "uvIndex", "number"
         attribute "lastUpdated", "string"
+        attribute "lastUpdated_date", "string"
+        attribute "lastUpdated_time", "string"
         attribute "systemStatus", "string"
         attribute "realtimeStatus", "string"
     }
@@ -151,10 +155,13 @@ private pollWeatherData(weatherUri) {
                         if (!settings.pullAllFields && !(attrName in coreFields)) return
 
                         if (timestampFields.contains(attrName) && value) {
-                            value = formatTimestamp(value, attrName)
+                            def ts = formatTimestamp(value, attrName)
+                            updateAttr(attrName, ts.formatted)
+                            updateAttr("${attrName}_date", ts.date)
+                            updateAttr("${attrName}_time", ts.time)
+                        } else {
+                            updateAttr(attrName, value)
                         }
-
-                        updateAttr(attrName, value)
                     }
                 }
 
@@ -166,7 +173,11 @@ private pollWeatherData(weatherUri) {
                 updateAttr("windSpeedKMH", data?.main?.windSpeedKMH)
                 updateAttr("lightIntensity", data?.atlas?.lightIntensity)
                 updateAttr("uvIndex", data?.atlas?.uvIndex)
-                updateAttr("lastUpdated", formatTimestamp(data?.main?.lastUpdated, "lastUpdated"))
+
+                def ts = formatTimestamp(data?.main?.lastUpdated, "lastUpdated")
+                updateAttr("lastUpdated", ts.formatted)
+                updateAttr("lastUpdated_date", ts.date)
+                updateAttr("lastUpdated_time", ts.time)
             } else {
                 logWarn "Failed to fetch weather data - Status: ${resp?.status}"
             }
@@ -189,7 +200,7 @@ private updateAttr(name, value) {
 }
 
 private formatTimestamp(value, name) {
-    if (!value) return value
+    if (!value) return [formatted: value, date: null, time: null]
     try {
         ZonedDateTime zdt
         if (value.toString() =~ /\d{4}-\d{2}-\d{2}T/) {
@@ -198,11 +209,15 @@ private formatTimestamp(value, name) {
             def formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss Z")
             zdt = ZonedDateTime.parse(value.toString(), formatter)
         }
-        def outputFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss z")
-        return zdt.format(outputFormatter)
+
+        def formatted = zdt.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss z"))
+        def datePart  = zdt.format(DateTimeFormatter.ofPattern("yyyy-MM-dd"))
+        def timePart  = zdt.format(DateTimeFormatter.ofPattern("HH:mm:ss z"))
+
+        return [formatted: formatted, date: datePart, time: timePart]
     } catch (e) {
         logWarn "Failed to format timestamp for ${name}: ${e.message}"
-        return value
+        return [formatted: value, date: null, time: null]
     }
 }
 
