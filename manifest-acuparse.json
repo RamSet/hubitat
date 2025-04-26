@@ -1,0 +1,10 @@
+{
+  "name": "Acuparse Weather Station",
+  "package": "Acuparse Weather Station",
+  "author": "RamSet",
+  "namespace": "custom",
+  "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/acuparse-weather-driver.groovy",
+  "description": "Weather driver for polling Acuparse JSON data and updating Hubitat attributes. Supports timestamp formatting and core/optional field selection.",
+  "required": true,
+  "version": "1.2.4"
+}
