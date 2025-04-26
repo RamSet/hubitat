@@ -35,7 +35,7 @@
 metadata {
     definition(
         name: "Network Monitor HealthCheck (HTTP)",
-        namespace: "Mezel",
+        "namespace": "RamSet",
         author: "RamSet",
         importURL: "https://raw.githubusercontent.com/RamSet/hubitat/main/NetworkMonitorHealthCheck.groovy"
     ) {
