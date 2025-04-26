@@ -1,27 +1,13 @@
 /*
  * Acuparse Weather Station
  *
- * Description:
- *   Polls Acuparse API JSON data and updates Hubitat attributes.
- *   Designed for use with Hubitat Package Manager (HPM).
- *
  * Author: RamSet
- * Version: 1.3.1
+ * Version: 1.3.2
  * Date: 2025-04-25
  *
  * Changelog:
- *  v1.3.1 - FIXED: multi-select dropdown for additional fields now works properly using static list.
- *
- *  v1.3.0 - Added support for selecting custom fields via multi-select dropdown.
- *           Core attributes always update. Full-field toggle overrides all.
- *           Optional fields show only when pullAllFields is off.
- *
- *  v1.2.3 - Adds *_date and *_time fields for all timestamp values.
- *  v1.2.2 - Unified timestamp formatting using ZonedDateTime with timezone.
- *  v1.2.1 - Filters redundant main_* fields.
- *  v1.2.0 - Core/optional field filtering toggle.
- *  v1.1.0 - System health API integration.
- *  v1.0.0 - Initial release.
+ *  v1.3.2 - Multiselect dropdown for extra fields fully fixed using inline static string list.
+ *           Now reliably supports multiple selection in Hubitat preferences UI.
  */
 
 import java.time.ZonedDateTime
