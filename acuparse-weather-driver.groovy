@@ -55,7 +55,8 @@
  * HPM Metadata:
  * {
  *   "package": "Acuparse Weather Station",
- *   "author": "RamSet",
+ *   "namespace": "RamSet",
+ *   "author: "RamSet",
  *   "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/acuparse-weather-driver.groovy",
  *   "description": "Weather driver for polling Acuparse JSON data with capabilities integration and extra field selection.",
  *   "required": true,
