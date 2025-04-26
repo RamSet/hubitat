@@ -4,24 +4,25 @@
  * Description:
  *   Polls Acuparse API JSON data and updates Hubitat attributes.
  *   Adds Hubitat capability integration while retaining raw attributes.
+ *   Supports user-selected extra fields in addition to core fields.
  *
  * Author: RamSet
- * Version: 1.3.0
+ * Version: 1.3.1
  * Date: 2025-04-26
  *
  * Changelog:
+ *  v1.3.1 - Adds user-selectable extra fields (multi-select).
+ *           "Pull All Fields" overrides extra selections.
+ *           Retains core fields always.
  *  v1.3.0 - Adds Hubitat capabilities:
  *           - TemperatureMeasurement
  *           - RelativeHumidityMeasurement
  *           - IlluminanceMeasurement
  *           - UltravioletIndex
- *           - Custom windSpeed attribute with dynamic unit detection (MPH / KMH).
- *           - Automatically respects hub temperature scale (C/F).
+ *           - Custom windSpeed attribute with unit detection (MPH/KMH).
+ *           - Respects hub temperature scale (C/F).
  *           - Raw attributes retained.
- *  v1.2.4 - Enforces minimum polling interval of 15 seconds.
- *           Pull All Fields disclaimer for high event load warning.
- *  v1.2.3 - Adds *_date and *_time for all timestamp attributes.
- *  (see previous changelog for earlier versions)
+ *  (previous changelogs omitted for brevity)
  *
  * HPM Metadata:
  * {
@@ -29,9 +30,9 @@
  *   "author": "RamSet",
  *   "namespace": "Mezel",
  *   "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/acuparse-weather-driver.groovy",
- *   "description": "Weather driver for polling Acuparse JSON data with capabilities integration.",
+ *   "description": "Weather driver for polling Acuparse JSON data with capabilities integration and extra field selection.",
  *   "required": true,
- *   "version": "1.3.0"
+ *   "version": "1.3.1"
  * }
  */
 
@@ -39,7 +40,7 @@ import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 
 metadata {
-    definition(name: "Acuparse Weather Station", namespace: "custom", author: "RamSet") {
+    definition(name: "Acuparse Weather Station", namespace: "Mezel", author: "RamSet") {
         capability "Sensor"
         capability "Polling"
         capability "Refresh"
@@ -73,9 +74,18 @@ metadata {
         input name: "logLevel", type: "enum", title: "Logging Level", options: ["Off", "Info", "Debug", "Warn"], defaultValue: "Info"
         input name: "pullAllFields", type: "bool", title: "Pull All Fields (May Generate Many Events)", defaultValue: false,
               description: "WARNING: Pulling all fields may generate a large number of events, especially if combined with a low refresh interval. The default core fields are optimized for efficiency."
+        input name: "extraFields", type: "enum", title: "Select Additional Fields", multiple: true, required: false,
+              options: [
+                "main_pressure_inHg", "main_pressure_kPa", "main_pressure_trend",
+                "main_tempF_avg", "main_tempF_high", "main_tempF_low", "main_tempF_trend",
+                "main_rainIN", "main_rainMM", "main_relH_trend", "main_sunrise", "main_sunset",
+                "main_moon_nextNew", "main_moonrise", "main_moonset",
+                "main_windAvgKMH", "main_windAvgMPH", "main_windBeaufort",
+                "lightning_strikecount", "lightning_currentstrikes", "lightning_last_strike_ts",
+                "atlas_lightIntensity_text", "atlas_uvIndex_text"
+              ]
     }
 }
-
 def installed() { initialize() }
 def updated() { unschedule(); initialize() }
 
@@ -139,6 +149,8 @@ private pollWeatherData(weatherUri) {
         "main_windSpeed_peak_recorded"
     ]
 
+    def userExtras = (settings.extraFields ?: []) as List
+
     def params = [ uri: weatherUri, contentType: "application/json" ]
     try {
         httpGet(params) { resp ->
@@ -154,7 +166,7 @@ private pollWeatherData(weatherUri) {
                             return
                         }
 
-                        if (!settings.pullAllFields && !(attrName in coreFields)) return
+                        if (!settings.pullAllFields && !(attrName in coreFields || userExtras.contains(attrName))) return
 
                         if (timestampFields.contains(attrName) && value) {
                             def ts = formatTimestamp(value, attrName)
@@ -167,7 +179,7 @@ private pollWeatherData(weatherUri) {
                     }
                 }
 
-                // Core capability mappings:
+                // Capabilities mapping:
                 def tempScale = location.temperatureScale
                 if (tempScale == "C") {
                     sendEvent(name: "temperature", value: data?.main?.tempC, unit: "°C")
@@ -183,7 +195,7 @@ private pollWeatherData(weatherUri) {
                 sendEvent(name: "illuminance", value: data?.atlas?.lightIntensity)
                 sendEvent(name: "ultravioletIndex", value: data?.atlas?.uvIndex)
 
-                // Raw fields (still present for advanced automations):
+                // Raw fields for automation flexibility:
                 updateAttr("temperatureF", data?.main?.tempF)
                 updateAttr("temperatureC", data?.main?.tempC)
                 updateAttr("humidity", data?.main?.relH)
@@ -193,10 +205,14 @@ private pollWeatherData(weatherUri) {
                 updateAttr("lightIntensity", data?.atlas?.lightIntensity)
                 updateAttr("uvIndex", data?.atlas?.uvIndex)
 
-                def ts = formatTimestamp(data?.main?.lastUpdated, "lastUpdated")
-                updateAttr("lastUpdated", ts.formatted)
-                updateAttr("lastUpdated_date", ts.date)
-                updateAttr("lastUpdated_time", ts.time)
+                if (data?.main?.lastUpdated) {
+                    def ts = formatTimestamp(data.main.lastUpdated, "lastUpdated")
+                    updateAttr("lastUpdated", ts.formatted)
+                    updateAttr("lastUpdated_date", ts.date)
+                    updateAttr("lastUpdated_time", ts.time)
+                } else {
+                    logWarn "lastUpdated timestamp not available from API"
+                }
             } else {
                 logWarn "Failed to fetch weather data - Status: ${resp?.status}"
             }
@@ -207,7 +223,6 @@ private pollWeatherData(weatherUri) {
 
     scheduleNextPoll()
 }
-
 private updateAttr(name, value) {
     def current = device.currentValue(name)
     if (current?.toString() != value?.toString()) {
@@ -225,10 +240,10 @@ private formatTimestamp(value, name) {
         def defaultZone = java.time.ZoneId.of("America/Denver")
 
         try {
-            // First, attempt standard ISO 8601 parsing
+            // Primary attempt: ISO 8601 parsing
             zdt = ZonedDateTime.parse(value.toString()).withZoneSameInstant(defaultZone)
         } catch (ignored) {
-            // Fallback: parse using manual pattern if not ISO format
+            // Fallback to manual pattern parsing
             def formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss Z")
             zdt = ZonedDateTime.parse(value.toString(), formatter).withZoneSameInstant(defaultZone)
         }
