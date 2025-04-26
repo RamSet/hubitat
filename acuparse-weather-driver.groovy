@@ -11,7 +11,7 @@
  *
  * Changelog:
  *  v1.2.4 - Enforces minimum polling interval of 15 seconds.
- *           Adds disclaimer for Pull All Fields toggle to warn about high event load at low intervals.
+ *           Adds info for Pull All Fields toggle to warn about high event load at low intervals.
  *
  *  v1.2.3 - Adds *_date and *_time attributes for all timestamp fields.
  *  v1.2.2 - Unified timestamp formatting for all date/time fields.
