@@ -10,7 +10,7 @@
     {
       "id": "afe3a491-3205-4c31-8997-5db28b45687b",
       "name": "Network Monitor Health Check",
-      "namespace": "Mezel",
+      "namespace": "RamSet",
       "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/NetworkMonitorHealthCheck.groovy",
       "required": true,
       "oauth": false,
