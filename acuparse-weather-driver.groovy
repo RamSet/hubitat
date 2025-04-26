@@ -5,23 +5,16 @@
  *   Polls Acuparse API JSON data and updates Hubitat attributes.
  *   Adds Hubitat capability integration while retaining raw attributes.
  *   Supports user-selected extra fields in addition to core fields.
+ *   Validates user-selected fields to avoid typos.
  *
  * Author: RamSet
- * Version: 1.3.1
+ * Version: 1.3.2
  * Date: 2025-04-26
  *
  * Changelog:
- *  v1.3.1 - Adds user-selectable extra fields (multi-select).
- *           "Pull All Fields" overrides extra selections.
- *           Retains core fields always.
- *  v1.3.0 - Adds Hubitat capabilities:
- *           - TemperatureMeasurement
- *           - RelativeHumidityMeasurement
- *           - IlluminanceMeasurement
- *           - UltravioletIndex
- *           - Custom windSpeed attribute with unit detection (MPH/KMH).
- *           - Respects hub temperature scale (C/F).
- *           - Raw attributes retained.
+ *  v1.3.2 - Switches extra field selection to comma-separated text input.
+ *           Adds validation against discovered fields.
+ *           Pull All Fields overrides extra selections.
  *  (previous changelogs omitted for brevity)
  *
  * HPM Metadata:
@@ -32,7 +25,7 @@
  *   "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/acuparse-weather-driver.groovy",
  *   "description": "Weather driver for polling Acuparse JSON data with capabilities integration and extra field selection.",
  *   "required": true,
- *   "version": "1.3.1"
+ *   "version": "1.3.2"
  * }
  */
 
@@ -74,16 +67,8 @@ metadata {
         input name: "logLevel", type: "enum", title: "Logging Level", options: ["Off", "Info", "Debug", "Warn"], defaultValue: "Info"
         input name: "pullAllFields", type: "bool", title: "Pull All Fields (May Generate Many Events)", defaultValue: false,
               description: "WARNING: Pulling all fields may generate a large number of events, especially if combined with a low refresh interval. The default core fields are optimized for efficiency."
-        input name: "extraFields", type: "enum", title: "Select Additional Fields", multiple: true, required: false,
-              options: [
-                "main_pressure_inHg", "main_pressure_kPa", "main_pressure_trend",
-                "main_tempF_avg", "main_tempF_high", "main_tempF_low", "main_tempF_trend",
-                "main_rainIN", "main_rainMM", "main_relH_trend", "main_sunrise", "main_sunset",
-                "main_moon_nextNew", "main_moonrise", "main_moonset",
-                "main_windAvgKMH", "main_windAvgMPH", "main_windBeaufort",
-                "lightning_strikecount", "lightning_currentstrikes", "lightning_last_strike_ts",
-                "atlas_lightIntensity_text", "atlas_uvIndex_text"
-              ]
+        input name: "extraFieldsText", type: "string", title: "Additional Fields (comma-separated)", required: false,
+              description: "Example: main_pressure_inHg, lightning_last_strike_ts"
     }
 }
 def installed() { initialize() }
@@ -149,13 +134,30 @@ private pollWeatherData(weatherUri) {
         "main_windSpeed_peak_recorded"
     ]
 
-    def userExtras = (settings.extraFields ?: []) as List
+    def userExtras = (settings.extraFieldsText ?: "")
+                        .split(",")
+                        .collect { it.trim() }
+                        .findAll { it }
 
+    def availableFields = []
     def params = [ uri: weatherUri, contentType: "application/json" ]
     try {
         httpGet(params) { resp ->
             if (resp?.status == 200 && resp?.data) {
                 def data = resp.data
+
+                // Discover available fields
+                ["main", "atlas", "lightning"].each { section ->
+                    data[section]?.each { key, _ ->
+                        availableFields << "${section}_${key}".replaceAll("\\s", "")
+                    }
+                }
+
+                // Validate user-selected fields
+                def invalidFields = userExtras.findAll { !availableFields.contains(it) }
+                if (invalidFields) {
+                    logWarn "Invalid extra field(s) specified: ${invalidFields.join(', ')}"
+                }
 
                 ["main", "atlas", "lightning"].each { section ->
                     data[section]?.each { key, value ->
@@ -195,7 +197,7 @@ private pollWeatherData(weatherUri) {
                 sendEvent(name: "illuminance", value: data?.atlas?.lightIntensity)
                 sendEvent(name: "ultravioletIndex", value: data?.atlas?.uvIndex)
 
-                // Raw fields for automation flexibility:
+                // Raw attributes for automation flexibility:
                 updateAttr("temperatureF", data?.main?.tempF)
                 updateAttr("temperatureC", data?.main?.tempC)
                 updateAttr("humidity", data?.main?.relH)
