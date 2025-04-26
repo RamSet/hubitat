@@ -1,10 +1,20 @@
 {
-  "name": "Acuparse Weather Station",
-  "package": "Acuparse Weather Station",
+  "packageName": "Acuparse Weather Station",
   "author": "RamSet",
-  "namespace": "Mezel",
-  "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/acuparse-weather-driver.groovy",
-  "description": "Weather driver for polling Acuparse JSON data and updating Hubitat attributes. Supports timestamp formatting and core/optional field selection.",
-  "required": true,
-  "version": "1.3.2"
+  "version": "1.3.2",
+  "releaseNotes": "v1.3.2 - Adds comma-separated extra field selection with validation. Includes capability integration, timestamp parsing, and core/optional attributes.",
+  "category": "Weather",
+  "tags": "Weather, JSON, Sensor, API",
+  "dateReleased": "2025-04-26",
+  "drivers": [
+    {
+      "id": "be3fdf4e-b15f-490b-b3b1-3df037a17852",
+      "name": "Acuparse Weather Station",
+      "namespace": "Mezel",
+      "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/acuparse-weather-driver.groovy",
+      "required": true,
+      "oauth": false,
+      "description": "Weather driver for polling Acuparse JSON data with capability integration and selectable extra fields."
+    }
+  ]
 }
