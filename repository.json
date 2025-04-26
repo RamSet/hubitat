@@ -1,7 +1,13 @@
 {
   "packageInformation": [
     {
-      "manifest": "https://raw.githubusercontent.com/RamSet/hubitat/main/manifest.json"
+      "manifest": "https://raw.githubusercontent.com/RamSet/hubitat/main/manifest-acuparse.json"
+    },
+    {
+      "manifest": "https://raw.githubusercontent.com/RamSet/hubitat/main/manifest-networkmonitor.json"
+    },
+    {
+      "manifest": "https://raw.githubusercontent.com/RamSet/hubitat/main/manifest-aqi.json"
     }
   ]
 }
