@@ -10,7 +10,7 @@
     {
       "id": "cbce9053-b7aa-4cd3-b2fb-fb4b239d41ff",
       "name": "Virtual AQI Driver",
-      "namespace": "Mezel",
+      "namespace": "RamSet",
       "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/VirtualAQIDriver.groovy",
       "required": true,
       "oauth": false,
