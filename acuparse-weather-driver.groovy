@@ -6,30 +6,22 @@
  *   Designed for use with Hubitat Package Manager (HPM).
  *
  * Author: RamSet
- * Version: 1.3.0
+ * Version: 1.3.1
  * Date: 2025-04-25
  *
  * Changelog:
+ *  v1.3.1 - FIXED: multi-select dropdown for additional fields now works properly using static list.
+ *
  *  v1.3.0 - Added support for selecting custom fields via multi-select dropdown.
  *           Core attributes always update. Full-field toggle overrides all.
  *           Optional fields show only when pullAllFields is off.
  *
- *  v1.2.3 - For all timestamp attributes, adds companion *_date and *_time attributes.
- *  v1.2.2 - Applies unified timestamp formatting to all date/time fields.
- *  v1.2.1 - Filters redundant main_* fields already mapped to top-level attributes.
- *  v1.2.0 - Added timestamp parsing, core/extra field filtering logic.
- *  v1.1.0 - Health check endpoint + new system attributes.
+ *  v1.2.3 - Adds *_date and *_time fields for all timestamp values.
+ *  v1.2.2 - Unified timestamp formatting using ZonedDateTime with timezone.
+ *  v1.2.1 - Filters redundant main_* fields.
+ *  v1.2.0 - Core/optional field filtering toggle.
+ *  v1.1.0 - System health API integration.
  *  v1.0.0 - Initial release.
- *
- * HPM Metadata:
- * {
- *   "package": "Acuparse Weather Station",
- *   "author": "RamSet",
- *   "namespace": "custom",
- *   "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/acuparse-weather-driver.groovy",
- *   "description": "Weather driver for polling Acuparse JSON data",
- *   "required": true
- * }
  */
 
 import java.time.ZonedDateTime
@@ -63,8 +55,23 @@ metadata {
         input name: "logLevel", type: "enum", title: "Logging Level", options: ["Off", "Info", "Debug", "Warn"], defaultValue: "Info"
         input name: "pullAllFields", type: "bool", title: "Pull All Fields (Overrides Manual Selection)", defaultValue: false
         input name: "extraFields", type: "enum", title: "Additional Fields to Pull", multiple: true,
-              options: getAllAvailableFields(), required: false,
-              description: "Optional: Select additional attributes if Pull All Fields is off"
+            options: [
+                "main_pressure_inHg", "main_pressure_kPa", "main_pressure_trend",
+                "main_tempF_avg", "main_tempF_high", "main_tempF_low", "main_tempF_trend",
+                "main_tempC_avg", "main_tempC_high", "main_tempC_low",
+                "main_rainIN", "main_rainMM", "main_rainTotalIN_today", "main_rainTotalMM_today",
+                "main_relH_trend", "main_sunrise", "main_sunset",
+                "main_moon_nextNew", "main_moonrise", "main_moonset",
+                "main_windAvgKMH", "main_windAvgMPH", "main_windBeaufort",
+                "main_windDEG", "main_windDEG_peak", "main_windDIR", "main_windDIR_peak",
+                "main_windGustDIR", "main_windGustDIRPeak", "main_windSpeedKMH_peak", "main_windSpeedMPH_peak",
+                "main_windSpeed_peak_recorded",
+                "lightning_strikecount", "lightning_currentstrikes", "lightning_dailystrikes",
+                "lightning_interference", "lightning_last_strike_distance_M", "lightning_last_strike_distance_KM",
+                "lightning_last_strike_ts", "lightning_last_update",
+                "atlas_lightSeconds", "atlas_lightHours", "atlas_lightIntensity_text", "atlas_uvIndex_text"
+            ], required: false,
+            description: "Optional: Select additional attributes if Pull All Fields is off"
     }
 }
 
@@ -213,25 +220,6 @@ private formatTimestamp(value, name) {
         logWarn "Failed to format timestamp for ${name}: ${e.message}"
         return [formatted: value, date: null, time: null]
     }
-}
-
-private getAllAvailableFields() {
-    return [
-        "main_pressure_inHg", "main_pressure_kPa", "main_pressure_trend",
-        "main_tempF_avg", "main_tempF_high", "main_tempF_low", "main_tempF_trend",
-        "main_tempC_avg", "main_tempC_high", "main_tempC_low",
-        "main_rainIN", "main_rainMM", "main_rainTotalIN_today", "main_rainTotalMM_today",
-        "main_relH_trend", "main_sunrise", "main_sunset",
-        "main_moon_nextNew", "main_moonrise", "main_moonset",
-        "main_windAvgKMH", "main_windAvgMPH", "main_windBeaufort",
-        "main_windDEG", "main_windDEG_peak", "main_windDIR", "main_windDIR_peak",
-        "main_windGustDIR", "main_windGustDIRPeak", "main_windSpeedKMH_peak", "main_windSpeedMPH_peak",
-        "main_windSpeed_peak_recorded",
-        "lightning_strikecount", "lightning_currentstrikes", "lightning_dailystrikes",
-        "lightning_interference", "lightning_last_strike_distance_M", "lightning_last_strike_distance_KM",
-        "lightning_last_strike_ts", "lightning_last_update",
-        "atlas_lightSeconds", "atlas_lightHours", "atlas_lightIntensity_text", "atlas_uvIndex_text"
-    ]
 }
 
 private logDebug(msg) {
