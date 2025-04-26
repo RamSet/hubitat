@@ -2,7 +2,7 @@
   "name": "Network Monitor Health Check",
   "package": "Network Monitor Health Check",
   "author": "RamSet",
-  "namespace": "custom",
+  "namespace": "Mezel",
   "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/NetworkMonitorHealthCheck.groovy",
   "description": "Simple network health check driver to ping devices and report status.",
   "required": true,
