@@ -224,11 +224,11 @@ private formatTimestamp(value, name) {
         ZonedDateTime zdt
         def defaultZone = java.time.ZoneId.of("America/Denver")
 
-        if (value.toString() =~ /\d{4
-
-}-\d{2}-\d{2}T/) {
+        try {
+            // First, attempt standard ISO 8601 parsing
             zdt = ZonedDateTime.parse(value.toString()).withZoneSameInstant(defaultZone)
-        } else {
+        } catch (ignored) {
+            // Fallback: parse using manual pattern if not ISO format
             def formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss Z")
             zdt = ZonedDateTime.parse(value.toString(), formatter).withZoneSameInstant(defaultZone)
         }
@@ -239,7 +239,7 @@ private formatTimestamp(value, name) {
 
         return [formatted: formatted, date: datePart, time: timePart]
     } catch (e) {
-        logWarn "Failed to format timestamp for ${name}: ${e.message}"
+        logWarn "Failed to format timestamp for ${name}: ${e.message} (raw input: ${value})"
         return [formatted: value, date: null, time: null]
     }
 }
