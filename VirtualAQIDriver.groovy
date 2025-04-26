@@ -1,56 +1,78 @@
 /**
  *  Virtual Air Quality Sensor - Device Driver for Hubitat Elevation
  *
- *  https://community.hubitat.com/t/dynamic-capabilities-commands-and-attributes-for-drivers/98342
- *
- * 	Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
- * 	in compliance with the License. You may obtain a copy of the License at:
- *
- * 		http://www.apache.org/licenses/LICENSE-2.0
- *
- * 	Unless required by applicable law or agreed to in writing, software distributed under the License is distributed
- * 	on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License
- * 	for the specific language governing permissions and limitations under the License.
- *
- * Simple way of processing a numeric value into an Air Quality sensor for integration with HomeKit
- *
- * Homekit thresholds (value):
- *
- * < 0 Unknown (Out of range)
- * 0-50 Excellent
- * 51-100 Good
- * 101-150 Fair
- * 151-200 Inferior
- * 201-500 Poor
- * > 500 Unknown (Out of range)
- * ver. 1.0.0  2023-09-26 RamSet  - Initial release version
+ *  Licensed under the Apache License, Version 2.0
+ *  See: http://www.apache.org/licenses/LICENSE-2.0
  */
 
 metadata {
-	definition (name: "Virtual Air Quality (AQI) Driver", namespace: "RamSet", author: "RamSet") {
-	capability "AirQuality"
-	capability "Sensor"
-	capability "Temperature Measurement"
-	command "airQualityIndex", ["Number"]
-	}
+    definition (name: "Virtual Air Quality (AQI) Driver", namespace: "RamSet", author: "RamSet") {
+        capability "AirQuality"
+        capability "Sensor"
+        capability "Temperature Measurement"
+        command "airQualityIndex", ["Number"]
+    }
+
+    preferences {
+        input name: "logEnable", type: "bool", title: "Enable Debug Logging", defaultValue: true
+        input name: "txtEnable", type: "bool", title: "Enable Description Text Logging", defaultValue: true
+    }
 }
+
 def installed() {
-    log.warn "installed..."
+    log.warn "Driver installed. Initializing with default AQI value."
     airQualityIndex(0)
-   }
+    initialize()
+}
 
 def updated() {
-    log.info "updated..."
-    log.warn "debug logging is: ${logEnable == true}"
-    log.warn "description logging is: ${txtEnable == true}"
+    log.info "Driver settings updated."
+    log.warn "Debug logging is: ${logEnable == true}"
+    log.warn "Description text logging is: ${txtEnable == true}"
+    initialize()
+}
+
+def initialize() {
+    if (logEnable) {
+        log.debug "Scheduling debug logging to turn off automatically in 30 minutes."
+        runIn(1800, logsOff)
+    }
+}
+
+def logsOff() {
+    log.warn "Debug logging disabled automatically."
+    device.updateSetting("logEnable", [value: "false", type: "bool"])
 }
 
 def parse(String description) {
+    // Not used for virtual device.
 }
 
-def airQualityIndex(str) {
-    def descriptionText = "${device.displayName} AQI is ${str}"
+def airQualityIndex(Number aqi) {
+    if (aqi == null || aqi < 0) {
+        log.warn "Invalid AQI value (${aqi}). Defaulting to 0 (Unknown)."
+        aqi = 0
+    }
+
+    def level = getAqiLevel(aqi)
+    def descriptionText = "${device.displayName} AQI is ${aqi} (${level})"
+
     if (txtEnable) log.info "${descriptionText}"
-    sendEvent(name: "airQualityIndex", value: str, descriptionText: descriptionText)
+    sendEvent(name: "airQualityIndex", value: aqi, descriptionText: descriptionText)
+    sendEvent(name: "airQuality", value: level)
+
+    logDebug("AQI value sent: ${aqi}, Level: ${level}")
 }
 
+def getAqiLevel(Number aqi) {
+    if (aqi >= 0 && aqi <= 50) return "Excellent"
+    if (aqi > 50 && aqi <= 100) return "Good"
+    if (aqi > 100 && aqi <= 150) return "Fair"
+    if (aqi > 150 && aqi <= 200) return "Inferior"
+    if (aqi > 200 && aqi <= 500) return "Poor"
+    return "Unknown"
+}
+
+def logDebug(msg) {
+    if (logEnable) log.debug msg
+}
