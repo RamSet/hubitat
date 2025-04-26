@@ -6,34 +6,19 @@
  *   Designed for use with Hubitat Package Manager (HPM).
  *
  * Author: RamSet
- * Version: 1.2.3
+ * Version: 1.2.4
  * Date: 2025-04-25
  *
  * Changelog:
- *  v1.2.3 - For all timestamp attributes, adds companion *_date and *_time attributes.
- *           Example: lastUpdated_date = 2025-04-25, lastUpdated_time = 19:39:20 MDT
+ *  v1.2.4 - Enforces minimum polling interval of 15 seconds.
+ *           Adds disclaimer for Pull All Fields toggle to warn about high event load at low intervals.
  *
- *  v1.2.2 - Applies unified timestamp formatting to all date/time fields using a centralized method.
- *
- *  v1.2.1 - Filters redundant main_* fields already mapped to top-level attributes.
- *          - Parses and formats all timestamp fields using ZonedDateTime with timezone.
- *
- *  v1.2.0 - Added timestamp parsing using ZonedDateTime/DateTimeFormatter for specific fields.
- *          - Optional toggle to limit attribute updates to essential fields only.
- *          - Essential attributes include: humidity, lightIntensity, tempC/F, windSpeed, uvIndex, and realtimeStatus.
- *          - All other attributes update only if "Pull All Fields" toggle is enabled.
- *          - Added disclaimer for potential event load when pulling all fields.
- *
- *  v1.1.0 - Added system health check from /api/system/health endpoint.
- *          - Fetches system status, realtime status, and database info first.
- *          - Weather data updated after health check.
- *          - New attributes: systemStatus, realtimeStatus, databaseInfo.
- *
+ *  v1.2.3 - Adds *_date and *_time attributes for all timestamp fields.
+ *  v1.2.2 - Unified timestamp formatting for all date/time fields.
+ *  v1.2.1 - Filters redundant main_* fields.
+ *  v1.2.0 - Core/optional field filtering logic with Pull All Fields toggle.
+ *  v1.1.0 - System health integration.
  *  v1.0.0 - Initial release.
- *          - Driver that pulls values from Acuparse API, including weather data.
- *          - Attributes for temperature, humidity, wind speed, light intensity, UV index, and lightning strike count.
- *          - Fully configurable polling interval and host/port settings.
- *          - Includes logging options (Debug, Info, Warn).
  *
  * HPM Metadata:
  * {
@@ -45,6 +30,7 @@
  *   "required": true
  * }
  */
+
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 
@@ -72,9 +58,10 @@ metadata {
     preferences {
         input name: "host", type: "string", title: "Device IP or Hostname", required: true
         input name: "port", type: "number", title: "Port (default 80)", required: false
-        input name: "updateInterval", type: "number", title: "Polling interval (seconds)", defaultValue: 60
+        input name: "updateInterval", type: "number", title: "Polling interval (seconds, minimum 15)", defaultValue: 60
         input name: "logLevel", type: "enum", title: "Logging Level", options: ["Off", "Info", "Debug", "Warn"], defaultValue: "Info"
-        input name: "pullAllFields", type: "bool", title: "Pull All Fields (May Generate Many Events)", defaultValue: false
+        input name: "pullAllFields", type: "bool", title: "Pull All Fields (May Generate Many Events)", defaultValue: false,
+              description: "WARNING: Pulling all fields may generate a large number of events, especially if combined with a low refresh interval. The default core fields are optimized for efficiency."
     }
 }
 
@@ -95,6 +82,10 @@ def refresh() { poll() }
 
 def scheduleNextPoll() {
     int seconds = settings.updateInterval ?: 60
+    if (seconds < 15) {
+        logWarn "Polling interval too low (${seconds}s). Setting to minimum 15 seconds."
+        seconds = 15
+    }
     runIn(seconds, poll)
 }
 
@@ -147,7 +138,6 @@ private pollWeatherData(weatherUri) {
                     data[section]?.each { key, value ->
                         def attrName = "${section}_${key}".replaceAll("\\s", "")
 
-                        // Prevent redundancy
                         if ((section == "main" && ["tempC", "tempF", "relH", "windSpeedKMH", "windSpeedMPH", "pressure_inHg"].contains(key)) ||
                             (section == "atlas" && ["lightIntensity", "uvIndex"].contains(key))) {
                             return
@@ -166,7 +156,6 @@ private pollWeatherData(weatherUri) {
                     }
                 }
 
-                // Explicit mapping for top-level attributes
                 updateAttr("temperatureF", data?.main?.tempF)
                 updateAttr("temperatureC", data?.main?.tempC)
                 updateAttr("humidity", data?.main?.relH)
