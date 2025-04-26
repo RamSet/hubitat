@@ -6,10 +6,12 @@
  *   Designed for use with Hubitat Package Manager (HPM).
  *
  * Author: RamSet
- * Version: 1.2.1
+ * Version: 1.2.2
  * Date: 2025-04-25
  *
  * Changelog:
+ *  v1.2.2 - Applies unified timestamp formatting to all date/time fields using a centralized method.
+ *
  *  v1.2.1 - Filters redundant main_* fields already mapped to top-level attributes.
  *          - Parses and formats all timestamp fields using ZonedDateTime with timezone.
  *
@@ -141,7 +143,6 @@ private pollWeatherData(weatherUri) {
                     data[section]?.each { key, value ->
                         def attrName = "${section}_${key}".replaceAll("\\s", "")
 
-                        // Suppress redundant or mapped fields
                         if ((section == "main" && ["tempC", "tempF", "relH", "windSpeedKMH", "windSpeedMPH", "pressure_inHg"].contains(key)) ||
                             (section == "atlas" && ["lightIntensity", "uvIndex"].contains(key))) {
                             return
@@ -150,26 +151,13 @@ private pollWeatherData(weatherUri) {
                         if (!settings.pullAllFields && !(attrName in coreFields)) return
 
                         if (timestampFields.contains(attrName) && value) {
-                            try {
-                                ZonedDateTime zdt
-                                if (value.toString() =~ /\d{4}-\d{2}-\d{2}T/) {
-                                    zdt = ZonedDateTime.parse(value.toString())
-                                } else {
-                                    def formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss Z")
-                                    zdt = ZonedDateTime.parse(value.toString(), formatter)
-                                }
-                                def outputFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss z")
-                                value = zdt.format(outputFormatter)
-                            } catch (e) {
-                                logWarn "Timestamp parse failed for ${attrName}: ${e.message}"
-                            }
+                            value = formatTimestamp(value, attrName)
                         }
 
                         updateAttr(attrName, value)
                     }
                 }
 
-                // Explicit mapping to top-level attributes
                 updateAttr("temperatureF", data?.main?.tempF)
                 updateAttr("temperatureC", data?.main?.tempC)
                 updateAttr("humidity", data?.main?.relH)
@@ -178,7 +166,7 @@ private pollWeatherData(weatherUri) {
                 updateAttr("windSpeedKMH", data?.main?.windSpeedKMH)
                 updateAttr("lightIntensity", data?.atlas?.lightIntensity)
                 updateAttr("uvIndex", data?.atlas?.uvIndex)
-                updateAttr("lastUpdated", data?.main?.lastUpdated)
+                updateAttr("lastUpdated", formatTimestamp(data?.main?.lastUpdated, "lastUpdated"))
             } else {
                 logWarn "Failed to fetch weather data - Status: ${resp?.status}"
             }
@@ -197,6 +185,24 @@ private updateAttr(name, value) {
         logInfo "Updated ${name} = ${value}"
     } else {
         logDebug "No change for ${name}"
+    }
+}
+
+private formatTimestamp(value, name) {
+    if (!value) return value
+    try {
+        ZonedDateTime zdt
+        if (value.toString() =~ /\d{4}-\d{2}-\d{2}T/) {
+            zdt = ZonedDateTime.parse(value.toString())
+        } else {
+            def formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss Z")
+            zdt = ZonedDateTime.parse(value.toString(), formatter)
+        }
+        def outputFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss z")
+        return zdt.format(outputFormatter)
+    } catch (e) {
+        logWarn "Failed to format timestamp for ${name}: ${e.message}"
+        return value
     }
 }
 
