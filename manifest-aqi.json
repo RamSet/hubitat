@@ -1,10 +1,20 @@
 {
-  "name": "Virtual AQI Driver",
-  "package": "Virtual AQI Driver",
+  "packageName": "Virtual AQI Driver",
   "author": "RamSet",
-  "namespace": "custom",
-  "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/VirtualAQIDriver.groovy",
-  "description": "Virtual Air Quality Index driver for Hubitat.",
-  "required": true,
-  "version": "1.0.0"
+  "version": "1.0.0",
+  "releaseNotes": "v1.0.0 - Initial release of the Virtual AQI (Air Quality Index) driver.",
+  "category": "Virtual Devices",
+  "tags": "Air Quality, Virtual Device, AQI",
+  "dateReleased": "2025-04-26",
+  "drivers": [
+    {
+      "id": "cbce9053-b7aa-4cd3-b2fb-fb4b239d41ff",
+      "name": "Virtual AQI Driver",
+      "namespace": "Mezel",
+      "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/VirtualAQIDriver.groovy",
+      "required": true,
+      "oauth": false,
+      "description": "Virtual Air Quality Index driver for Hubitat."
+    }
+  ]
 }
