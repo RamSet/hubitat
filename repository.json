@@ -1,4 +1,5 @@
 {
+  "name": "RamSet - Hubitat",
   "packageInformation": [
     {
       "manifest": "https://raw.githubusercontent.com/RamSet/hubitat/main/manifest-acuparse.json"
