@@ -1,14 +1,24 @@
 {
-  "name": "RamSet - Hubitat",
-  "packageInformation": [
+  "author": "RamSet",
+  "gitHubUrl": "https://github.com/RamSet",
+  "packages": [
     {
-      "manifest": "https://raw.githubusercontent.com/RamSet/hubitat/main/manifest-acuparse.json"
+      "name": "Acuparse Weather Station",
+      "category": "Weather",
+      "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/manifest-acuparse.json",
+      "description": "Weather driver for polling Acuparse JSON data with capability integration, timestamp parsing, and optional extra fields."
     },
     {
-      "manifest": "https://raw.githubusercontent.com/RamSet/hubitat/main/manifest-networkmonitor.json"
+      "name": "Network Monitor Health Check",
+      "category": "Monitoring",
+      "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/manifest-networkmonitor.json",
+      "description": "Network health check driver to monitor device availability via ping and status reporting."
     },
     {
-      "manifest": "https://raw.githubusercontent.com/RamSet/hubitat/main/manifest-aqi.json"
+      "name": "Virtual AQI Driver",
+      "category": "Virtual Devices",
+      "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/manifest-aqi.json",
+      "description": "Virtual Air Quality Index (AQI) driver for Hubitat."
     }
   ]
 }
