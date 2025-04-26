@@ -10,7 +10,7 @@
     {
       "id": "be3fdf4e-b15f-490b-b3b1-3df037a17852",
       "name": "Acuparse Weather Station",
-      "namespace": "Mezel",
+      "namespace": "RamSet",
       "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/acuparse-weather-driver.groovy",
       "required": true,
       "oauth": false,
