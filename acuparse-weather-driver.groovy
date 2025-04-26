@@ -3,9 +3,8 @@
  *
  * Description:
  *   Polls Acuparse API JSON data and updates Hubitat attributes.
- *   Adds Hubitat capability integration while retaining raw attributes.
- *   Supports user-selected extra fields in addition to core fields.
- *   Validates user-selected fields to avoid typos.
+ *   Includes capability integration, core and optional extra fields, 
+ *   robust timestamp handling, and API health status.
  *
  * Author: RamSet
  * Version: 1.3.2
@@ -13,9 +12,45 @@
  *
  * Changelog:
  *  v1.3.2 - Switches extra field selection to comma-separated text input.
- *           Adds validation against discovered fields.
+ *           Adds validation against discovered fields (avoids typos).
  *           Pull All Fields overrides extra selections.
- *  (previous changelogs omitted for brevity)
+ *
+ *  v1.3.1 - Adds user-selectable extra fields (multi-select list).
+ *           Pull All Fields overrides extra selections.
+ *           Core fields always included.
+ *
+ *  v1.3.0 - Adds Hubitat capability integration:
+ *             - TemperatureMeasurement
+ *             - RelativeHumidityMeasurement
+ *             - IlluminanceMeasurement
+ *             - UltravioletIndex
+ *           - Adds custom windSpeed attribute with automatic unit detection (MPH/KMH).
+ *           - Honors hub's temperature scale (C/F).
+ *           - Raw API attributes retained for advanced automations.
+ *
+ *  v1.2.4 - Enforces minimum polling interval of 15 seconds.
+ *           Adds Pull All Fields disclaimer to warn about potential event load.
+ *
+ *  v1.2.3 - Adds *_date and *_time attributes alongside original timestamp fields.
+ *           Uses ZonedDateTime for proper timezone handling.
+ *
+ *  v1.2.2 - Unifies timestamp parsing for all date/time fields using centralized formatting.
+ *
+ *  v1.2.1 - Filters redundant main_* attributes that map directly to top-level attributes.
+ *           Applies proper timestamp formatting to identified fields.
+ *
+ *  v1.2.0 - Adds timestamp parsing using ZonedDateTime/DateTimeFormatter.
+ *           Adds Pull All Fields toggle to allow pulling extended attributes.
+ *           Includes a warning about event generation when enabled.
+ *
+ *  v1.1.0 - Adds health status polling via /api/system/health endpoint.
+ *           Attributes: systemStatus, realtimeStatus.
+ *
+ *  v1.0.0 - Initial release.
+ *           Supports polling Acuparse JSON data.
+ *           Provides core weather data attributes including temperature, humidity,
+ *           wind speed, light intensity, UV index, and lightning strike count.
+ *           Fully configurable polling interval and logging options.
  *
  * HPM Metadata:
  * {
