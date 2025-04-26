@@ -3,22 +3,25 @@
  *
  * Description:
  *   Polls Acuparse API JSON data and updates Hubitat attributes.
- *   Designed for use with Hubitat Package Manager (HPM).
+ *   Adds Hubitat capability integration while retaining raw attributes.
  *
  * Author: RamSet
- * Version: 1.2.4
- * Date: 2025-04-25
+ * Version: 1.3.0
+ * Date: 2025-04-26
  *
  * Changelog:
+ *  v1.3.0 - Adds Hubitat capabilities:
+ *           - TemperatureMeasurement
+ *           - RelativeHumidityMeasurement
+ *           - IlluminanceMeasurement
+ *           - UltravioletIndex
+ *           - Custom windSpeed attribute with dynamic unit detection (MPH / KMH).
+ *           - Automatically respects hub temperature scale (C/F).
+ *           - Raw attributes retained.
  *  v1.2.4 - Enforces minimum polling interval of 15 seconds.
- *           Adds info for Pull All Fields toggle to warn about high event load at low intervals.
- *
- *  v1.2.3 - Adds *_date and *_time attributes for all timestamp fields.
- *  v1.2.2 - Unified timestamp formatting for all date/time fields.
- *  v1.2.1 - Filters redundant main_* fields.
- *  v1.2.0 - Core/optional field filtering logic with Pull All Fields toggle.
- *  v1.1.0 - System health integration.
- *  v1.0.0 - Initial release.
+ *           Pull All Fields disclaimer for high event load warning.
+ *  v1.2.3 - Adds *_date and *_time for all timestamp attributes.
+ *  (see previous changelog for earlier versions)
  *
  * HPM Metadata:
  * {
@@ -26,8 +29,9 @@
  *   "author": "RamSet",
  *   "namespace": "custom",
  *   "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/acuparse-weather-driver.groovy",
- *   "description": "Weather driver for polling Acuparse JSON data",
- *   "required": true
+ *   "description": "Weather driver for polling Acuparse JSON data with capabilities integration.",
+ *   "required": true,
+ *   "version": "1.3.0"
  * }
  */
 
@@ -39,6 +43,13 @@ metadata {
         capability "Sensor"
         capability "Polling"
         capability "Refresh"
+        capability "TemperatureMeasurement"
+        capability "RelativeHumidityMeasurement"
+        capability "IlluminanceMeasurement"
+        capability "UltravioletIndex"
+
+        attribute "windSpeed", "number"
+        attribute "windSpeedUnit", "string"
 
         attribute "temperatureF", "number"
         attribute "temperatureC", "number"
@@ -156,6 +167,23 @@ private pollWeatherData(weatherUri) {
                     }
                 }
 
+                // Core capability mappings:
+                def tempScale = location.temperatureScale
+                if (tempScale == "C") {
+                    sendEvent(name: "temperature", value: data?.main?.tempC, unit: "°C")
+                    sendEvent(name: "windSpeed", value: data?.main?.windSpeedKMH, unit: "KMH")
+                    sendEvent(name: "windSpeedUnit", value: "KMH")
+                } else {
+                    sendEvent(name: "temperature", value: data?.main?.tempF, unit: "°F")
+                    sendEvent(name: "windSpeed", value: data?.main?.windSpeedMPH, unit: "MPH")
+                    sendEvent(name: "windSpeedUnit", value: "MPH")
+                }
+
+                sendEvent(name: "humidity", value: data?.main?.relH, unit: "%")
+                sendEvent(name: "illuminance", value: data?.atlas?.lightIntensity)
+                sendEvent(name: "ultravioletIndex", value: data?.atlas?.uvIndex)
+
+                // Raw fields (still present for advanced automations):
                 updateAttr("temperatureF", data?.main?.tempF)
                 updateAttr("temperatureC", data?.main?.tempC)
                 updateAttr("humidity", data?.main?.relH)
@@ -196,7 +224,9 @@ private formatTimestamp(value, name) {
         ZonedDateTime zdt
         def defaultZone = java.time.ZoneId.of("America/Denver")
 
-        if (value.toString() =~ /\d{4}-\d{2}-\d{2}T/) {
+        if (value.toString() =~ /\d{4
+
+}-\d{2}-\d{2}T/) {
             zdt = ZonedDateTime.parse(value.toString()).withZoneSameInstant(defaultZone)
         } else {
             def formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss Z")
