@@ -1,0 +1,10 @@
+{
+  "name": "Virtual AQI Driver",
+  "package": "Virtual AQI Driver",
+  "author": "RamSet",
+  "namespace": "custom",
+  "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/VirtualAQIDriver.groovy",
+  "description": "Virtual Air Quality Index driver for Hubitat.",
+  "required": true,
+  "version": "1.0.0"
+}
