@@ -6,33 +6,20 @@
  *   Designed for use with Hubitat Package Manager (HPM).
  *
  * Author: RamSet
- * Version: 1.2.3
+ * Version: 1.3.0
  * Date: 2025-04-25
  *
  * Changelog:
+ *  v1.3.0 - Added support for selecting custom fields via multi-select dropdown.
+ *           Core attributes always update. Full-field toggle overrides all.
+ *           Optional fields show only when pullAllFields is off.
+ *
  *  v1.2.3 - For all timestamp attributes, adds companion *_date and *_time attributes.
- *           E.g., lastUpdated_date = 2025-04-25, lastUpdated_time = 19:39:20 MDT
- *
- *  v1.2.2 - Applies unified timestamp formatting to all date/time fields using a centralized method.
- *
+ *  v1.2.2 - Applies unified timestamp formatting to all date/time fields.
  *  v1.2.1 - Filters redundant main_* fields already mapped to top-level attributes.
- *          - Parses and formats all timestamp fields using ZonedDateTime with timezone.
- *
- *  v1.2.0 - Added timestamp parsing using ZonedDateTime/DateTimeFormatter for specific fields.
- *          - Optional toggle to limit attribute updates to essential fields only.
- *          - Essential attributes include: humidity, lightIntensity, tempC/F, windSpeed, uvIndex, and realtimeStatus.
- *          - All other attributes update only if "Pull All Fields" toggle is enabled.
- *
- *  v1.1.0 - Added system health check from /api/system/health endpoint.
- *          - Fetches system status, realtime status, and database info first.
- *          - Weather data updated after health check.
- *          - New attributes: systemStatus, realtimeStatus, databaseInfo.
- *
+ *  v1.2.0 - Added timestamp parsing, core/extra field filtering logic.
+ *  v1.1.0 - Health check endpoint + new system attributes.
  *  v1.0.0 - Initial release.
- *          - Driver that pulls values from Acuparse API, including weather data.
- *          - Attributes for temperature, humidity, wind speed, light intensity, UV index, and lightning strike count.
- *          - Fully configurable polling interval and host/port settings.
- *          - Includes logging options (Debug, Info, Warn).
  *
  * HPM Metadata:
  * {
@@ -74,7 +61,10 @@ metadata {
         input name: "port", type: "number", title: "Port (default 80)", required: false
         input name: "updateInterval", type: "number", title: "Polling interval (seconds)", defaultValue: 60
         input name: "logLevel", type: "enum", title: "Logging Level", options: ["Off", "Info", "Debug", "Warn"], defaultValue: "Info"
-        input name: "pullAllFields", type: "bool", title: "Pull All Fields (May Generate Many Events)", defaultValue: false
+        input name: "pullAllFields", type: "bool", title: "Pull All Fields (Overrides Manual Selection)", defaultValue: false
+        input name: "extraFields", type: "enum", title: "Additional Fields to Pull", multiple: true,
+              options: getAllAvailableFields(), required: false,
+              description: "Optional: Select additional attributes if Pull All Fields is off"
     }
 }
 
@@ -137,6 +127,8 @@ private pollWeatherData(weatherUri) {
         "main_windSpeed_peak_recorded"
     ]
 
+    def userExtras = (settings.extraFields ?: []) as List
+
     def params = [ uri: weatherUri, contentType: "application/json" ]
     try {
         httpGet(params) { resp ->
@@ -152,7 +144,7 @@ private pollWeatherData(weatherUri) {
                             return
                         }
 
-                        if (!settings.pullAllFields && !(attrName in coreFields)) return
+                        if (!settings.pullAllFields && !(attrName in coreFields || userExtras.contains(attrName))) return
 
                         if (timestampFields.contains(attrName) && value) {
                             def ts = formatTimestamp(value, attrName)
@@ -203,11 +195,13 @@ private formatTimestamp(value, name) {
     if (!value) return [formatted: value, date: null, time: null]
     try {
         ZonedDateTime zdt
+        def defaultZone = java.time.ZoneId.of("America/Denver")
+
         if (value.toString() =~ /\d{4}-\d{2}-\d{2}T/) {
-            zdt = ZonedDateTime.parse(value.toString())
+            zdt = ZonedDateTime.parse(value.toString()).withZoneSameInstant(defaultZone)
         } else {
             def formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss Z")
-            zdt = ZonedDateTime.parse(value.toString(), formatter)
+            zdt = ZonedDateTime.parse(value.toString(), formatter).withZoneSameInstant(defaultZone)
         }
 
         def formatted = zdt.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss z"))
@@ -219,6 +213,25 @@ private formatTimestamp(value, name) {
         logWarn "Failed to format timestamp for ${name}: ${e.message}"
         return [formatted: value, date: null, time: null]
     }
+}
+
+private getAllAvailableFields() {
+    return [
+        "main_pressure_inHg", "main_pressure_kPa", "main_pressure_trend",
+        "main_tempF_avg", "main_tempF_high", "main_tempF_low", "main_tempF_trend",
+        "main_tempC_avg", "main_tempC_high", "main_tempC_low",
+        "main_rainIN", "main_rainMM", "main_rainTotalIN_today", "main_rainTotalMM_today",
+        "main_relH_trend", "main_sunrise", "main_sunset",
+        "main_moon_nextNew", "main_moonrise", "main_moonset",
+        "main_windAvgKMH", "main_windAvgMPH", "main_windBeaufort",
+        "main_windDEG", "main_windDEG_peak", "main_windDIR", "main_windDIR_peak",
+        "main_windGustDIR", "main_windGustDIRPeak", "main_windSpeedKMH_peak", "main_windSpeedMPH_peak",
+        "main_windSpeed_peak_recorded",
+        "lightning_strikecount", "lightning_currentstrikes", "lightning_dailystrikes",
+        "lightning_interference", "lightning_last_strike_distance_M", "lightning_last_strike_distance_KM",
+        "lightning_last_strike_ts", "lightning_last_update",
+        "atlas_lightSeconds", "atlas_lightHours", "atlas_lightIntensity_text", "atlas_uvIndex_text"
+    ]
 }
 
 private logDebug(msg) {
