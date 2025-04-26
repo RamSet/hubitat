@@ -6,22 +6,25 @@
  *   Designed for use with Hubitat Package Manager (HPM).
  *
  * Author: RamSet
- * Version: 1.2.0
+ * Version: 1.2.1
  * Date: 2025-04-25
  *
  * Changelog:
+ *  v1.2.1 - Filters redundant main_* fields already mapped to top-level attributes.
+ *          - Parses and formats all timestamp fields using ZonedDateTime with timezone.
+ *
  *  v1.2.0 - Added timestamp parsing using ZonedDateTime/DateTimeFormatter for specific fields.
  *          - Optional toggle to limit attribute updates to essential fields only.
  *          - Essential attributes include: humidity, lightIntensity, tempC/F, windSpeed, uvIndex, and realtimeStatus.
  *          - All other attributes update only if "Pull All Fields" toggle is enabled.
  *          - Added disclaimer for potential event load when pulling all fields.
- * 
- * v1.1.0 - Added system health check from /api/system/health endpoint.
+ *
+ *  v1.1.0 - Added system health check from /api/system/health endpoint.
  *          - Fetches system status, realtime status, and database info first.
  *          - Weather data updated after health check.
  *          - New attributes: systemStatus, realtimeStatus, databaseInfo.
- * 
- * v1.0.0 - Initial release.
+ *
+ *  v1.0.0 - Initial release.
  *          - Driver that pulls values from Acuparse API, including weather data.
  *          - Attributes for temperature, humidity, wind speed, light intensity, UV index, and lightning strike count.
  *          - Fully configurable polling interval and host/port settings.
@@ -69,14 +72,8 @@ metadata {
     }
 }
 
-def installed() {
-    initialize()
-}
-
-def updated() {
-    unschedule()
-    initialize()
-}
+def installed() { initialize() }
+def updated() { unschedule(); initialize() }
 
 def initialize() {
     logInfo "Initializing with interval: ${settings.updateInterval} seconds"
@@ -88,9 +85,7 @@ def initialize() {
     poll()
 }
 
-def refresh() {
-    poll()
-}
+def refresh() { poll() }
 
 def scheduleNextPoll() {
     int seconds = settings.updateInterval ?: 60
@@ -106,7 +101,7 @@ def poll() {
     def targetPort = settings.port ?: 80
     def healthUri = "http://${settings.host}:${targetPort}/api/system/health"
     def weatherUri = "http://${settings.host}:${targetPort}/api/v1/json/dashboard/?main"
-    
+
     def healthParams = [ uri: healthUri, contentType: "application/json" ]
     try {
         httpGet(healthParams) { healthResp ->
@@ -125,57 +120,56 @@ def poll() {
 }
 
 private pollWeatherData(weatherUri) {
+    def coreFields = [
+        "humidity", "lightIntensity", "uvIndex", "temperatureC", "temperatureF",
+        "windSpeedKMH", "windSpeedMPH", "realtimeStatus"
+    ]
+
+    def timestampFields = [
+        "atlas_lastUpdated", "lastUpdated", "lightning_last_strike_ts", "lightning_last_update",
+        "main_moon_nextNew", "main_moonrise", "main_moonset", "main_sunrise", "main_sunset",
+        "main_windSpeed_peak_recorded"
+    ]
+
     def params = [ uri: weatherUri, contentType: "application/json" ]
     try {
         httpGet(params) { resp ->
             if (resp?.status == 200 && resp?.data) {
                 def data = resp.data
-                def coreFields = [
-                    "main_tempC", "main_tempF", "main_relH", "atlas_lightIntensity",
-                    "atlas_uvIndex", "main_windSpeedKMH", "main_windSpeedMPH", "realtimeStatus"
-                ]
-                def timestampFields = [
-                    "atlas_lastUpdated", "lastUpdated", "lightning_last_strike_ts", "lightning_last_update",
-                    "main_high_temp_recorded", "main_lastUpdated", "main_low_temp_recorded",
-                    "main_moon_lastFull", "main_moon_lastNew", "main_moon_nextFull", "main_moon_nextNew",
-                    "main_moonrise", "main_moonset", "main_sunrise", "main_sunset",
-                    "main_windSpeed_peak_recorded"
-                ]
 
-   ["main", "atlas", "lightning"].each { section ->
-    data[section]?.each { key, value ->
-        def attrName = "${section}_${key}".replaceAll("\\s", "")
+                ["main", "atlas", "lightning"].each { section ->
+                    data[section]?.each { key, value ->
+                        def attrName = "${section}_${key}".replaceAll("\\s", "")
 
-        // Skip known redundant fields that are already top-level
-        if ((section == "main" && ["tempC", "tempF", "relH", "windSpeedKMH", "windSpeedMPH", "pressure_inHg"].contains(key)) ||
-            (section == "atlas" && ["lightIntensity", "uvIndex"].contains(key))) {
-            return
-        }
+                        // Suppress redundant or mapped fields
+                        if ((section == "main" && ["tempC", "tempF", "relH", "windSpeedKMH", "windSpeedMPH", "pressure_inHg"].contains(key)) ||
+                            (section == "atlas" && ["lightIntensity", "uvIndex"].contains(key))) {
+                            return
+                        }
 
-        if (!settings.pullAllFields && !(attrName in coreFields)) return
+                        if (!settings.pullAllFields && !(attrName in coreFields)) return
 
-        if (timestampFields.contains(attrName) && value) {
-            try {
-                ZonedDateTime zdt
-                if (value.toString() =~ /\d{4}-\d{2}-\d{2}T/) {
-                    // ISO 8601
-                    zdt = ZonedDateTime.parse(value.toString())
-                } else {
-                    // Handle "yyyy-MM-dd HH:mm:ss Z"
-                    def formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss Z")
-                    zdt = ZonedDateTime.parse(value.toString(), formatter)
+                        if (timestampFields.contains(attrName) && value) {
+                            try {
+                                ZonedDateTime zdt
+                                if (value.toString() =~ /\d{4}-\d{2}-\d{2}T/) {
+                                    zdt = ZonedDateTime.parse(value.toString())
+                                } else {
+                                    def formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss Z")
+                                    zdt = ZonedDateTime.parse(value.toString(), formatter)
+                                }
+                                def outputFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss z")
+                                value = zdt.format(outputFormatter)
+                            } catch (e) {
+                                logWarn "Timestamp parse failed for ${attrName}: ${e.message}"
+                            }
+                        }
+
+                        updateAttr(attrName, value)
+                    }
                 }
-                def outputFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss z")
-                value = zdt.format(outputFormatter)
-            } catch (e) {
-                logWarn "Timestamp parse failed for ${attrName}: ${e.message}"
-            }
-        }
 
-        updateAttr(attrName, value)
-    }
-}
-
+                // Explicit mapping to top-level attributes
                 updateAttr("temperatureF", data?.main?.tempF)
                 updateAttr("temperatureC", data?.main?.tempC)
                 updateAttr("humidity", data?.main?.relH)
