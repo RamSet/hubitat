@@ -4,11 +4,16 @@
  *  This driver monitors Internet, LAN, and optionally a Custom Host's connectivity via HTTP requests.
  *  It updates attributes based on reachability and supports a manual check command.
  *
- *  Version: 1.4
+ *  Version: 1.4.1
  *  Author: RamSet
- *  Last Updated: 2025-04-23
+ *  Last Updated: 2025-06-21
  *
  *  CHANGELOG:
+ *  v1.4.1
+ *   - Fixed runIn() interval issues by forcing Integer cast and logging scheduled checks.
+ *   - Replaced logLevel references with settings.logLevel.
+ *   - Added clearer logging for initialize and connectivity execution.
+ *
  *  v1.4
  *   - Added toggle to treat "connection refused" as online.
  *   - Only unreachable hosts are considered offline if toggle is enabled.
@@ -35,7 +40,7 @@
 metadata {
     definition(
         name: "Network Monitor HealthCheck (HTTP)",
-        "namespace": "RamSet",
+        namespace: "RamSet",
         author: "RamSet",
         importURL: "https://raw.githubusercontent.com/RamSet/hubitat/main/NetworkMonitorHealthCheck.groovy"
     ) {
@@ -48,15 +53,13 @@ metadata {
     }
 
     preferences {
-        input("internetHost", "text", title: "Internet Host", required: true, defaultValue: "https://www.google.com")
+        input("internetHost", "text", title: "Internet Host (don't forget to add http:// or https://)", required: true, defaultValue: "https://www.google.com")
         input("checkLAN", "bool", title: "Check LAN Host?", defaultValue: true)
-        input("lanHost", "text", title: "LAN Host", required: false, defaultValue: "")
-        input("checkCustom", "bool", title: "Check Custom Host?", defaultValue: true)
+        input("lanHost", "text", title: "LAN Host (don't forget to add http:// or https://)", required: false, defaultValue: "")
+        input("checkCustom", "bool", title: "Check Custom Host? (don't forget to add http:// or https://)", defaultValue: true)
         input("customHost", "text", title: "Custom Host", required: false, defaultValue: "")
         input("checkInterval", "number", title: "Check Interval (seconds)", required: true, defaultValue: 300)
-        input("treatRefusedAsOnline", "bool", title: "Treat 'Connection Refused' as Online?",
-              description: "If enabled, only unreachable hosts are considered offline. All other responses, including connection refused, are considered online.",
-              defaultValue: false)
+        input("treatRefusedAsOnline", "bool", title: "Treat 'Connection Refused' as Online?", description: "If enabled, only unreachable hosts are considered offline. All other responses, including connection refused, are considered online.", defaultValue: false)
         input("logLevel", "enum", title: "Logging Level", options: ["info", "debug", "warn", "off"], defaultValue: "info")
     }
 }
@@ -73,14 +76,15 @@ def updated() {
 }
 
 def initialize() {
+    logInfo "Initializing network monitor..."
+
     if (settings.checkInterval) {
         sendEvent(name: "checkInterval", value: settings.checkInterval, unit: "sec")
     }
 
-    // Default undefined boolean toggles to true
-    if (checkLAN == null) app.updateSetting("checkLAN", [type: "bool", value: true])
-    if (checkCustom == null) app.updateSetting("checkCustom", [type: "bool", value: true])
-    if (treatRefusedAsOnline == null) app.updateSetting("treatRefusedAsOnline", [type: "bool", value: false])
+    if (settings.checkLAN == null) app.updateSetting("checkLAN", [type: "bool", value: true])
+    if (settings.checkCustom == null) app.updateSetting("checkCustom", [type: "bool", value: true])
+    if (settings.treatRefusedAsOnline == null) app.updateSetting("treatRefusedAsOnline", [type: "bool", value: false])
 
     checkConnectivity()
 }
@@ -91,6 +95,8 @@ def checkNow() {
 }
 
 def checkConnectivity() {
+    logInfo "Running connectivity check..."
+
     checkHost("internet", settings.internetHost?.trim() ?: "https://www.google.com")
 
     if (settings.checkLAN) {
@@ -118,30 +124,40 @@ def checkConnectivity() {
     }
 
     if (settings.checkInterval) {
-        runIn(settings.checkInterval as Integer, checkConnectivity)
+        def interval = (settings.checkInterval ?: 300) as Integer
+        logInfo "Scheduling next check in ${interval} seconds"
+        runIn(interval, checkConnectivity)
     }
 }
 
-def checkHost(attr, url) {
+def checkHost(attr, url, triedHttps = false) {
     try {
         httpGet([uri: url, ignoreSSLIssues: true]) { resp ->
             def statusCode = resp?.getStatus()
-            logDebug "Host ${url} responded with ${statusCode}"
             sendEventIfChanged(attr, "online", "Online - HTTP ${statusCode}")
+            logInfo "${attr.toUpperCase()} check OK: ${statusCode} from ${url}"
         }
     } catch (e) {
-        def msg = e.message ?: "Unknown error"
+        def msg = e?.message ?: e?.toString() ?: "Unknown error"
+
+        if (msg.contains("ClientProtocolException") && !triedHttps && url.toLowerCase().startsWith("http://")) {
+            def httpsUrl = url.replaceFirst("(?i)^http://", "https://")
+            logWarn "${attr.toUpperCase()} HTTP failed, retrying as HTTPS: ${httpsUrl}"
+            checkHost(attr, httpsUrl, true)
+            return
+        }
+
         def codeMatch = msg =~ /status code: (\d{3})/
         if (codeMatch) {
             def code = codeMatch[0][1]
-            logDebug "Host ${url} error code ${code} treated as online"
             sendEventIfChanged(attr, "online", "Online - HTTP ${code}")
+            logInfo "${attr.toUpperCase()} treated as online: HTTP ${code} from ${url}"
         } else if (msg.toLowerCase().contains("connection refused") && settings.treatRefusedAsOnline) {
-            logDebug "Host ${url} refused connection but treated as online"
             sendEventIfChanged(attr, "online", "Online - Connection refused")
+            logInfo "${attr.toUpperCase()} refused connection but treated as online (${url})"
         } else {
-            logWarn "Host ${url} unreachable: ${msg}"
             sendEventIfChanged(attr, "offline", "Offline - ${msg}")
+            logWarn "${attr.toUpperCase()} unreachable: ${msg} (${url})"
         }
     }
 }
@@ -157,13 +173,13 @@ def sendEventIfChanged(name, value, desc) {
 }
 
 def logInfo(msg) {
-    if (logLevel in ["info", "debug"]) log.info msg
+    if (settings.logLevel in ["info", "debug"]) log.info msg
 }
 
 def logDebug(msg) {
-    if (logLevel == "debug") log.debug msg
+    if (settings.logLevel == "debug") log.debug msg
 }
 
 def logWarn(msg) {
-    if (logLevel in ["warn", "debug"]) log.warn msg
+    if (settings.logLevel in ["warn", "debug"]) log.warn msg
 }
