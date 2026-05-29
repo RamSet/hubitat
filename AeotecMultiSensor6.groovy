@@ -13,6 +13,18 @@
  *  for the specific language governing permissions and limitations under the License.
  *
  *
+ *         v2.1.3   Cleanup pass:
+ *                    - Hide debug commands (setParameter, getParameterReport) from
+ *                      the device UI so the command buttons aren't cluttered for
+ *                      everyday use. Implementations remain in place for advanced
+ *                      users — uncomment the `command` lines to expose them again.
+ *                    - Rewritten every preference description in plain language
+ *                      explaining what each setting does and when to change it.
+ *                    - Removed obsolete state.Copyright variable.
+ *                    - Populate the `firmware` attribute (declared but never
+ *                      sendEvent'd) so the firmware version actually shows up in
+ *                      Current States after a Refresh.
+ *
  *         v2.1.2   Add per-device temperature scale preference (Use hub / Celsius
  *                    / Fahrenheit) so the device's scale can be overridden
  *                    without changing the hub-wide setting.
@@ -122,7 +134,7 @@
    15. support for celsius added. set in input options.
 */
 
- public static String version()      {  return "v2.1.2"  }
+ public static String version()      {  return "v2.1.3"  }
  import groovy.transform.Field
 
 metadata {
@@ -140,8 +152,11 @@ metadata {
         capability "TamperAlert"
 
         command    "refresh"
-        command    "getParameterReport", [[name:"parameterNumber",type:"NUMBER", description:"Parameter Number (omit for a complete listing of parameters that have been set)", constraints:["NUMBER"]]]
-        command    "setParameter",[[name:"parameterNumber",type:"NUMBER", description:"Parameter Number", constraints:["NUMBER"]],[name:"size",type:"NUMBER", description:"Parameter Size", constraints:["NUMBER"]],[name:"value",type:"NUMBER", description:"Parameter Value", constraints:["NUMBER"]]]
+        // Advanced/debug commands — hidden from the device UI by default so the
+        // command list stays clean for everyday use. Uncomment to expose them
+        // (the implementations at the bottom of this driver remain intact).
+        // command    "getParameterReport", [[name:"parameterNumber",type:"NUMBER", description:"Parameter Number (omit for a complete listing of parameters that have been set)", constraints:["NUMBER"]]]
+        // command    "setParameter",[[name:"parameterNumber",type:"NUMBER", description:"Parameter Number", constraints:["NUMBER"]],[name:"size",type:"NUMBER", description:"Parameter Size", constraints:["NUMBER"]],[name:"value",type:"NUMBER", description:"Parameter Value", constraints:["NUMBER"]]]
 
         attribute  "firmware", "decimal"
 
@@ -153,39 +168,67 @@ metadata {
     preferences {
         // Note: Hubitat doesn't appear to honour 'sections' in device handler preferences just now, but hopefully one day...
         section("Motion sensor settings") {
-            input "motionDelayTime", "enum", title: "<b>Motion Sensor Delay Time?</b>",
+            input "motionDelayTime", "enum", title: "<b>Motion Sensor Delay Time</b>",
+                                      description: "<br><i>How long the sensor waits after motion stops before reporting \"no motion\". Shorter values clear the motion state faster (good for lights that should turn off quickly). Longer values prevent flicker when someone briefly stands still. Default: 1 minute.</i><br>",
                                       options: ["20 seconds", "30 seconds", "1 minute", "2 minutes", "3 minutes", "4 minutes"], defaultValue: "1 minute", displayDuringSetup: true
-            input "motionSensitivity", "enum", title: "<b>Motion Sensor Sensitivity?</b>", options: [5:"Very High", 4:"High", 3:"Medium High", 2:"Medium", 1:"Low", 0:"Off"], defaultValue: 5, displayDuringSetup: true
+            input "motionSensitivity", "enum", title: "<b>Motion Sensor Sensitivity</b>",
+                                      description: "<br><i>How easily the PIR triggers. <b>Very High</b> catches small movements like a hand wave. <b>Low</b> requires a person walking across the room. <b>Off</b> disables motion detection entirely. Default: Very High.</i><br>",
+                                      options: [5:"Very High", 4:"High", 3:"Medium High", 2:"Medium", 1:"Low", 0:"Off (disabled)"], defaultValue: 5, displayDuringSetup: true
         }
 
         section("Automatic report settings") {
-            input "reportInterval", "enum", title: "<b>Sensors Report Interval?</b>",
+            input "reportInterval", "enum", title: "<b>Sensors Report Interval</b>",
+                                      description: "<br><i>How often the sensor wakes up and sends temperature, humidity, light and UV readings. Shorter = more responsive dashboards but more battery drain on battery-powered sensors. <b>USB-powered sensors</b>: 1-5 minutes is fine. <b>Battery sensors</b>: 30 minutes-1 hour is recommended. Default: 5 minutes.</i><br>",
                                       options: ["20 seconds", "30 seconds", "1 minute", "2 minutes", "3 minutes", "4 minutes", "5 minutes", "10 minutes", "15 minutes", "30 minutes", "1 hour", "6 hours", "12 hours", "18 hours", "24 hours"], defaultValue: "5 minutes", displayDuringSetup: true
-            input "tempChangeAmount", "number", title: "<b>Temperature Change Amount (Tenths of a degree)?</b>", range: "1..70", description: "<br><i>The tenths of degrees the temperature must change to induce an automatic report.</i><br>", defaultValue: 2, required: false
-            input "humidChangeAmount", "number", title: "<b>Humidity Change Amount (%)?</b>", range: "1..100", description: "<br><i>The percentage the humidity must change to induce an automatic report.</i><br>", defaultValue: 10, required: false
-            input "luxChangeAmount", "number", title: "<b>Luminance Change Amount (LUX)?</b>", range: "-1000..1000", description: "<br><i>The amount of LUX the luminance must change to induce an automatic report.</i><br>", defaultValue: 100, required: false
+            input "tempChangeAmount", "number", title: "<b>Temperature Change Amount</b>",
+                                      description: "<br><i>Send a report immediately when temperature changes by this many <b>tenths of a degree</b> (e.g. 2 = 0.2°). Smaller = more frequent updates. <b>Battery-powered devices ignore this</b> and only report on the interval above. Default: 2 (0.2°).</i><br>",
+                                      range: "1..70", defaultValue: 2, required: false
+            input "humidChangeAmount", "number", title: "<b>Humidity Change Amount (%)</b>",
+                                      description: "<br><i>Send a report when humidity changes by this percentage. Smaller = more reports. Battery devices ignore this. Default: 10%.</i><br>",
+                                      range: "1..100", defaultValue: 10, required: false
+            input "luxChangeAmount", "number", title: "<b>Luminance Change Amount (LUX)</b>",
+                                      description: "<br><i>Send a report when light level changes by this many lux (e.g. lights turn on/off, sun comes out). Smaller = more reports. Battery devices ignore this. Default: 100.</i><br>",
+                                      range: "-1000..1000", defaultValue: 100, required: false
         }
 
         section("Temperature scale") {
             input "tempScalePref", "enum", title: "<b>Temperature Scale</b>",
-                                      description: "<br><i>Override the hub's temperature scale for this device. \"Use hub setting\" follows the global Hubitat scale (the default).</i><br>",
+                                      description: "<br><i>Override the hub's temperature scale just for this device. <b>Use hub setting</b> follows the global Hubitat scale (under Settings → Location). Pick Celsius or Fahrenheit to force this one sensor regardless of the hub's setting. Default: Use hub setting.</i><br>",
                                       options: ["hub":"Use hub setting", "C":"Celsius", "F":"Fahrenheit"], defaultValue: "hub", displayDuringSetup: true
         }
 
         section("Calibration settings") {
-            input "tempOffset", "number", title: "<b>Temperature Offset?</b>", range: "-127..128", description: "<br><i> -128 to +127 (Tenths of a degree)<br>If your temperature is inaccurate this will offset/adjust it by this many tenths of a degree.</i><br>", defaultValue: 0, required: false, displayDuringSetup: true
-            input "humidOffset", "number", title: "<b>Humidity Offset/Adjustment -50 to +50 in percent?</b>", range: "-50..50", description: "<br><i>If your humidity is inaccurate this will offset/adjust it by this percent.</i><br>", defaultValue: 0, required: false, displayDuringSetup: true
-            input "luxOffset", "number", title: "<b>Luminance Offset/Adjustment -10 to +10 in LUX?</b>", range: "-10..10", description: "<br><i>If your luminance is inaccurate this will offset/adjust it by this percent.</i><br>", defaultValue: 0, required: false, displayDuringSetup: true
+            input "tempOffset", "number", title: "<b>Temperature Offset</b>",
+                                      description: "<br><i>Add this many <b>tenths of a degree</b> to the raw reading to correct a sensor that reads too high or too low (e.g. 5 = +0.5°, -5 = -0.5°). Compare to a known-good thermometer and enter the difference. Range: -128 to +127. Default: 0 (no correction).</i><br>",
+                                      range: "-127..128", defaultValue: 0, required: false, displayDuringSetup: true
+            input "humidOffset", "number", title: "<b>Humidity Offset (%)</b>",
+                                      description: "<br><i>Add this many percent to the raw humidity reading to correct miscalibration (e.g. 5 = +5%). Range: -50 to +50. Default: 0 (no correction).</i><br>",
+                                      range: "-50..50", defaultValue: 0, required: false, displayDuringSetup: true
+            input "luxOffset", "number", title: "<b>Luminance Offset (LUX)</b>",
+                                      description: "<br><i>Add this many lux to the raw light reading to correct miscalibration. Range: -10 to +10. Default: 0 (no correction).</i><br>",
+                                      range: "-10..10", defaultValue: 0, required: false, displayDuringSetup: true
         }
 
-        input "ledOptions", "enum", title: "<b>LED Options</b>",
-                                      options: [0:"Fully Enabled", 1:"Fully Disabled", 2:"Disable When Motion (Aeon v1.10 only)"], defaultValue: "0", displayDuringSetup: true
-        input name: "selectiveReporting", type: "bool", title: "<b>Enable Selective Reporting?</b>", defaultValue: false
-        input "autoInactive", "enum", title: "<b>Auto Inactive</b>", description: "<br><i>Choose to automatically turn off Motion (inactive) after a period of time.</i><br>", 
+        section("Device behaviour") {
+            input "ledOptions", "enum", title: "<b>LED Indicator</b>",
+                                      description: "<br><i>Controls the sensor's onboard LED. <b>Fully Enabled</b>: blinks on motion and wake-up (default). <b>Fully Disabled</b>: silent — recommended for bedrooms and dark rooms. <b>Disable When Motion</b>: only available on Aeon firmware v1.10+.</i><br>",
+                                      options: [0:"Fully Enabled", 1:"Fully Disabled", 2:"Disable When Motion (Aeon v1.10+ only)"], defaultValue: "0", displayDuringSetup: true
+            input name: "selectiveReporting", type: "bool", title: "<b>Enable Selective Reporting</b>",
+                                      description: "<br><i>When ON: the sensor only sends reports when readings cross the change thresholds above (saves Z-Wave traffic, reduces dashboard updates). When OFF: the sensor reports on every interval regardless of change. <b>Battery-powered sensors ignore this</b> — they always report on interval. Default: OFF.</i><br>",
+                                      defaultValue: false
+            input "autoInactive", "enum", title: "<b>Auto Inactive (driver-side timeout)</b>",
+                                      description: "<br><i>Workaround for the rare case where the sensor's \"no motion\" message gets lost. Forces the motion state to inactive after this much time has passed since the last motion event. Leave on <b>Disable</b> unless your motion is sticking ON. Default: Disable.</i><br>",
                                       options: [0:"Disable",  2:"2 minutes", 5:"5 minutes", 10:"10 minutes", 20:"20 minutes", 40:"40 minutes", 60: "1 hour"], defaultValue: "0", displayDuringSetup: true
+        }
 
-        input name: "debugOutput",   type: "bool", title: "<b>Enable debug logging?</b>",   description: "<br>", defaultValue: true
-        input name: "descTextEnable", type: "bool", title: "<b>Enable descriptionText logging?</b>", defaultValue: true
+        section("Logging") {
+            input name: "debugOutput", type: "bool", title: "<b>Enable debug logging</b>",
+                                      description: "<br><i>Logs every Z-Wave message and decision for troubleshooting. <b>Auto-turns off after 30 minutes</b> so you don't fill the log forever. Leave OFF in normal use.</i><br>",
+                                      defaultValue: true
+            input name: "descTextEnable", type: "bool", title: "<b>Enable description text logging</b>",
+                                      description: "<br><i>Logs human-readable status messages (e.g. \"Temperature is 22.1°C\", \"Motion is active\") to the Logs page. Useful for casual monitoring. Default: ON.</i><br>",
+                                      defaultValue: true
+        }
     }
 }
 
@@ -266,7 +309,6 @@ void installed()
 def initialize() {
 	if (settings.ledOptions == null) settings.ledOptions = 0 // default to Full
 	state.firmware = state.firmware ?: 0.0d
-	state.Copyright = "${thisCopyright} -- ${version()}"
 	// Seed ultravioletIndex so the attribute renders on the device card before the first sensor report arrives.
 	if (device.currentValue("ultravioletIndex") == null) {
 		sendEvent(name: "ultravioletIndex", value: 0, descriptionText: "${device.displayName} ultraviolet index initialized to 0")
@@ -495,6 +537,10 @@ def zwaveEvent(hubitat.zwave.commands.versionv1.VersionReport cmd) {
 	if (cmd.firmware0Version) {
 	    BigDecimal fw = cmd.firmware0Version + (cmd.firmware0SubVersion/100)
 	    state.firmware = fw
+	    // Publish to the `firmware` attribute so the current firmware version is visible
+	    // under Current States on the device page (previously it lived only in state).
+	    sendEvent(name: "firmware", value: fw, descriptionText: "${device.displayName} firmware is ${String.format('%1.2f', fw)}")
+	    updateDataValue("firmwareVersion", String.format('%1.2f', fw))
 	}
 	if (debugOutput) log.debug "---VERSION REPORT V1--- ${device.displayName} is running firmware version: ${String.format("%1.2f",state.firmware)}, Z-Wave version: ${cmd.zWaveProtocolVersion}.${cmd.zWaveProtocolSubVersion}"
 	if(state.firmware < 1.10)
@@ -785,7 +831,7 @@ private dbCleanUp() {
 //	state.remove("Version")
 //	state.remove("sensorTemp")
 //	state.remove("author")
-//	state.remove("Copyright")
+	state.remove("Copyright")  // scrub legacy state.Copyright (removed in v2.1.3)
 	state.remove("verUpdate")
 	state.remove("verStatus")
 	state.remove("Type")
@@ -826,4 +872,3 @@ List<String> getParameterReport(param = null){
 }	
 
 
-String getThisCopyright(){"&copy; 2019 C Steele "}
