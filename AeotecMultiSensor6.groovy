@@ -13,6 +13,17 @@
  *  for the specific language governing permissions and limitations under the License.
  *
  *
+ *         v2.1.2   Add per-device temperature scale preference (Use hub / Celsius
+ *                    / Fahrenheit) so the device's scale can be overridden
+ *                    without changing the hub-wide setting.
+ *                    Fix Aeotec parameter 64 byte mapping (was 1=C/2=F, spec is
+ *                    0=C/1=F). The wrong byte was also used in parameters 41 and
+ *                    201, so the device was misconfigured for everyone — usually
+ *                    fell back to its Fahrenheit default regardless of hub setting.
+ *                    Parser now manually converts when the preferred scale
+ *                    differs from the hub scale (convertTemperatureIfNeeded only
+ *                    targets the hub scale).
+ *
  *         v2.1.1   Fix UltravioletIndex never reporting: lower bound was 1 so UV=0
  *                    (indoor sensors, nighttime) was silently dropped and the
  *                    ultravioletIndex attribute never populated. Lower bound 0,
@@ -111,7 +122,7 @@
    15. support for celsius added. set in input options.
 */
 
- public static String version()      {  return "v2.1.1"  }
+ public static String version()      {  return "v2.1.2"  }
  import groovy.transform.Field
 
 metadata {
@@ -153,6 +164,12 @@ metadata {
             input "tempChangeAmount", "number", title: "<b>Temperature Change Amount (Tenths of a degree)?</b>", range: "1..70", description: "<br><i>The tenths of degrees the temperature must change to induce an automatic report.</i><br>", defaultValue: 2, required: false
             input "humidChangeAmount", "number", title: "<b>Humidity Change Amount (%)?</b>", range: "1..100", description: "<br><i>The percentage the humidity must change to induce an automatic report.</i><br>", defaultValue: 10, required: false
             input "luxChangeAmount", "number", title: "<b>Luminance Change Amount (LUX)?</b>", range: "-1000..1000", description: "<br><i>The amount of LUX the luminance must change to induce an automatic report.</i><br>", defaultValue: 100, required: false
+        }
+
+        section("Temperature scale") {
+            input "tempScalePref", "enum", title: "<b>Temperature Scale</b>",
+                                      description: "<br><i>Override the hub's temperature scale for this device. \"Use hub setting\" follows the global Hubitat scale (the default).</i><br>",
+                                      options: ["hub":"Use hub setting", "C":"Celsius", "F":"Fahrenheit"], defaultValue: "hub", displayDuringSetup: true
         }
 
         section("Calibration settings") {
@@ -338,11 +355,19 @@ def zwaveEvent(hubitat.zwave.commands.sensormultilevelv5.SensorMultilevelReport 
 	        if (debugOutput) log.debug "raw temp = $cmd.scaledSensorValue"
 	        if (cmd.scale == 1) { if ((cmd.scaledSensorValue > LIMIT_VALUES.tempF.upper) || (cmd.scaledSensorValue < LIMIT_VALUES.tempF.lower)) { return } }
 	        if (cmd.scale == 0) { if ((cmd.scaledSensorValue > LIMIT_VALUES.tempC.upper) || (cmd.scaledSensorValue < LIMIT_VALUES.tempC.lower)) { return } }
-	        // Convert temperature (if needed) to the system's configured temperature scale
-	        map.value = convertTemperatureIfNeeded(cmd.scaledSensorValue, cmd.scale == 1 ? "F" : "C", cmd.precision)
-	        if (debugOutput) log.debug "finalval = $map.value"
+	        // Convert to the user's preferred scale (per-device override, falling back to hub scale).
+	        // convertTemperatureIfNeeded only targets the hub scale, so do the math directly when
+	        // the user picked a per-device override that differs from the hub.
+	        String rawScale = (cmd.scale == 1 ? "F" : "C")
+	        String targetScale = getEffectiveTempScale()
+	        BigDecimal tempVal = cmd.scaledSensorValue as BigDecimal
+	        if (rawScale != targetScale) {
+	            tempVal = (targetScale == "C") ? ((tempVal - 32) * 5.0 / 9.0) : (tempVal * 9.0 / 5.0 + 32)
+	        }
+	        map.value = roundIt(tempVal, (cmd.precision ?: 1) as int)
+	        if (debugOutput) log.debug "finalval = $map.value (scale=$targetScale, from $rawScale)"
 
-	        map.unit = "\u00b0" + getTemperatureScale()
+	        map.unit = "\u00b0" + targetScale
 	        map.name = "temperature"
 	        map.descriptionText = "${device.displayName} temperature is ${map.value}${map.unit}"
 	        if (descTextEnable) log.info "Temperature is ${map.value}${map.unit}"
@@ -554,10 +579,13 @@ def configure(ccc) {
 	if (debugOutput) log.debug "wake time reset to $waketime"
 	if (debugOutput) log.debug "Current firmware: ${sprintf ("%1.2f", state.firmware)}"
 
-	// Retrieve local temperature scale: "C" = Celsius, "F" = Fahrenheit
-	// Convert to a value of 1 or 2 as used by the device to select the scale
-	if (debugOutput) log.debug "Location temperature scale: ${location.getTemperatureScale()}"
-	byte tempScaleByte = (location.getTemperatureScale() == "C" ? 1 : 2)
+	// Resolve effective temperature scale (per-device preference, falling back to hub scale).
+	// Aeotec MultiSensor 6 parameter 64 spec: 0 = Celsius, 1 = Fahrenheit.
+	// (Pre-v2.1.2 used 1/2, which sent the wrong scale to the device — device usually
+	// ignored the value and defaulted to Fahrenheit.)
+	String effectiveScale = getEffectiveTempScale()
+	if (debugOutput) log.debug "Hub temperature scale: ${location.getTemperatureScale()}; effective for this device: ${effectiveScale}"
+	byte tempScaleByte = (effectiveScale == "C" ? 0 : 1)
 	selectiveReport = selectiveReporting ? 1 : 0
 
 	def request = [
@@ -664,6 +692,19 @@ def motionEvent(value, by) {
 def motionInactivate() {
 	if (descTextEnable) log.info "Motion is inactive by Time Out"
 	sendEvent(name: "motion", value: "inactive", descriptionText: "${device.displayName} motion is inactive by Time Out")
+}
+
+
+/*
+	getEffectiveTempScale
+
+	Per-device temperature scale: "C" or "F". Respects the user's tempScalePref
+	override; falls back to the hub's location scale when set to "hub" (default).
+*/
+String getEffectiveTempScale() {
+	def pref = settings?.tempScalePref ?: "hub"
+	if (pref == "C" || pref == "F") return pref
+	return location.getTemperatureScale()
 }
 
 
