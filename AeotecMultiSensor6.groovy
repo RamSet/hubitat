@@ -1,5 +1,5 @@
 /*
- * IMPORT URL: https://raw.githubusercontent.com/HubitatCommunity/AeotecMultiSensor6/master/AeotecMultisensor6.groovy
+ * IMPORT URL: http://10.33.47.84/RamSet/hubitat/raw/branch/main/AeotecMultiSensor6.groovy
  *
  *  Copyright 2015 SmartThings
  *
@@ -138,7 +138,7 @@
  import groovy.transform.Field
 
 metadata {
-    definition (name: "AeotecMultiSensor6", namespace: "cSteele", author: "cSteele", importUrl: "https://raw.githubusercontent.com/HubitatCommunity/AeotecMultiSensor6/master/AeotecMultisensor6.groovy") {
+    definition (name: "AeotecMultiSensor6", namespace: "cSteele", author: "cSteele", importUrl: "http://10.33.47.84/RamSet/hubitat/raw/branch/main/AeotecMultiSensor6.groovy") {
         capability "Motion Sensor"
         capability "Temperature Measurement"
         capability "Relative Humidity Measurement"
