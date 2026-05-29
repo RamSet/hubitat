@@ -13,6 +13,11 @@
  *  for the specific language governing permissions and limitations under the License.
  *
  *
+ *         v2.1.4   De-duplicate firmware: drop the state.firmware State Variable
+ *                    (the `firmware` attribute under Current States is now the
+ *                    single source of truth). Existing installs are scrubbed on
+ *                    next Save Preferences via dbCleanUp.
+ *
  *         v2.1.3   Cleanup pass:
  *                    - Hide debug commands (setParameter, getParameterReport) from
  *                      the device UI so the command buttons aren't cluttered for
@@ -134,7 +139,7 @@
    15. support for celsius added. set in input options.
 */
 
- public static String version()      {  return "v2.1.3"  }
+ public static String version()      {  return "v2.1.4"  }
  import groovy.transform.Field
 
 metadata {
@@ -308,7 +313,6 @@ void installed()
 */
 def initialize() {
 	if (settings.ledOptions == null) settings.ledOptions = 0 // default to Full
-	state.firmware = state.firmware ?: 0.0d
 	// Seed ultravioletIndex so the attribute renders on the device card before the first sensor report arrives.
 	if (device.currentValue("ultravioletIndex") == null) {
 		sendEvent(name: "ultravioletIndex", value: 0, descriptionText: "${device.displayName} ultraviolet index initialized to 0")
@@ -533,18 +537,16 @@ def zwaveEvent(hubitat.zwave.commands.versionv1.VersionCommandClassReport cmd) {
 
 def zwaveEvent(hubitat.zwave.commands.versionv1.VersionReport cmd) {
 	if (debugOutput) log.debug "in version report"
-	// SubVersion is in 1/100ths so that 1.01 < 1.08 < 1.10, etc.//    state.firmware = 0.0d
+	// SubVersion is in 1/100ths so that 1.01 < 1.08 < 1.10, etc.
 	if (cmd.firmware0Version) {
 	    BigDecimal fw = cmd.firmware0Version + (cmd.firmware0SubVersion/100)
-	    state.firmware = fw
-	    // Publish to the `firmware` attribute so the current firmware version is visible
-	    // under Current States on the device page (previously it lived only in state).
+	    // Publish to the `firmware` attribute (Current States) — single source of truth.
 	    sendEvent(name: "firmware", value: fw, descriptionText: "${device.displayName} firmware is ${String.format('%1.2f', fw)}")
 	    updateDataValue("firmwareVersion", String.format('%1.2f', fw))
+	    if (debugOutput) log.debug "---VERSION REPORT V1--- ${device.displayName} is running firmware version: ${String.format("%1.2f",fw)}, Z-Wave version: ${cmd.zWaveProtocolVersion}.${cmd.zWaveProtocolSubVersion}"
+	    if (fw < 1.10)
+	        log.warn "--- WARNING: Device handler expects devices to have firmware 1.10 or later"
 	}
-	if (debugOutput) log.debug "---VERSION REPORT V1--- ${device.displayName} is running firmware version: ${String.format("%1.2f",state.firmware)}, Z-Wave version: ${cmd.zWaveProtocolVersion}.${cmd.zWaveProtocolSubVersion}"
-	if(state.firmware < 1.10)
-	    log.warn "--- WARNING: Device handler expects devices to have firmware 1.10 or later"
 }
 
 
@@ -623,7 +625,7 @@ def configure(ccc) {
 	else waketime = 300
 
 	if (debugOutput) log.debug "wake time reset to $waketime"
-	if (debugOutput) log.debug "Current firmware: ${sprintf ("%1.2f", state.firmware)}"
+	if (debugOutput) log.debug "Current firmware: ${device.currentValue('firmware') ?: 'unknown'}"
 
 	// Resolve effective temperature scale (per-device preference, falling back to hub scale).
 	// Aeotec MultiSensor 6 parameter 64 spec: 0 = Celsius, 1 = Fahrenheit.
@@ -832,6 +834,7 @@ private dbCleanUp() {
 //	state.remove("sensorTemp")
 //	state.remove("author")
 	state.remove("Copyright")  // scrub legacy state.Copyright (removed in v2.1.3)
+	state.remove("firmware")   // scrub legacy state.firmware (replaced by `firmware` attribute in v2.1.4)
 	state.remove("verUpdate")
 	state.remove("verStatus")
 	state.remove("Type")
