@@ -62,9 +62,9 @@ definition(
     importUrl: "https://raw.githubusercontent.com/RamSet/hubitat/main/spruce-scheduler.groovy",
     description: "Setup schedules for Spruce irrigation controller",
     category: "Green Living",
-    iconUrl: "http://www.plaidsystems.com/smartthings/st_spruce_leaf_250f.png",
-    iconX2Url: "http://www.plaidsystems.com/smartthings/st_spruce_leaf_250f.png",
-    iconX3Url: "http://www.plaidsystems.com/smartthings/st_spruce_leaf_250f.png",
+    iconUrl: "",
+    iconX2Url: "",
+    iconX3Url: "",
     pausable: true
 )
 
@@ -107,28 +107,28 @@ def startPage(){
     {
         section(''){
             href(name: 'globalPage', title: 'Schedule settings', required: false, page: 'globalPage',
-                image: 'http://www.plaidsystems.com/smartthings/st_settings.png',
+                image: '',
                 description: "Schedule: ${enableString()}\nWatering Time: ${startTimeString()}\nDays:${daysString()}\nNotifications:${notifyString()}"
             )
         }
 
         section(''){
             href(name: 'weatherPage', title: 'Weather Settings', required: false, page: 'weatherPage',
-                image: 'http://www.plaidsystems.com/smartthings/st_rain_225_r.png',
+                image: '',
                 description: "Weather from: ${zipString()}\nRain Delay: ${isRainString()}\nSeasonal Adjust: ${seasonalAdjString()}"
             )
         }
 
         section(''){
             href(name: 'zonePage', title: 'Zone summary and setup', required: false, page: 'zonePage',
-                image: 'http://www.plaidsystems.com/smartthings/st_zone16_225.png',
+                image: '',
                 description: "${getZoneSummary()}"
             )
         }
 
         section(''){
             href(name: 'delayPage', title: 'Valve delays & Pause controls', required: false, page: 'delayPage',
-                image: 'http://www.plaidsystems.com/smartthings/st_timer.png',
+                image: '',
                 description: "Valve Delay: ${pumpDelayString()} s\n${waterStoppersString()}\nSchedule Sync: ${syncString()}"
             )
         }
@@ -138,7 +138,7 @@ def startPage(){
                   description: 'Explore our knowledge base for more information on Spruce and Spruce sensors.  Contact form is ' +
                              'also available here.',
                 required: false, style:'embedded',
-                image: 'http://www.plaidsystems.com/smartthings/st_spruce_leaf_250f.png',
+                image: '',
                 url: 'http://support.spruceirrigation.com'
             )
         }
@@ -162,7 +162,7 @@ def globalPage() {
             input 'enable', 'bool', title: 'Enable watering:', defaultValue: 'true', metadata: [values: ['true', 'false']]
             input 'enableManual', 'bool', title: 'Enable this schedule for manual start, only 1 schedule should be enabled for manual start at a time!', defaultValue: 'true', metadata: [values: ['true', 'false']]
             input 'startTime', 'time', title: 'Watering start time', required: true
-            paragraph(image: 'http://www.plaidsystems.com/smartthings/st_calander.png',
+            paragraph(image: '',
                       title: 'Selecting watering days',
                       'Selecting watering days is optional. Spruce will optimize your watering schedule automatically. ' +
                       'If your area has water restrictions or you prefer set days, select the days to meet your requirements. ')
@@ -183,7 +183,7 @@ def weatherPage() {
     dynamicPage(name: 'weatherPage', title: 'Weather settings') {
        section("Location to get weather forecast and conditions:") {
             input(name: 'zipcode', type: 'text', title: "Zipcode default location: ${getDefaultLocation()}", required: false, submitOnChange: true)
-           	input "weatherDevice", "capability.relativeHumidityMeasurement", title: "Weather Device (ie darksky or openweather) to get rain forecase from?", required: false
+           	input "weatherDevice", "capability.relativeHumidityMeasurement", title: "Weather Device (e.g. OpenWeatherMap or similar) to get rain forecast from", required: false
 
             input 'isRain', 'bool', title: 'Enable Rain check:', metadata: [values: ['true', 'false']]
             input 'rainDelay', 'decimal', title: 'inches of rain that will delay watering, default: 0.2', required: false
@@ -315,7 +315,7 @@ private String pumpDelayString(){
 def delayPage() {
     dynamicPage(name: 'delayPage', title: 'Additional Options') {
         section(''){
-            paragraph image: 'http://www.plaidsystems.com/smartthings/st_timer.png',
+            paragraph image: '',
                       title: 'Pump and Master valve delay',
                       required: false,
                       'Setting a delay is optional, default is 0.  If you have a pump that feeds water directly into your valves, ' +
@@ -325,7 +325,7 @@ def delayPage() {
         }
 
         section(''){
-            paragraph(image: 'http://www.plaidsystems.com/smartthings/st_pause.png',
+            paragraph(image: '',
                       title: 'Pause Control Contacts & Switches',
                       required: false,
                       'Selecting contacts or control switches is optional. When a selected contact sensor is opened or switch is ' +
@@ -347,7 +347,7 @@ def delayPage() {
         }
 
         section(''){
-            paragraph image: 'http://www.plaidsystems.com/smartthings/st_spruce_controller_250.png',
+            paragraph image: '',
                            title: 'Controller Sync',
                           required: false,
                           'For multiple controllers only.  This schedule will wait for the selected controller to finish before ' +
@@ -363,7 +363,7 @@ def zonePage() {
             href(name: 'hrefWithImage', title: 'Zone configuration', page: 'zoneSettingsPage',
              description: "${zoneString()}",
              required: false,
-             image: 'http://www.plaidsystems.com/smartthings/st_spruce_leaf_250f.png')
+             image: '')
         }
 
         if (zoneActive('1')){
@@ -505,7 +505,7 @@ def zoneSettingsPage() {
           //  input 'zoneNumberEnum', 'enum', title: 'Select zones to configure', multiple: true,    metadata: [values: ['1','2','3','4','5','6','7','8','9','10','11','12','13','14','15','16']]
              input 'zoneNumberEnum', 'enum', title: 'Select zones to configure', multiple: true,   options: ['1','2','3','4','5','6','7','8','9','10','11','12','13','14','15','16']
            input 'gain', 'number', title: 'Increase or decrease all water times by this %, enter a negative or positive value, Default: 0', required: false, range: '-99..99'
-            paragraph image: 'http://www.plaidsystems.com/smartthings/st_sensor_200_r.png',
+            paragraph image: '',
                           title: 'Moisture sensor adapt mode',
                           'Adaptive mode enabled: Watering times will be adjusted based on the assigned moisture sensor.\n\nAdaptive mode ' +
                           'disabled (Delay): Zones with moisture sensors will water on any available days when the low moisture setpoint has ' +
@@ -518,7 +518,7 @@ def zoneSettingsPage() {
 def zoneSetPage() {
     dynamicPage(name: 'zoneSetPage', title: "Zone ${state.app} Setup") {
         section(''){
-            paragraph image: "http://www.plaidsystems.com/smartthings/st_${state.app}.png",
+            paragraph image: "",
             title: 'Current Settings',
             "${display("${state.app}")}"
             input "name${state.app}", 'text', title: 'Zone name?', required: false, defaultValue: "Zone ${state.app}"
@@ -549,7 +549,7 @@ def zoneSetPage() {
             }
         
         section(''){
-            paragraph image: 'http://www.plaidsystems.com/smartthings/st_sensor_200_r.png',
+            paragraph image: '',
                       title: 'Moisture sensor settings',
                       'Select a soil moisture sensor to monitor and control watering.  The soil moisture target value is set to a default value but can be adjusted to tune watering'
             input "sensor${state.app}", 'capability.relativeHumidityMeasurement', title: 'Select moisture sensor?', required: false, multiple: false
@@ -557,7 +557,7 @@ def zoneSetPage() {
         }
 
         section(''){
-            paragraph image: 'http://www.plaidsystems.com/smartthings/st_timer.png',
+            paragraph image: '',
                       title: 'Optional: Enter total watering time per week',
                       'This value will replace the calculated time from other settings'
                 input "minWeek${state.app}", 'number', title: 'Water time per week.\nDefault: 0 = autoadjust', description: 'minutes per week', required: false
@@ -585,37 +585,37 @@ private String setString(String type) {
 def plantSetPage() {
     dynamicPage(name: 'plantSetPage', title: "${settings["name${state.app}"]} Landscape Select") {
         section(''){
-            paragraph image: 'http://www.plaidsystems.com/img/st_${state.app}.png',
+            paragraph image: '',
                 title: "${settings["name${state.app}"]}",
                 "Current settings ${display("${state.app}")}"
             //input "plant${state.app}", "enum", title: "Landscape", multiple: false, required: false, submitOnChange: true,options: [values: ['Lawn', 'Garden', 'Flowers', 'Shrubs', 'Trees', 'Xeriscape', 'New Plants']
         }
         section(''){
-            paragraph image: 'http://www.plaidsystems.com/smartthings/st_lawn_200_r.png',
+            paragraph image: '',
             title: 'Lawn',
             'Select Lawn for typical grass applications'
 
-            paragraph image: 'http://www.plaidsystems.com/smartthings/st_garden_225_r.png',
+            paragraph image: '',
             title: 'Garden',
             'Select Garden for vegetable gardens'
 
-            paragraph image: 'http://www.plaidsystems.com/smartthings/st_flowers_225_r.png',
+            paragraph image: '',
             title: 'Flowers',
             'Select Flowers for beds with smaller seasonal plants'
 
-            paragraph image: 'http://www.plaidsystems.com/smartthings/st_shrubs_225_r.png',
+            paragraph image: '',
             title: 'Shrubs',
             'Select Shrubs for beds with larger established plants'
 
-            paragraph image: 'http://www.plaidsystems.com/smartthings/st_trees_225_r.png',
+            paragraph image: '',
             title: 'Trees',
             'Select Trees for deep rooted areas without other plants'
 
-            paragraph image: 'http://www.plaidsystems.com/smartthings/st_xeriscape_225_r.png',
+            paragraph image: '',
             title: 'Xeriscape',
             'Reduces water for native or drought tolorent plants'
 
-            paragraph image: 'http://www.plaidsystems.com/smartthings/st_newplants_225_r.png',
+            paragraph image: '',
             title: 'New Plants',
             'Increases watering time per week and reduces automatic adjustments to help establish new plants. No weekly seasonal adjustment and moisture setpoint set to 40.'
         }
@@ -625,29 +625,29 @@ def plantSetPage() {
 def sprinklerSetPage(){
     dynamicPage(name: 'sprinklerSetPage', title: "${settings["name${state.app}"]} Sprinkler Select") {
         section(''){
-            paragraph image: "http://www.plaidsystems.com/img/st_${state.app}.png",
+            paragraph image: "",
             title: "${settings["name${state.app}"]}",
             "Current settings ${display("${state.app}")}"
             //input "zone${state.app}", "enum", title: "Sprinkler Type", multiple: false, required: false, defaultValue: 'Off', options: [values: ['Off', 'Spray', 'Rotor', 'Drip', 'Master Valve', 'Pump']
             }
         section(''){
-            paragraph image: 'http://www.plaidsystems.com/smartthings/st_spray_225_r.png',
+            paragraph image: '',
             title: 'Spray',
             'Spray sprinkler heads spray a fan of water over the lawn. The water is applied evenly and can be turned on for a shorter duration of time.'
 
-            paragraph image: 'http://www.plaidsystems.com/smartthings/st_rotor_225_r.png',
+            paragraph image: '',
             title: 'Rotor',
             'Rotor sprinkler heads rotate, spraying a stream over the lawn.  Because they move back and forth across the lawn, they require a longer water period.'
 
-            paragraph image: 'http://www.plaidsystems.com/smartthings/st_drip_225_r.png',
+            paragraph image: '',
             title: 'Drip',
             'Drip lines or low flow emitters water slowely to minimize evaporation, because they are low flow, they require longer watering periods.'
 
-            paragraph image: 'http://www.plaidsystems.com/smartthings/st_master_225_r.png',
+            paragraph image: '',
             title: 'Master',
             'Master valves will open before watering begins.  Set the delay between master opening and watering in delay settings.'
 
-            paragraph image: 'http://www.plaidsystems.com/smartthings/st_pump_225_r.png',
+            paragraph image: '',
             title: 'Pump',
             'Attach a pump relay to this zone and the pump will turn on before watering begins.  Set the delay between pump start and watering in delay settings.'
         }
@@ -657,33 +657,33 @@ def sprinklerSetPage(){
 def optionSetPage(){
     dynamicPage(name: 'optionSetPage', title: "${settings["name${state.app}"]} Options") {
         section(''){
-            paragraph image: "http://www.plaidsystems.com/img/st_${state.app}.png",
+            paragraph image: "",
             title: "${settings["name${state.app}"]}",
             "Current settings ${display("${state.app}")}"
             //input "option${state.app}", "enum", title: "Options", multiple: false, required: false, defaultValue: 'Cycle 2x', options: ['Slope', 'Sand', 'Clay', 'No Cycle', 'Cycle 2x', 'Cycle 3x']
         }
         section(''){
-            paragraph image: 'http://www.plaidsystems.com/smartthings/st_slope_225_r.png',
+            paragraph image: '',
             title: 'Slope',
             'Slope sets the sprinklers to cycle 3x, each with a short duration to minimize runoff'
 
-            paragraph image: 'http://www.plaidsystems.com/smartthings/st_sand_225_r.png',
+            paragraph image: '',
             title: 'Sand',
             'Sandy soil drains quickly and requires more frequent but shorter intervals of water'
 
-            paragraph image: 'http://www.plaidsystems.com/smartthings/st_clay_225_r.png',
+            paragraph image: '',
             title: 'Clay',
             'Clay sets the sprinklers to cycle 2x, each with a short duration to maximize absorption'
 
-            paragraph image: 'http://www.plaidsystems.com/smartthings/st_cycle1x_225_r.png',
+            paragraph image: '',
             title: 'No Cycle',
             'The sprinklers will run for 1 long duration'
 
-            paragraph image: 'http://www.plaidsystems.com/smartthings/st_cycle2x_225_r.png',
+            paragraph image: '',
             title: 'Cycle 2x',
             'Cycle 2x will break the water period up into 2 shorter cycles to help minimize runoff and maximize adsorption'
 
-            paragraph image: 'http://www.plaidsystems.com/smartthings/st_cycle3x_225_r.png',
+            paragraph image: '',
             title: 'Cycle 3x',
             'Cycle 3x will break the water period up into 3 shorter cycles to help minimize runoff and maximize adsorption'
         }
@@ -760,9 +760,9 @@ private String getimage(String image){
     if (image.isNumber()) {
         String zoneStr = settings."zone${image}"
         if (zoneStr) {
-            if (zoneStr == 'Off')             return 'http://www.plaidsystems.com/smartthings/off2.png'
-            if (zoneStr == 'Master Valve')     return 'http://www.plaidsystems.com/smartthings/master.png'
-            if (zoneStr == 'Pump')             return 'http://www.plaidsystems.com/smartthings/pump.png'
+            if (zoneStr == 'Off')             return ''
+            if (zoneStr == 'Master Valve')     return ''
+            if (zoneStr == 'Pump')             return ''
 
             if (settings."plant${image}") imageStr = settings."plant${image}"        // default assume asking for the plant image
         }
@@ -771,47 +771,47 @@ private String getimage(String image){
     switch (imageStr) {
         case "null":
         case null:
-            return 'http://www.plaidsystems.com/smartthings/off2.png'
+            return ''
         case 'Off':
-            return 'http://www.plaidsystems.com/smartthings/off2.png'
+            return ''
         case 'Lawn':
-            return 'http://www.plaidsystems.com/smartthings/st_lawn_200_r.png'
+            return ''
         case 'Garden':
-            return 'http://www.plaidsystems.com/smartthings/st_garden_225_r.png'
+            return ''
         case 'Flowers':
-            return 'http://www.plaidsystems.com/smartthings/st_flowers_225_r.png'
+            return ''
         case 'Shrubs':
-            return 'http://www.plaidsystems.com/smartthings/st_shrubs_225_r.png'
+            return ''
         case 'Trees':
-            return 'http://www.plaidsystems.com/smartthings/st_trees_225_r.png'
+            return ''
         case 'Xeriscape':
-            return 'http://www.plaidsystems.com/smartthings/st_xeriscape_225_r.png'
+            return ''
         case 'New Plants':
-            return 'http://www.plaidsystems.com/smartthings/st_newplants_225_r.png'
+            return ''
         case 'Spray':
-            return 'http://www.plaidsystems.com/smartthings/st_spray_225_r.png'
+            return ''
         case 'Rotor':
-            return 'http://www.plaidsystems.com/smartthings/st_rotor_225_r.png'
+            return ''
         case 'Drip':
-            return 'http://www.plaidsystems.com/smartthings/st_drip_225_r.png'
+            return ''
         case 'Master Valve':
-            return "http://www.plaidsystems.com/smartthings/st_master_225_r.png"
+            return ""
         case 'Pump':
-            return 'http://www.plaidsystems.com/smartthings/st_pump_225_r.png'
+            return ''
         case 'Slope':
-            return 'http://www.plaidsystems.com/smartthings/st_slope_225_r.png'
+            return ''
         case 'Sand':
-            return 'http://www.plaidsystems.com/smartthings/st_sand_225_r.png'
+            return ''
         case 'Clay':
-            return 'http://www.plaidsystems.com/smartthings/st_clay_225_r.png'
+            return ''
         case 'No Cycle':
-            return 'http://www.plaidsystems.com/smartthings/st_cycle1x_225_r.png'
+            return ''
         case 'Cycle 2x':
-            return 'http://www.plaidsystems.com/smartthings/st_cycle2x_225_r.png'
+            return ''
         case "Cycle 3x":
-            return 'http://www.plaidsystems.com/smartthings/st_cycle3x_225_r.png'
+            return ''
         default:
-            return 'http://www.plaidsystems.com/smartthings/off2.png'
+            return ''
     }
 }
 
@@ -2234,16 +2234,20 @@ private Map omSynthesise() {
     List relativeHumidity = []
     List daypartName = []
     int n = daily.time.size()
+    // Values stored as Strings to match the original TWC response shape that
+    // isWeather() expects (.isNumber(), .toFloat(), .toInteger() are
+    // String-only Groovy methods). Numeric values are formatted with US
+    // locale so the decimal separator is "." regardless of hub locale.
     for (int i = todayIdx; i < n; i++) {
-        Number qpfDay   = (daily.precipitation_sum && daily.precipitation_sum[i] != null) ? daily.precipitation_sum[i] : 0
-        Number popDay   = (daily.precipitation_probability_mean && daily.precipitation_probability_mean[i] != null) ? daily.precipitation_probability_mean[i] : 0
-        Number tempDay  = (daily.temperature_2m_max && daily.temperature_2m_max[i] != null) ? daily.temperature_2m_max[i] : 0
-        Integer humDay  = humByDay[daily.time[i]] ?: 0
+        String qpfStr   = String.format(Locale.US, "%.2f", ((daily.precipitation_sum            && daily.precipitation_sum[i]            != null) ? daily.precipitation_sum[i]            : 0) as float)
+        String popStr   = ((daily.precipitation_probability_mean && daily.precipitation_probability_mean[i] != null) ? daily.precipitation_probability_mean[i] : 0).toString()
+        String tempStr  = ((daily.temperature_2m_max             && daily.temperature_2m_max[i]             != null) ? Math.round((daily.temperature_2m_max[i]) as float) : 0).toString()
+        String humStr   = ((humByDay[daily.time[i]] ?: 0)).toString()
         String label    = (i == todayIdx) ? "Today" : daily.time[i]
         // Day half
-        qpf << qpfDay; precipChance << popDay; temperature << tempDay; relativeHumidity << humDay; daypartName << label
+        qpf << qpfStr; precipChance << popStr; temperature << tempStr; relativeHumidity << humStr; daypartName << label
         // Night half (duplicate day's totals)
-        qpf << qpfDay; precipChance << popDay; temperature << tempDay; relativeHumidity << humDay; daypartName << "${label} night"
+        qpf << qpfStr; precipChance << popStr; temperature << tempStr; relativeHumidity << humStr; daypartName << "${label} night"
     }
 
     // Sunrise/sunset for today, formatted to match the existing parser
@@ -2315,7 +2319,7 @@ def getRainToday() {
     }
   //  def conditionsData = getConditions()
     else {
-        note('warning', "${app.label}: Please select an openweather or darksky weather device that has a daily rain forecase", 'a')
+        note('warning', "${app.label}: Please select a weather device that exposes a daily rainToday attribute", 'a')
     }
 }
 
@@ -2361,8 +2365,10 @@ boolean isWeather(){
         //log.debug "${forecastData.daypart[0].precipChance}"
         if (forecastData.daypart[0].qpf[not_today]) qpfTodayIn = forecastData.daypart[0].qpf[not_today].toFloat()
         if (forecastData.daypart[0].precipChance[not_today]) popToday = forecastData.daypart[0].precipChance[not_today].toFloat()
-        if (forecastData.daypart[0].qpf[2]) qpfTomIn = forecastData.daypart[0].qpf[1].toFloat()
-        if (forecastData.daypart[0].precipChance[2]) popTom = forecastData.daypart[0].precipChance[1].toFloat()
+        // Tomorrow: daypart layout is [today-day, today-night, tomorrow-day, tomorrow-night, ...].
+        // Original code checked index 2 (tomorrow-day) but read index 1 (today-night) — off-by-one.
+        if (forecastData.daypart[0].qpf[2]) qpfTomIn = forecastData.daypart[0].qpf[2].toFloat()
+        if (forecastData.daypart[0].precipChance[2]) popTom = forecastData.daypart[0].precipChance[2].toFloat()
         if (qpfTodayIn > 25.0) qpfTodayIn = 25.0
         else if (qpfTodayIn < 0.0) qpfTodayIn = 0.0
         if (qpfTomIn > 25.0) qpfTomIn = 25.0
@@ -2458,9 +2464,9 @@ boolean isWeather(){
             int j = 2
             int highs = 1
             int totalHum = humToday
-            while (j < 6) {                     // get forcasted humitidty for today and the next 3 days                
+            while (j < 6) {                     // get forecasted humidity for today and the next 3 days
                 if (forecastData.daypart[0].relativeHumidity[j].isNumber()) {
-                    totalHum += forecastData.daypart[0].relativeHumidity[j]
+                    totalHum += forecastData.daypart[0].relativeHumidity[j].toInteger()
                     highs++
                 }
                 j+=2
