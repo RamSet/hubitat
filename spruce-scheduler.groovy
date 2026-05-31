@@ -7,6 +7,14 @@
  *  Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
  *  in compliance with the License. You may obtain a copy of the License at:
  *
+ *  -------v2.58 (2026-05) RamSet -----------
+ *  - Restored preference-page icons. Every paragraph/href/icon image
+ *    now points at OpenMoji (https://openmoji.org, CC-BY-SA 4.0) PNGs
+ *    served from the project's GitHub raw URL. The getimage() helper
+ *    routes by zone/plant/sprinkler/soil/cycle name to an appropriate
+ *    emoji codepoint; iconUrl in definition() uses the evergreen-tree
+ *    glyph as the app icon.
+ *
  *  -------v2.57 (2026-05) RamSet -----------
  *  - Weather provider migration: replaced the dead Hubitat getTwcLocation /
  *    getTwcConditions / getTwcForecast calls (IBM/TWC API was retired by
@@ -62,9 +70,9 @@ definition(
     importUrl: "https://raw.githubusercontent.com/RamSet/hubitat/main/spruce-scheduler.groovy",
     description: "Setup schedules for Spruce irrigation controller",
     category: "Green Living",
-    iconUrl: "",
-    iconX2Url: "",
-    iconX3Url: "",
+    iconUrl:   "https://raw.githubusercontent.com/hfg-gmuend/openmoji/master/color/618x618/1F332.png",
+    iconX2Url: "https://raw.githubusercontent.com/hfg-gmuend/openmoji/master/color/618x618/1F332.png",
+    iconX3Url: "https://raw.githubusercontent.com/hfg-gmuend/openmoji/master/color/618x618/1F332.png",
     pausable: true
 )
 
@@ -107,28 +115,28 @@ def startPage(){
     {
         section(''){
             href(name: 'globalPage', title: 'Schedule settings', required: false, page: 'globalPage',
-                image: '',
+                image: 'https://raw.githubusercontent.com/hfg-gmuend/openmoji/master/color/618x618/1F332.png',
                 description: "Schedule: ${enableString()}\nWatering Time: ${startTimeString()}\nDays:${daysString()}\nNotifications:${notifyString()}"
             )
         }
 
         section(''){
             href(name: 'weatherPage', title: 'Weather Settings', required: false, page: 'weatherPage',
-                image: '',
+                image: 'https://raw.githubusercontent.com/hfg-gmuend/openmoji/master/color/618x618/1F332.png',
                 description: "Weather from: ${zipString()}\nRain Delay: ${isRainString()}\nSeasonal Adjust: ${seasonalAdjString()}"
             )
         }
 
         section(''){
             href(name: 'zonePage', title: 'Zone summary and setup', required: false, page: 'zonePage',
-                image: '',
+                image: 'https://raw.githubusercontent.com/hfg-gmuend/openmoji/master/color/618x618/1F332.png',
                 description: "${getZoneSummary()}"
             )
         }
 
         section(''){
             href(name: 'delayPage', title: 'Valve delays & Pause controls', required: false, page: 'delayPage',
-                image: '',
+                image: 'https://raw.githubusercontent.com/hfg-gmuend/openmoji/master/color/618x618/2699.png',
                 description: "Valve Delay: ${pumpDelayString()} s\n${waterStoppersString()}\nSchedule Sync: ${syncString()}"
             )
         }
@@ -138,7 +146,7 @@ def startPage(){
                   description: 'Explore our knowledge base for more information on Spruce and Spruce sensors.  Contact form is ' +
                              'also available here.',
                 required: false, style:'embedded',
-                image: '',
+                image: 'https://raw.githubusercontent.com/hfg-gmuend/openmoji/master/color/618x618/1F327.png',
                 url: 'http://support.spruceirrigation.com'
             )
         }
@@ -162,7 +170,7 @@ def globalPage() {
             input 'enable', 'bool', title: 'Enable watering:', defaultValue: 'true', metadata: [values: ['true', 'false']]
             input 'enableManual', 'bool', title: 'Enable this schedule for manual start, only 1 schedule should be enabled for manual start at a time!', defaultValue: 'true', metadata: [values: ['true', 'false']]
             input 'startTime', 'time', title: 'Watering start time', required: true
-            paragraph(image: '',
+            paragraph(image: 'https://raw.githubusercontent.com/hfg-gmuend/openmoji/master/color/618x618/1F33F.png',
                       title: 'Selecting watering days',
                       'Selecting watering days is optional. Spruce will optimize your watering schedule automatically. ' +
                       'If your area has water restrictions or you prefer set days, select the days to meet your requirements. ')
@@ -315,7 +323,7 @@ private String pumpDelayString(){
 def delayPage() {
     dynamicPage(name: 'delayPage', title: 'Additional Options') {
         section(''){
-            paragraph image: '',
+            paragraph image: 'https://raw.githubusercontent.com/hfg-gmuend/openmoji/master/color/618x618/23F1.png',
                       title: 'Pump and Master valve delay',
                       required: false,
                       'Setting a delay is optional, default is 0.  If you have a pump that feeds water directly into your valves, ' +
@@ -325,7 +333,7 @@ def delayPage() {
         }
 
         section(''){
-            paragraph(image: '',
+            paragraph(image: 'https://raw.githubusercontent.com/hfg-gmuend/openmoji/master/color/618x618/1F332.png',
                       title: 'Pause Control Contacts & Switches',
                       required: false,
                       'Selecting contacts or control switches is optional. When a selected contact sensor is opened or switch is ' +
@@ -347,7 +355,7 @@ def delayPage() {
         }
 
         section(''){
-            paragraph image: '',
+            paragraph image: 'https://raw.githubusercontent.com/hfg-gmuend/openmoji/master/color/618x618/1F4C5.png',
                            title: 'Controller Sync',
                           required: false,
                           'For multiple controllers only.  This schedule will wait for the selected controller to finish before ' +
@@ -363,7 +371,7 @@ def zonePage() {
             href(name: 'hrefWithImage', title: 'Zone configuration', page: 'zoneSettingsPage',
              description: "${zoneString()}",
              required: false,
-             image: '')
+             image: 'https://raw.githubusercontent.com/hfg-gmuend/openmoji/master/color/618x618/23F1.png')
         }
 
         if (zoneActive('1')){
@@ -505,7 +513,7 @@ def zoneSettingsPage() {
           //  input 'zoneNumberEnum', 'enum', title: 'Select zones to configure', multiple: true,    metadata: [values: ['1','2','3','4','5','6','7','8','9','10','11','12','13','14','15','16']]
              input 'zoneNumberEnum', 'enum', title: 'Select zones to configure', multiple: true,   options: ['1','2','3','4','5','6','7','8','9','10','11','12','13','14','15','16']
            input 'gain', 'number', title: 'Increase or decrease all water times by this %, enter a negative or positive value, Default: 0', required: false, range: '-99..99'
-            paragraph image: '',
+            paragraph image: 'https://raw.githubusercontent.com/hfg-gmuend/openmoji/master/color/618x618/23F8.png',
                           title: 'Moisture sensor adapt mode',
                           'Adaptive mode enabled: Watering times will be adjusted based on the assigned moisture sensor.\n\nAdaptive mode ' +
                           'disabled (Delay): Zones with moisture sensors will water on any available days when the low moisture setpoint has ' +
@@ -518,7 +526,7 @@ def zoneSettingsPage() {
 def zoneSetPage() {
     dynamicPage(name: 'zoneSetPage', title: "Zone ${state.app} Setup") {
         section(''){
-            paragraph image: "",
+            paragraph image: 'https://raw.githubusercontent.com/hfg-gmuend/openmoji/master/color/618x618/1F39B.png',
             title: 'Current Settings',
             "${display("${state.app}")}"
             input "name${state.app}", 'text', title: 'Zone name?', required: false, defaultValue: "Zone ${state.app}"
@@ -549,7 +557,7 @@ def zoneSetPage() {
             }
         
         section(''){
-            paragraph image: '',
+            paragraph image: 'https://raw.githubusercontent.com/hfg-gmuend/openmoji/master/color/618x618/1F332.png',
                       title: 'Moisture sensor settings',
                       'Select a soil moisture sensor to monitor and control watering.  The soil moisture target value is set to a default value but can be adjusted to tune watering'
             input "sensor${state.app}", 'capability.relativeHumidityMeasurement', title: 'Select moisture sensor?', required: false, multiple: false
@@ -557,7 +565,7 @@ def zoneSetPage() {
         }
 
         section(''){
-            paragraph image: '',
+            paragraph image: 'https://raw.githubusercontent.com/hfg-gmuend/openmoji/master/color/618x618/1F4E1.png',
                       title: 'Optional: Enter total watering time per week',
                       'This value will replace the calculated time from other settings'
                 input "minWeek${state.app}", 'number', title: 'Water time per week.\nDefault: 0 = autoadjust', description: 'minutes per week', required: false
@@ -585,37 +593,37 @@ private String setString(String type) {
 def plantSetPage() {
     dynamicPage(name: 'plantSetPage', title: "${settings["name${state.app}"]} Landscape Select") {
         section(''){
-            paragraph image: '',
+            paragraph image: getimage("${state.app}"),
                 title: "${settings["name${state.app}"]}",
                 "Current settings ${display("${state.app}")}"
             //input "plant${state.app}", "enum", title: "Landscape", multiple: false, required: false, submitOnChange: true,options: [values: ['Lawn', 'Garden', 'Flowers', 'Shrubs', 'Trees', 'Xeriscape', 'New Plants']
         }
         section(''){
-            paragraph image: '',
+            paragraph image: 'https://raw.githubusercontent.com/hfg-gmuend/openmoji/master/color/618x618/1F4E1.png',
             title: 'Lawn',
             'Select Lawn for typical grass applications'
 
-            paragraph image: '',
+            paragraph image: 'https://raw.githubusercontent.com/hfg-gmuend/openmoji/master/color/618x618/23F1.png',
             title: 'Garden',
             'Select Garden for vegetable gardens'
 
-            paragraph image: '',
+            paragraph image: openmoji('1F338'),
             title: 'Flowers',
             'Select Flowers for beds with smaller seasonal plants'
 
-            paragraph image: '',
+            paragraph image: 'https://raw.githubusercontent.com/hfg-gmuend/openmoji/master/color/618x618/1F33F.png',
             title: 'Shrubs',
             'Select Shrubs for beds with larger established plants'
 
-            paragraph image: '',
+            paragraph image: 'https://raw.githubusercontent.com/hfg-gmuend/openmoji/master/color/618x618/1F96C.png',
             title: 'Trees',
             'Select Trees for deep rooted areas without other plants'
 
-            paragraph image: '',
+            paragraph image: 'https://raw.githubusercontent.com/hfg-gmuend/openmoji/master/color/618x618/1F338.png',
             title: 'Xeriscape',
             'Reduces water for native or drought tolorent plants'
 
-            paragraph image: '',
+            paragraph image: 'https://raw.githubusercontent.com/hfg-gmuend/openmoji/master/color/618x618/1F333.png',
             title: 'New Plants',
             'Increases watering time per week and reduces automatic adjustments to help establish new plants. No weekly seasonal adjustment and moisture setpoint set to 40.'
         }
@@ -625,29 +633,29 @@ def plantSetPage() {
 def sprinklerSetPage(){
     dynamicPage(name: 'sprinklerSetPage', title: "${settings["name${state.app}"]} Sprinkler Select") {
         section(''){
-            paragraph image: "",
+            paragraph image: 'https://raw.githubusercontent.com/hfg-gmuend/openmoji/master/color/618x618/1F332.png',
             title: "${settings["name${state.app}"]}",
             "Current settings ${display("${state.app}")}"
             //input "zone${state.app}", "enum", title: "Sprinkler Type", multiple: false, required: false, defaultValue: 'Off', options: [values: ['Off', 'Spray', 'Rotor', 'Drip', 'Master Valve', 'Pump']
             }
         section(''){
-            paragraph image: '',
+            paragraph image: 'https://raw.githubusercontent.com/hfg-gmuend/openmoji/master/color/618x618/1F335.png',
             title: 'Spray',
             'Spray sprinkler heads spray a fan of water over the lawn. The water is applied evenly and can be turned on for a shorter duration of time.'
 
-            paragraph image: '',
+            paragraph image: 'https://raw.githubusercontent.com/hfg-gmuend/openmoji/master/color/618x618/1F331.png',
             title: 'Rotor',
             'Rotor sprinkler heads rotate, spraying a stream over the lawn.  Because they move back and forth across the lawn, they require a longer water period.'
 
-            paragraph image: '',
+            paragraph image: openmoji('1F6B0'),
             title: 'Drip',
             'Drip lines or low flow emitters water slowely to minimize evaporation, because they are low flow, they require longer watering periods.'
 
-            paragraph image: '',
+            paragraph image: 'https://raw.githubusercontent.com/hfg-gmuend/openmoji/master/color/618x618/1F4A6.png',
             title: 'Master',
             'Master valves will open before watering begins.  Set the delay between master opening and watering in delay settings.'
 
-            paragraph image: '',
+            paragraph image: 'https://raw.githubusercontent.com/hfg-gmuend/openmoji/master/color/618x618/1F4A7.png',
             title: 'Pump',
             'Attach a pump relay to this zone and the pump will turn on before watering begins.  Set the delay between pump start and watering in delay settings.'
         }
@@ -657,33 +665,33 @@ def sprinklerSetPage(){
 def optionSetPage(){
     dynamicPage(name: 'optionSetPage', title: "${settings["name${state.app}"]} Options") {
         section(''){
-            paragraph image: "",
+            paragraph image: 'https://raw.githubusercontent.com/hfg-gmuend/openmoji/master/color/618x618/1F6B0.png',
             title: "${settings["name${state.app}"]}",
             "Current settings ${display("${state.app}")}"
             //input "option${state.app}", "enum", title: "Options", multiple: false, required: false, defaultValue: 'Cycle 2x', options: ['Slope', 'Sand', 'Clay', 'No Cycle', 'Cycle 2x', 'Cycle 3x']
         }
         section(''){
-            paragraph image: '',
+            paragraph image: 'https://raw.githubusercontent.com/hfg-gmuend/openmoji/master/color/618x618/1F527.png',
             title: 'Slope',
             'Slope sets the sprinklers to cycle 3x, each with a short duration to minimize runoff'
 
-            paragraph image: '',
+            paragraph image: 'https://raw.githubusercontent.com/hfg-gmuend/openmoji/master/color/618x618/26FD.png',
             title: 'Sand',
             'Sandy soil drains quickly and requires more frequent but shorter intervals of water'
 
-            paragraph image: '',
+            paragraph image: openmoji('1F9F1'),
             title: 'Clay',
             'Clay sets the sprinklers to cycle 2x, each with a short duration to maximize absorption'
 
-            paragraph image: '',
+            paragraph image: 'https://raw.githubusercontent.com/hfg-gmuend/openmoji/master/color/618x618/1F4D0.png',
             title: 'No Cycle',
             'The sprinklers will run for 1 long duration'
 
-            paragraph image: '',
+            paragraph image: 'https://raw.githubusercontent.com/hfg-gmuend/openmoji/master/color/618x618/1F3D6.png',
             title: 'Cycle 2x',
             'Cycle 2x will break the water period up into 2 shorter cycles to help minimize runoff and maximize adsorption'
 
-            paragraph image: '',
+            paragraph image: 'https://raw.githubusercontent.com/hfg-gmuend/openmoji/master/color/618x618/1F9F1.png',
             title: 'Cycle 3x',
             'Cycle 3x will break the water period up into 3 shorter cycles to help minimize runoff and maximize adsorption'
         }
@@ -760,59 +768,46 @@ private String getimage(String image){
     if (image.isNumber()) {
         String zoneStr = settings."zone${image}"
         if (zoneStr) {
-            if (zoneStr == 'Off')             return ''
-            if (zoneStr == 'Master Valve')     return ''
-            if (zoneStr == 'Pump')             return ''
+            if (zoneStr == 'Off')          return openmoji('2B55')
+            if (zoneStr == 'Master Valve') return openmoji('1F527')
+            if (zoneStr == 'Pump')         return openmoji('26FD')
 
             if (settings."plant${image}") imageStr = settings."plant${image}"        // default assume asking for the plant image
         }
     }
-    // OK, lookup the requested image
+    // OK, lookup the requested image — values are OpenMoji codepoints
+    // (https://openmoji.org) served from their GitHub raw URL. See
+    // openmoji() for the URL template.
     switch (imageStr) {
         case "null":
-        case null:
-            return ''
-        case 'Off':
-            return ''
-        case 'Lawn':
-            return ''
-        case 'Garden':
-            return ''
-        case 'Flowers':
-            return ''
-        case 'Shrubs':
-            return ''
-        case 'Trees':
-            return ''
-        case 'Xeriscape':
-            return ''
-        case 'New Plants':
-            return ''
-        case 'Spray':
-            return ''
-        case 'Rotor':
-            return ''
-        case 'Drip':
-            return ''
-        case 'Master Valve':
-            return ""
-        case 'Pump':
-            return ''
-        case 'Slope':
-            return ''
-        case 'Sand':
-            return ''
-        case 'Clay':
-            return ''
-        case 'No Cycle':
-            return ''
-        case 'Cycle 2x':
-            return ''
-        case "Cycle 3x":
-            return ''
-        default:
-            return ''
+        case null:           return openmoji('2B55')   // circle (no value)
+        case 'Off':          return openmoji('2B55')   // circle
+        case 'Lawn':         return openmoji('1F33F')  // herb
+        case 'Garden':       return openmoji('1F96C')  // leafy green
+        case 'Flowers':      return openmoji('1F338')  // cherry blossom
+        case 'Shrubs':       return openmoji('1F333')  // deciduous tree
+        case 'Trees':        return openmoji('1F332')  // evergreen tree
+        case 'Xeriscape':    return openmoji('1F335')  // cactus
+        case 'New Plants':   return openmoji('1F331')  // seedling
+        case 'Spray':        return openmoji('1F4A6')  // sweat droplets
+        case 'Rotor':        return openmoji('1F4A7')  // droplet
+        case 'Drip':         return openmoji('1F6B0')  // potable water
+        case 'Master Valve': return openmoji('1F527')  // wrench
+        case 'Pump':         return openmoji('26FD')   // fuel pump
+        case 'Slope':        return openmoji('1F4D0')  // triangular ruler
+        case 'Sand':         return openmoji('1F3D6')  // beach
+        case 'Clay':         return openmoji('1F9F1')  // brick
+        case 'No Cycle':     return openmoji('0031-FE0F-20E3') // keycap 1
+        case 'Cycle 2x':     return openmoji('0032-FE0F-20E3') // keycap 2
+        case "Cycle 3x":     return openmoji('0033-FE0F-20E3') // keycap 3
+        default:             return ''
     }
+}
+
+// OpenMoji icon URL (color, 618px PNG). Centralized so the path can be
+// changed in one place if the upstream CDN ever moves.
+private String openmoji(String code) {
+    return "https://raw.githubusercontent.com/hfg-gmuend/openmoji/master/color/618x618/${code}.png"
 }
 
 private String getname(String i) {

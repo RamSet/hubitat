@@ -8,11 +8,15 @@
  *  removed safely.
  *
  *  Changelog:
+ *   v1.11 (2026-05) RamSet:
+ *                   - Restored preference-page icons using OpenMoji
+ *                     (https://openmoji.org, CC-BY-SA 4.0) PNGs served from
+ *                     GitHub raw.
+ *
  *   v1.10 (2026-05) RamSet cleanup:
  *                   - Stripped dead http://www.plaidsystems.com/smartthings/*.png
  *                     image URLs that were 404-ing every time a preference page
- *                     rendered. Empty image: attributes left in place so the
- *                     syntax stays valid.
+ *                     rendered.
  *                   - Added importUrl.
  *
  *  Copyright 2019 Plaid Systems
@@ -67,9 +71,9 @@ definition(
     importUrl: "https://raw.githubusercontent.com/RamSet/hubitat/main/spruce-connect.groovy",
     description: "Connect Spruce Controller and Sensors to Hubitat Elevation",
     category: "",
-    iconUrl: "",
-    iconX2Url: "",
-    iconX3Url: "",
+    iconUrl:   "https://raw.githubusercontent.com/hfg-gmuend/openmoji/master/color/618x618/1F332.png",
+    iconX2Url: "https://raw.githubusercontent.com/hfg-gmuend/openmoji/master/color/618x618/1F332.png",
+    iconX3Url: "https://raw.githubusercontent.com/hfg-gmuend/openmoji/master/color/618x618/1F332.png",
     oauth: true,
     singleInstance: true
 )
@@ -114,7 +118,7 @@ def pageConnect(){
         log.debug "redirectUrl ${redirectUrl}"
         dynamicPage(name: "pageConnect", title: "<b>Connect Account<b/>",  uninstall: false, install:false) {
             section {
-                href url: redirectUrl, style:"embedded", required:false, title:"<b>Connect Spruce Account</b>", image: '', description: "Login to grant access"
+                href url: redirectUrl, style:"embedded", required:false, title:"<b>Connect Spruce Account</b>", image: 'https://raw.githubusercontent.com/hfg-gmuend/openmoji/master/color/618x618/1F332.png', description: "Login to grant access"
             }
         }
     }    
