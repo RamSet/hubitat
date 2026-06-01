@@ -13,6 +13,28 @@
  *  for the specific language governing permissions and limitations under the License.
  *
  *
+ *         v2.1.5   LED control rework — "Fully Disabled" was silently failing.
+ *                    Root causes:
+ *                    1. The "Disable When Motion (Aeon v1.10+ only)" option was
+ *                       mis-labelled — Aeotec removed value 2 in firmware 1.10+.
+ *                       On modern firmware only 0/1 are valid; sending 2 is
+ *                       silently ignored. Re-labelled the enum accordingly.
+ *                    2. Battery-powered sensors queue parameter changes until
+ *                       the next wake-up, so the LED doesn't change immediately
+ *                       on Save Preferences. The driver now explicitly says so
+ *                       in the preference description and after Save Preferences
+ *                       sends a one-line warn telling battery users to single-
+ *                       click the action button to force wake-up.
+ *                    3. configure() sent param 81 but never read it back, so
+ *                       there was no way to know if the device accepted it.
+ *                       Added a configurationGet(81) immediately after the Set,
+ *                       and a ConfigurationReport handler for param 81 that
+ *                       publishes the result to a new `ledState` attribute.
+ *                    Also added a `setLED on|off` device command that sends the
+ *                    Set + Get on demand (no Save Preferences needed); useful
+ *                    for testing on USB sensors and for queueing an immediate
+ *                    LED change on battery sensors before manual wake-up.
+ *
  *         v2.1.4   De-duplicate firmware: drop the state.firmware State Variable
  *                    (the `firmware` attribute under Current States is now the
  *                    single source of truth). Existing installs are scrubbed on
@@ -139,7 +161,7 @@
    15. support for celsius added. set in input options.
 */
 
- public static String version()      {  return "v2.1.4"  }
+ public static String version()      {  return "v2.1.5"  }
  import groovy.transform.Field
 
 metadata {
@@ -157,6 +179,7 @@ metadata {
         capability "TamperAlert"
 
         command    "refresh"
+        command    "setLED", [[name:"state*", type:"ENUM", description:"Turn the sensor's onboard LED on or off (param 81). Battery-powered sensors queue the change until next wake-up — single-click the action button to apply immediately.", constraints:["on","off"]]]
         // Advanced/debug commands — hidden from the device UI by default so the
         // command list stays clean for everyday use. Uncomment to expose them
         // (the implementations at the bottom of this driver remain intact).
@@ -164,6 +187,7 @@ metadata {
         // command    "setParameter",[[name:"parameterNumber",type:"NUMBER", description:"Parameter Number", constraints:["NUMBER"]],[name:"size",type:"NUMBER", description:"Parameter Size", constraints:["NUMBER"]],[name:"value",type:"NUMBER", description:"Parameter Value", constraints:["NUMBER"]]]
 
         attribute  "firmware", "decimal"
+        attribute  "ledState", "string"  // "on" or "off" — last value param 81 actually reported back
 
         fingerprint deviceId: "0x2101", inClusters: "0x5E,0x86,0x72,0x59,0x85,0x73,0x71,0x84,0x80,0x30,0x31,0x70,0x7A", outClusters: "0x5A"
         fingerprint  mfr:"0086", prod:"0102", deviceId:"0064", inClusters:"0x5E,0x86,0x72,0x59,0x85,0x73,0x71,0x84,0x80,0x30,0x31,0x70,0x7A,0x5A" 
@@ -216,8 +240,13 @@ metadata {
 
         section("Device behaviour") {
             input "ledOptions", "enum", title: "<b>LED Indicator</b>",
-                                      description: "<br><i>Controls the sensor's onboard LED. <b>Fully Enabled</b>: blinks on motion and wake-up (default). <b>Fully Disabled</b>: silent — recommended for bedrooms and dark rooms. <b>Disable When Motion</b>: only available on Aeon firmware v1.10+.</i><br>",
-                                      options: [0:"Fully Enabled", 1:"Fully Disabled", 2:"Disable When Motion (Aeon v1.10+ only)"], defaultValue: "0", displayDuringSetup: true
+                                      description: "<br><i>Controls the sensor's onboard LED (Z-Wave parameter 81). " +
+                                                   "<b>Enabled</b>: blinks on motion and wake-up (default). " +
+                                                   "<b>Disabled</b>: silent — recommended for bedrooms and dark rooms. " +
+                                                   "<b>Legacy (pre-1.10 only)</b>: the old \"disable in security mode\" value — Aeotec dropped this in firmware 1.10+ and the sensor will silently ignore it on modern firmware, so don't pick this unless you know your sensor runs old firmware. " +
+                                                   "<br><br><b>Battery-powered sensors:</b> the LED change does not apply on Save Preferences — it queues until the next wake-up (default every 5 min). To apply immediately, single-click the action button on the back of the sensor after saving. The `setLED` device command works the same way. " +
+                                                   "The new <b>ledState</b> attribute under Current States reports the value the sensor actually accepted, so you can verify the change went through.</i><br>",
+                                      options: [0:"Enabled", 1:"Disabled", 2:"Legacy (pre-1.10 only)"], defaultValue: "0", displayDuringSetup: true
             input name: "selectiveReporting", type: "bool", title: "<b>Enable Selective Reporting</b>",
                                       description: "<br><i>When ON: the sensor only sends reports when readings cross the change thresholds above (saves Z-Wave traffic, reduces dashboard updates). When OFF: the sensor reports on every interval regardless of change. <b>Battery-powered sensors ignore this</b> — they always report on interval. Default: OFF.</i><br>",
                                       defaultValue: false
@@ -260,6 +289,7 @@ def updated() {
 		    // setConfigured("false") is used by WakeUpNotification
 		    setConfigured("false") //wait until the next time device wakeup to send configure command after user change preference
 		    selectiveReport = 0 // battery, selective reporting is not supported
+		    log.warn "${device.displayName} is battery-powered — preference changes (including LED) will not apply until next wake-up. Single-click the sensor's action button to force-wake and apply immediately."
 		} else { //case3: power source is not identified, ask user to properly pair the sensor again
 		    log.warn "power source is not identified, check that sensor is powered by USB, if so > configure()"
 		    def request = []
@@ -267,6 +297,27 @@ def updated() {
 		    response(commands(request))
 	}
 	return(configure(1))
+}
+
+/*
+	setLED — turn the onboard LED on or off without going through Save Preferences.
+	On USB-powered sensors the change applies immediately. On battery-powered
+	sensors the Set+Get pair is queued; single-click the action button to
+	force-wake and apply. The `ledState` attribute updates from the device's
+	ConfigurationReport, so you can verify the change actually landed.
+*/
+def setLED(String state) {
+	Integer val = (state?.toLowerCase() == "off") ? 1 : 0
+	String desired = (val == 1) ? "off" : "on"
+	if (descTextEnable) log.info "setLED(${state}) -> param 81 = ${val} (${desired})"
+	if (device.latestValue("powerSource") == "battery") {
+		log.warn "${device.displayName} is battery-powered — setLED queued, will apply on next wake-up. Single-click the action button to force-wake."
+	}
+	def cmds = [
+		zwave.configurationV1.configurationSet(parameterNumber: 81, size: 1, scaledConfigurationValue: val),
+		zwave.configurationV1.configurationGet(parameterNumber: 81)
+	]
+	return commands(cmds)
 }
 
 
@@ -519,6 +570,16 @@ def zwaveEvent(hubitat.zwave.commands.configurationv1.ConfigurationReport cmd) {
 	else if (cmd.parameterNumber == 101){
 	    result << response(configure(5))
 	}
+	else if (cmd.parameterNumber == 81) {
+	    // LED Indicator (param 81). 0 = enabled, 1 = disabled, 2 = legacy
+	    // pre-1.10 "disable in security mode" (silently ignored on 1.10+).
+	    Integer raw = (cmd.configurationValue && cmd.configurationValue[0] != null) ? (cmd.configurationValue[0] as int) : -1
+	    String ledStateValue = (raw == 1) ? "off" : (raw == 0 ? "on" : "unknown(${raw})")
+	    result << sendEvent(name: "ledState", value: ledStateValue,
+	                        descriptionText: "${device.displayName} LED is ${ledStateValue} (param 81 = ${raw})",
+	                        displayed: false)
+	    if (descTextEnable) log.info "LED is ${ledStateValue} (param 81 = ${raw})"
+	}
 	result
 }
 
@@ -683,8 +744,13 @@ def configure(ccc) {
 	        zwave.configurationV1.configurationSet(parameterNumber: 202, size: 1, scaledConfigurationValue: humidOffset),
 	        // Set luminance calibration offset
 	        zwave.configurationV1.configurationSet(parameterNumber: 203, size: 2, scaledConfigurationValue: luxOffset),
-	        // Set LED Option value
-	        zwave.configurationV1.configurationSet(parameterNumber: 81, size: 1, configurationValue: [ledOptions as int]),
+	        // Set LED Option value (param 81 — see setLED command for ad-hoc changes)
+	        zwave.configurationV1.configurationSet(parameterNumber: 81, size: 1, scaledConfigurationValue: (ledOptions != null ? (ledOptions as int) : 0)),
+	        // Confirmation read-back: device will reply with a ConfigurationReport
+	        // and the handler publishes the result to the `ledState` attribute.
+	        // Without this, there was no way to tell whether param 81 actually
+	        // landed on the device.
+	        zwave.configurationV1.configurationGet(parameterNumber: 81),
 	        //7. query sensor data
 //	        zwave.configurationV1.configurationGet(parameterNumber: 9),  // Retrieve current power mode
 	        zwave.batteryV1.batteryGet(),
