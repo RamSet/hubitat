@@ -13,6 +13,25 @@
  *  for the specific language governing permissions and limitations under the License.
  *
  *
+ *         v2.1.7   Diagnostic + raw-LED. Read-back is working (ledState
+ *                    populates from the device's ConfigurationReport) but on
+ *                    firmware 1.16 the device may report parameter 81 = 0
+ *                    even after we send value 1 — either because the Set
+ *                    didn't land or because that firmware uses param 81 as
+ *                    a bitmask rather than the documented 0/1 enum.
+ *                    Changes:
+ *                    - Reverted the LED Set to the original
+ *                      configurationValue:[N] form (instead of v2.1.5's
+ *                      scaledConfigurationValue) — matches the long-standing
+ *                      behavior that worked for many users.
+ *                    - Added log.info before every LED Set so the exact wire
+ *                      value is visible in the device log.
+ *                    - New `setLEDRaw <N>` command: writes any byte (0..7) to
+ *                      parameter 81 and immediately reads it back. Use this to
+ *                      probe what value actually disables motion-LED on your
+ *                      specific firmware (some report 2 = full-off, some 3).
+ *                      `ledState` shows what the device confirms.
+ *
  *         v2.1.6   Root-cause fix for "LED still blinks on motion after Save
  *                    Preferences": the original updated() did
  *                       setConfigured("false")        // queue for wake-up
@@ -183,7 +202,7 @@
    15. support for celsius added. set in input options.
 */
 
- public static String version()      {  return "v2.1.6"  }
+ public static String version()      {  return "v2.1.7"  }
  import groovy.transform.Field
 
 metadata {
@@ -203,6 +222,7 @@ metadata {
         command    "refresh"
         command    "setLED", [[name:"state*", type:"ENUM", description:"Turn the sensor's onboard LED on or off (param 81). Battery-powered sensors queue the change until next wake-up — single-click the action button to apply immediately.", constraints:["on","off"]]]
         command    "forceWakeConfig"  // flip configured=false so the next wake-up actually re-pushes all settings
+        command    "setLEDRaw", [[name:"value*", type:"NUMBER", description:"Write a raw 0..7 byte to parameter 81. Use to probe firmware-specific LED behaviour (some Aeotec MS6 firmware uses it as a bitmask). Confirm with the ledState attribute."]]
         // Advanced/debug commands — hidden from the device UI by default so the
         // command list stays clean for everyday use. Uncomment to expose them
         // (the implementations at the bottom of this driver remain intact).
@@ -349,12 +369,43 @@ def forceWakeConfig() {
 def setLED(String state) {
 	Integer val = (state?.toLowerCase() == "off") ? 1 : 0
 	String desired = (val == 1) ? "off" : "on"
-	if (descTextEnable) log.info "setLED(${state}) -> param 81 = ${val} (${desired})"
+	log.info "setLED(${state}) -> param 81 = ${val} (${desired})"
 	if (device.latestValue("powerSource") == "battery") {
 		log.warn "${device.displayName} is battery-powered — setLED queued, will apply on next wake-up. Single-click the action button to force-wake."
 	}
+	// Use the configurationValue:[N] form to match what the long-standing
+	// original driver used (and the form configure() now uses in v2.1.7).
 	def cmds = [
-		zwave.configurationV1.configurationSet(parameterNumber: 81, size: 1, scaledConfigurationValue: val),
+		zwave.configurationV1.configurationSet(parameterNumber: 81, size: 1, configurationValue: [val]),
+		zwave.configurationV1.configurationGet(parameterNumber: 81)
+	]
+	return commands(cmds)
+}
+
+/*
+	setLEDRaw — write any byte value (0..7) to parameter 81 and read it back.
+	Useful for probing firmware-specific behaviour when the documented values
+	(0 = enable, 1 = disable) don't produce the expected result. Aeotec MS6
+	firmware 1.13+ has been reported to treat parameter 81 as a bitmask:
+	     0 = all LED activity on
+	     1 = main LED off, motion-LED may still trigger
+	     2 = "night mode" / security alarm LED off
+	     3 = (combination)
+	Use this command to find the value that actually silences your firmware's
+	motion-LED. After running, check the `ledState` attribute on the device.
+*/
+def setLEDRaw(value) {
+	Integer val = value as int
+	if (val < 0 || val > 255) {
+		log.warn "setLEDRaw(${value}): out of range — clamping to 0..255"
+		val = Math.max(0, Math.min(255, val))
+	}
+	log.info "setLEDRaw(${val}) -> param 81 = ${val}"
+	if (device.latestValue("powerSource") == "battery") {
+		log.warn "${device.displayName} is battery-powered — setLEDRaw queued, will apply on next wake-up. Single-click the action button to force-wake."
+	}
+	def cmds = [
+		zwave.configurationV1.configurationSet(parameterNumber: 81, size: 1, configurationValue: [val]),
 		zwave.configurationV1.configurationGet(parameterNumber: 81)
 	]
 	return commands(cmds)
@@ -715,6 +766,9 @@ def configure(ccc) {
 			log.debug "Min Lux change for reporting = $luxChangeAmount"
 			log.debug "LED Option = $ledOptions"
 	}
+	// Always surface this — even with debug off — so the "LED didn't change"
+	// failure mode is visible in the device log without enabling full debug.
+	log.info "configure(): preparing to set param 81 (LED) = ${(ledOptions != null ? (ledOptions as int) : 0)} (pref='${ledOptions}')"
 
 	def now = new Date()
 	def tf = new java.text.SimpleDateFormat("dd-MMM-yyyy h:mm a")
@@ -788,12 +842,14 @@ def configure(ccc) {
 	        zwave.configurationV1.configurationSet(parameterNumber: 202, size: 1, scaledConfigurationValue: humidOffset),
 	        // Set luminance calibration offset
 	        zwave.configurationV1.configurationSet(parameterNumber: 203, size: 2, scaledConfigurationValue: luxOffset),
-	        // Set LED Option value (param 81 — see setLED command for ad-hoc changes)
-	        zwave.configurationV1.configurationSet(parameterNumber: 81, size: 1, scaledConfigurationValue: (ledOptions != null ? (ledOptions as int) : 0)),
+	        // Set LED Option value (param 81 — see setLED command for ad-hoc changes).
+	        // Form is configurationValue:[N] (raw byte list) matching the
+	        // long-standing original driver. v2.1.5 briefly used
+	        // scaledConfigurationValue but it was correlated with a regression
+	        // on firmware 1.16 (ledState read-back still showed 0 after setting 1).
+	        zwave.configurationV1.configurationSet(parameterNumber: 81, size: 1, configurationValue: [(ledOptions != null ? (ledOptions as int) : 0)]),
 	        // Confirmation read-back: device will reply with a ConfigurationReport
 	        // and the handler publishes the result to the `ledState` attribute.
-	        // Without this, there was no way to tell whether param 81 actually
-	        // landed on the device.
 	        zwave.configurationV1.configurationGet(parameterNumber: 81),
 	        //7. query sensor data
 //	        zwave.configurationV1.configurationGet(parameterNumber: 9),  // Retrieve current power mode
