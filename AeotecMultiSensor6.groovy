@@ -13,6 +13,28 @@
  *  for the specific language governing permissions and limitations under the License.
  *
  *
+ *         v2.1.6   Root-cause fix for "LED still blinks on motion after Save
+ *                    Preferences": the original updated() did
+ *                       setConfigured("false")        // queue for wake-up
+ *                       return configure(1)           // returns cmd list
+ *                    and configure() unconditionally calls setConfigured("true"),
+ *                    so the data flag ended up TRUE on every Save Preferences.
+ *                    On the next WakeUpNotification, isConfigured()==true takes
+ *                    the "already configured" branch and ONLY sends
+ *                    wakeUpNoMoreInformation — none of the parameter Sets are
+ *                    actually pushed. Verified on the hub: device data.configured
+ *                    was stuck at "true", and Current States never gained
+ *                    `firmware` or `ledState` even after several wake-ups.
+ *                    Fix: updated() no longer calls configure(1) on battery
+ *                    devices. It only sets configured=false; the next wake-up
+ *                    handler runs configure(3), which IS allowed to flip the
+ *                    flag back to true after it has queued the commands.
+ *                    DC-powered sensors keep the previous immediate-send path.
+ *                    Added a `forceWakeConfig` device command that flips
+ *                    configured=false on demand for stuck devices, plus
+ *                    logs the current data.configured value on every wake-up
+ *                    so the failure mode is visible in the device's log.
+ *
  *         v2.1.5   LED control rework — "Fully Disabled" was silently failing.
  *                    Root causes:
  *                    1. The "Disable When Motion (Aeon v1.10+ only)" option was
@@ -161,7 +183,7 @@
    15. support for celsius added. set in input options.
 */
 
- public static String version()      {  return "v2.1.5"  }
+ public static String version()      {  return "v2.1.6"  }
  import groovy.transform.Field
 
 metadata {
@@ -180,6 +202,7 @@ metadata {
 
         command    "refresh"
         command    "setLED", [[name:"state*", type:"ENUM", description:"Turn the sensor's onboard LED on or off (param 81). Battery-powered sensors queue the change until next wake-up — single-click the action button to apply immediately.", constraints:["on","off"]]]
+        command    "forceWakeConfig"  // flip configured=false so the next wake-up actually re-pushes all settings
         // Advanced/debug commands — hidden from the device UI by default so the
         // command list stays clean for everyday use. Uncomment to expose them
         // (the implementations at the bottom of this driver remain intact).
@@ -283,20 +306,37 @@ def updated() {
 	// Check for any null settings and change them to default values
 	inputValidationCheck()
 
-	if (device.latestValue("powerSource") == "dc") {  //case1: USB powered
-	  //  response(configure(2))
-		} else if (device.latestValue("powerSource") == "battery") {  //case2: battery powered
-		    // setConfigured("false") is used by WakeUpNotification
-		    setConfigured("false") //wait until the next time device wakeup to send configure command after user change preference
-		    selectiveReport = 0 // battery, selective reporting is not supported
-		    log.warn "${device.displayName} is battery-powered — preference changes (including LED) will not apply until next wake-up. Single-click the sensor's action button to force-wake and apply immediately."
-		} else { //case3: power source is not identified, ask user to properly pair the sensor again
-		    log.warn "power source is not identified, check that sensor is powered by USB, if so > configure()"
-		    def request = []
-		    request << zwave.configurationV1.configurationGet(parameterNumber: 9)  // Retrieve current power mode
-		    response(commands(request))
+	String powerSource = device.latestValue("powerSource")
+	if (powerSource == "battery") {
+		// Battery path: do NOT call configure(1) here. configure() unconditionally
+		// flips data.configured back to "true" via setConfigured(), which then
+		// makes the next WakeUpNotification handler take the "already configured"
+		// branch and skip every parameter Set. By NOT calling configure(1) we
+		// leave configured=false; the next wake-up handler sees that and runs
+		// configure(3), which queues all parameter Sets in the wake-window and
+		// flips configured=true at the end.
+		setConfigured("false")
+		selectiveReport = 0 // battery — selective reporting is not supported
+		log.warn "${device.displayName} is battery-powered — preference changes (including LED) will not apply until next wake-up. Single-click the sensor's action button to force-wake and apply immediately."
+		return null
+	} else if (powerSource == "dc") {
+		return configure(1)
+	} else {
+		log.warn "power source is not identified, check that sensor is powered by USB, if so > configure()"
+		def request = [zwave.configurationV1.configurationGet(parameterNumber: 9)]
+		return commands(request)
 	}
-	return(configure(1))
+}
+
+/*
+	forceWakeConfig — flip data.configured to "false" on demand. Useful when the
+	previous version of the driver (pre-v2.1.6) left the flag stuck at "true",
+	so the next WakeUpNotification skips configure() and parameter changes never
+	land. Run this once, then single-click the sensor's action button.
+*/
+def forceWakeConfig() {
+	log.warn "${device.displayName}: forceWakeConfig — flipping data.configured to false. Single-click the sensor's action button to wake it and apply all queued settings."
+	setConfigured("false")
 }
 
 /*
@@ -379,11 +419,15 @@ def initialize() {
 def zwaveEvent(hubitat.zwave.commands.wakeupv1.WakeUpNotification cmd) {
 	def result = [sendEvent(descriptionText: "${device.displayName} woke up")]
 	def cmds = []
+	// Log the path each wake-up takes so the "preferences didn't apply"
+	// failure mode (configured stuck at true) is visible without enabling
+	// full debug output.
+	log.info "${device.displayName} woke up — data.configured=${getDataValue('configured')}"
 	if (!isConfigured()) {
-	    if (debugOutput) log.debug("late configure")
+	    if (descTextEnable) log.info "Wake-up: configured=false → running configure(3) to push queued settings"
 	    result << response(configure(3))
 	} else {
-	    //if (debugOutput) log.debug("Device has been configured sending >> wakeUpNoMoreInformation()")
+	    if (debugOutput) log.debug "Wake-up: configured=true → sending wakeUpNoMoreInformation()"
 	    cmds << zwave.wakeUpV1.wakeUpNoMoreInformation().format()
 	    result << response(cmds)
 	}
