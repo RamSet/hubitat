@@ -59,7 +59,7 @@ mappings {
     path("/calendar.ics")  { action: [GET: "apiCalendar"] }
 }
 
-String getAppVersion() { return "v0.5.0 (2026-06)" }
+String getAppVersion() { return "v0.6.0 (2026-06)" }
 
 // =========================================================================
 // Notification event keys & defaults
@@ -124,7 +124,13 @@ String getAppVersion() { return "v0.5.0 (2026-06)" }
 
     // Fertilizer
     "fertilizer.armed":    [section: "Lifecycle",  default: '${app}: ${zone} starting in fertilizer mode (${cycles}× ${perCycleMin}m, soak ${soakMin}m)'],
-    "fertilizer.disarmed": [section: "Lifecycle",  default: '${app}: ${zone} fertilizer mode complete and disarmed', defaultOff: true]
+    "fertilizer.disarmed": [section: "Lifecycle",  default: '${app}: ${zone} fertilizer mode complete and disarmed', defaultOff: true],
+
+    // Manual triggers via exposed child Virtual Switches
+    "zone.manualStart":    [section: "Lifecycle",  default: '${app}: MANUAL ▶ ${zone} for ${duration} (switch ${switch})'],
+    "zone.manualEnd":      [section: "Lifecycle",  default: '${app}: MANUAL ■ ${zone} (turned off externally)', defaultOff: true],
+    "zone.manualTimeout":  [section: "Lifecycle",  default: '${app}: MANUAL ■ ${zone} (manual-on timer expired)'],
+    "zone.manualBlocked":  [section: "Lifecycle",  default: '${app}: manual ${zone} blocked — ${reason}']
 ]
 
 @groovy.transform.Field static final List NOTIFY_PRIORITIES = ["default", "-2 silent", "-1 quiet", "0 normal", "1 high", "2 emergency"]
@@ -162,6 +168,7 @@ preferences {
     page(name: "notifyEventsPage")
     page(name: "moisturePage")
     page(name: "aboutPage")
+    page(name: "exposurePage")
 }
 
 def mainPage() {
@@ -213,6 +220,9 @@ def mainPage() {
             href name: "dashboardPage", title: "Dashboard tile", page: "dashboardPage",
                  image: openmoji("1F4F1"),
                  description: dashboardSummaryString()
+            href name: "exposurePage", title: "Zone switches (HomeKit / Rules)", page: "exposurePage",
+                 image: openmoji("1F39B"),
+                 description: exposureSummaryString()
             href name: "restrictionsPage", title: "Restrictions (quiet hours / mode / HSM)", page: "restrictionsPage",
                  image: openmoji("1F6AB"),
                  description: restrictionsSummaryString()
@@ -367,6 +377,13 @@ def zoneDetailPage(Map params = [:]) {
                   title: "Soak time between cycles (minutes)",
                   range: "1..60", defaultValue: 10
         }
+        section("Exposed switch override") {
+            paragraph "When the global zone-switch feature is on, this zone exposes a child Virtual Switch. Override the manual-on auto-off timer for THIS zone only (blank = use the global default)."
+            input name: "zone${zid}ManualTimerMin", type: "number",
+                  title: "Manual-on timer (minutes) for this zone",
+                  range: "1..240", required: false
+        }
+
         section("Fertilizer mode (one-shot)") {
             paragraph "Arming fertilizer mode changes the NEXT run only: zone runs as short bursts with long soak intervals for dilution and uniform uptake. Auto-disarms after the run completes."
             input name: "zone${zid}FertArmed", type: "bool",
@@ -972,6 +989,60 @@ def apiPage() {
     }
 }
 
+def exposurePage() {
+    dynamicPage(name: "exposurePage", title: "Zone switches") {
+        section {
+            paragraph "Expose each enabled zone as a child Virtual Switch you can trigger from anywhere — Hubitat dashboards, Rule Machine, HomeKit (via Hubitat's HomeKit Integration), Alexa/Google routines. The child switch reflects the zone's actual relay state both ways: turn it ON externally and the zone runs; turn it OFF and the zone stops."
+            input name: "zoneSwitchesEnabled", type: "bool",
+                  title: "Create / maintain a child switch per enabled zone",
+                  defaultValue: false, submitOnChange: true
+            if (settings.zoneSwitchesEnabled) {
+                input name: "defaultManualTimerMin", type: "number",
+                      title: "Default manual-on timer (minutes)",
+                      description: "When a child switch is turned ON from outside, the zone auto-stops after this many minutes. Per-zone override on the zone detail page.",
+                      range: "1..240", defaultValue: 10
+                input name: "zoneSwitchPrefix", type: "text",
+                      title: "Optional label prefix for child devices",
+                      description: "e.g. \"Sprinkler \" yields child names like \"Sprinkler Front Lawn\". Leave blank to use the zone name alone.",
+                      required: false
+                input name: "btnRebuildZoneSwitches", type: "button",
+                      title: "Rebuild zone switches now (delete + recreate)"
+            }
+        }
+        if (settings.zoneSwitchesEnabled) {
+            section("Currently exposed") {
+                Integer n = zoneCount()
+                int created = 0
+                for (int i = 1; i <= n; i++) {
+                    def ch = getZoneChildVs(i)
+                    if (ch) {
+                        created++
+                        String label = settings."zone${i}Name" ?: "Zone ${i}"
+                        Integer mins = (settings."zone${i}ManualTimerMin" ?: settings.defaultManualTimerMin ?: 10) as int
+                        Long expiresMs = (state.manualActive ?: [:])[i.toString()] as Long
+                        String when = expiresMs ? " — auto-off at ${new Date(expiresMs).format('HH:mm:ss', location?.timeZone ?: TimeZone.getDefault())}" : ""
+                        paragraph "• ${label} (${ch.displayName}) — current: ${ch.currentValue('switch') ?: '?'} · timer ${mins}min${when}"
+                    }
+                }
+                if (created == 0) paragraph "No child switches exist yet. Save this page to create them."
+            }
+        } else {
+            section {
+                paragraph "Disabling will remove the child switches on save."
+            }
+        }
+    }
+}
+
+private String exposureSummaryString() {
+    if (!settings.zoneSwitchesEnabled) return "Disabled — no child switches"
+    Integer mins = (settings.defaultManualTimerMin ?: 10) as int
+    int n = 0
+    Integer zc = zoneCount()
+    for (int i = 1; i <= zc; i++) { if (getZoneChildVs(i)) n++ }
+    return "${n} child switch(es) · default timer ${mins}min"
+}
+
 def aboutPage() {
     dynamicPage(name: "aboutPage", title: "About") {
         section {
@@ -986,6 +1057,7 @@ def aboutPage() {
             paragraph "A Hubitat app for running sprinkler zones via Zooz ZEN16 800LR multi-relay controllers — or any Hubitat device exposing the Switch capability. Hardware-agnostic, multi-instance, with Spruce-style weather adaptation, per-zone moisture-aware watering, restrictions (quiet hours / mode / HSM), pause-and-resume from external sensors, hub-independent hardware watchdog via Z-Wave parameters, full external JSON/HTML/iCal API, and granular templated notifications with Pushover support."
         }
         section("Changelog") {
+            paragraph "v0.6 — Per-zone child Virtual Switches for HomeKit/Rule-Machine/dashboard control with configurable manual-on auto-off timer (default 10 min, per-zone override). Contact-sensor rain support (incl. ZEN16 input child devices). HTML stripped from input/paragraph text on mobile clients. App icons resized for the iOS Hubitat app."
             paragraph "v0.5 — Smart skips (frost/cold/wind via Open-Meteo), per-zone fertilizer mode (one-shot short-burst-with-soak), auto-stagger across instances via shared coordination switch, HTML dashboard endpoint, iCalendar export endpoint, About page."
             paragraph "v0.4 — Per-zone moisture modes (off / skip / earlyStop / adapt / learn), pre/post moisture capture with rolling rate, learned-rate prediction, Moisture page with per-zone history table."
             paragraph "v0.3 — Per-event notification system with 25 named events + templates + Pushover. Spruce-style weekly-minutes runtime. Per-zone weekly budget cap. Today's forecast preview on weather page."
@@ -1212,6 +1284,7 @@ def initialize() {
     }
 
     maintainDashboardChild()
+    maintainZoneSwitches()
     runEvery1Hour("publishDashboardState")
     runEvery1Hour("zen16Watchdog")
     // Weekly-budget rollover every Monday 00:01 local
@@ -1654,6 +1727,8 @@ def startNextZone() {
     }
     state.lastRunByZone[zid.toString()] = new Date().format("yyyy-MM-dd HH:mm", location?.timeZone ?: TimeZone.getDefault())
     sw.on()
+    // Mirror onto the exposed child Virtual Switch (HomeKit/dashboard view).
+    setZoneChildSwitch(zid, "on")
     // Early-stop subscription on the moisture sensor for the duration of this zone
     if (moistureMode in ["earlyStop", "adapt", "learn"]) {
         def msens = settings."zone${zid}MoistureSensor"
@@ -1675,6 +1750,7 @@ def zoneCyclePhaseDone() {
     def sw = settings."zone${zid}Switch"
     String zname = settings."zone${zid}Name" ?: "Zone ${zid}"
     if (sw) sw.off()
+    setZoneChildSwitch(zid, "off")
 
     Integer cycles    = state.currentZoneCycles as int
     Integer cycleIdx  = (state.currentZoneCycleIdx ?: 0) as int
@@ -1744,12 +1820,15 @@ def stopAllZones() {
     unschedule("zoneCyclePhaseDone")
     unschedule("zoneCycleResume")
     unschedule("doResumeAfterPause")
+    unschedule("manualZoneTimeout")
     Integer n = (settings.zoneCountPref ?: 0) as int
     for (int i = 1; i <= n; i++) {
         def sw = settings."zone${i}Switch"
         if (sw) try { sw.off() } catch (e) { log.warn "stop zone ${i}: ${e.message}" }
         unsubscribeZoneMoisture(i)
+        setZoneChildSwitch(i, "off")
     }
+    state.manualActive = [:]
     state.running = false
     state.paused = false
     state.pausedRemainingSec = 0
@@ -2179,6 +2258,150 @@ def pushHardwareSafety() {
     state.hwLastPushSummary = summary
     log.info "${app.label}: hardware safety push — ${ok} ok, ${fail} failed (${mins}min auto-off)"
     notify("hardware.push", [minutes: mins, count: ok])
+}
+
+// =========================================================================
+// Per-zone exposed child Virtual Switches (manual trigger + timer)
+// =========================================================================
+
+private String zoneVsDni(int zid) { return "${app.id}-zone-${zid}" }
+
+private getZoneChildVs(int zid) {
+    return getChildDevice(zoneVsDni(zid))
+}
+
+private String zoneVsLabel(int zid) {
+    String prefix = settings.zoneSwitchPrefix ?: ""
+    String name   = settings."zone${zid}Name" ?: "Zone ${zid}"
+    return (prefix + name).trim()
+}
+
+// Called from initialize() and after a "rebuild" button press. Creates a
+// Virtual Switch child for each enabled zone; renames if labels changed;
+// deletes children for disabled / removed zones; deletes all if the
+// global toggle is off.
+private void maintainZoneSwitches() {
+    Integer n = zoneCount()
+    if (!settings.zoneSwitchesEnabled) {
+        // Remove every zone child VS we created
+        getChildDevices().each { ch ->
+            if (ch.deviceNetworkId?.startsWith("${app.id}-zone-")) {
+                try { deleteChildDevice(ch.deviceNetworkId) }
+                catch (e) { log.warn "remove ${ch.displayName}: ${e.message}" }
+            }
+        }
+        return
+    }
+    for (int i = 1; i <= n; i++) {
+        boolean shouldExist = (settings."zone${i}Enabled" != false) && settings."zone${i}Switch"
+        def existing = getZoneChildVs(i)
+        if (shouldExist) {
+            String desiredLabel = zoneVsLabel(i)
+            if (!existing) {
+                try {
+                    addChildDevice("hubitat", "Virtual Switch", zoneVsDni(i),
+                                   [name: desiredLabel, label: desiredLabel, isComponent: false])
+                    log.info "${app.label}: created zone child switch '${desiredLabel}'"
+                } catch (e) {
+                    log.warn "${app.label}: cannot create zone child for ${i}: ${e.message}"
+                }
+            } else if (existing.label != desiredLabel) {
+                try { existing.setLabel(desiredLabel) } catch (e) { log.warn "rename: ${e.message}" }
+            }
+            // Always subscribe so external on/off lands on us
+            def ch = getZoneChildVs(i)
+            if (ch) {
+                try { subscribe(ch, "switch", "zoneChildSwitchEvent") }
+                catch (e) { log.warn "subscribe child ${i}: ${e.message}" }
+            }
+        } else if (existing) {
+            try { deleteChildDevice(zoneVsDni(i)); log.info "${app.label}: removed zone child for ${i} (disabled or no switch)" }
+            catch (e) { log.warn "remove zone child ${i}: ${e.message}" }
+        }
+    }
+}
+
+// Called when ANY zone child VS changes state. Distinguish app-initiated
+// (scheduler turned it on/off) from external (HomeKit / dashboard).
+def zoneChildSwitchEvent(evt) {
+    if (!evt?.deviceNetworkId) return
+    String prefix = "${app.id}-zone-"
+    if (!evt.deviceNetworkId.startsWith(prefix)) return
+    Integer zid = evt.deviceNetworkId.substring(prefix.length()).toInteger()
+    String guard = "${zid}:${evt.value}"
+    if (state.suppressZoneChildEvent == guard) {
+        state.suppressZoneChildEvent = null
+        return
+    }
+    // External trigger
+    if (evt.value == "on") manualZoneStart(zid)
+    else                   manualZoneStop(zid)
+}
+
+private void setZoneChildSwitch(int zid, String value) {
+    def ch = getZoneChildVs(zid)
+    if (!ch) return
+    if (ch.currentValue("switch") == value) return  // no change needed
+    state.suppressZoneChildEvent = "${zid}:${value}"
+    try { if (value == "on") ch.on() else ch.off() }
+    catch (e) { log.warn "setZoneChildSwitch(${zid}, ${value}): ${e.message}" }
+}
+
+// External "on" arrived on a zone child VS. Start the underlying relay
+// for the manual timer duration; auto-off after that. Refuse if the
+// scheduler is currently running its own plan.
+def manualZoneStart(int zid) {
+    if (state.running) {
+        log.warn "${app.label}: manual zone ${zid} blocked — scheduler is running"
+        notify("zone.manualBlocked", [zone: settings."zone${zid}Name" ?: "Zone ${zid}", reason: "scheduler is running"])
+        setZoneChildSwitch(zid, "off")   // bounce the VS back off
+        return
+    }
+    def sw = settings."zone${zid}Switch"
+    if (!sw) {
+        log.warn "${app.label}: manual zone ${zid} has no underlying switch — ignoring"
+        setZoneChildSwitch(zid, "off")
+        return
+    }
+    Integer mins = (settings."zone${zid}ManualTimerMin" ?: settings.defaultManualTimerMin ?: 10) as int
+    String zname = settings."zone${zid}Name" ?: "Zone ${zid}"
+    long expiresMs = now() + (mins * 60L * 1000L)
+    Map active = (state.manualActive ?: [:]) as Map
+    active[zid.toString()] = expiresMs
+    state.manualActive = active
+
+    log.info "${app.label}: MANUAL ▶ ${zname} for ${mins}m (via ${sw.displayName})"
+    notify("zone.manualStart", [zone: zname, duration: "${mins}m", switch: sw.displayName])
+    try { sw.on() } catch (e) { log.warn "manualZoneStart relay on: ${e.message}" }
+
+    runIn(mins * 60, "manualZoneTimeout", [data: [zid: zid], overwrite: false])
+}
+
+// User explicitly turned the child VS off, or scheduler stop-all hit us.
+def manualZoneStop(int zid, boolean fromTimeout = false) {
+    Map active = (state.manualActive ?: [:]) as Map
+    if (!active.containsKey(zid.toString()) && !fromTimeout) {
+        // Nothing manual was tracked; still make sure the relay's off
+    }
+    active.remove(zid.toString())
+    state.manualActive = active
+    def sw = settings."zone${zid}Switch"
+    String zname = settings."zone${zid}Name" ?: "Zone ${zid}"
+    if (sw) try { sw.off() } catch (e) { log.warn "manualZoneStop relay off: ${e.message}" }
+    setZoneChildSwitch(zid, "off")
+    if (fromTimeout) {
+        if (descTextEnable) log.info "${app.label}: MANUAL ■ ${zname} (timer)"
+        notify("zone.manualTimeout", [zone: zname])
+    } else {
+        if (descTextEnable) log.info "${app.label}: MANUAL ■ ${zname} (off)"
+        notify("zone.manualEnd", [zone: zname])
+    }
+}
+
+def manualZoneTimeout(data) {
+    Integer zid = (data?.zid ?: 0) as int
+    if (zid <= 0) return
+    manualZoneStop(zid, true)
 }
 
 // =========================================================================
@@ -3192,6 +3415,16 @@ def appButtonHandler(String btn) {
             break
         case "btnRefreshDashboard":
             publishDashboardState()
+            break
+        case "btnRebuildZoneSwitches":
+            // Delete every zone child and re-create from scratch
+            getChildDevices().each { ch ->
+                if (ch.deviceNetworkId?.startsWith("${app.id}-zone-")) {
+                    try { deleteChildDevice(ch.deviceNetworkId) } catch (e) { log.warn "rebuild remove: ${e.message}" }
+                }
+            }
+            maintainZoneSwitches()
+            log.info "${app.label}: zone switches rebuilt"
             break
         case "btnClearHistory":
             state.runHistory = []
