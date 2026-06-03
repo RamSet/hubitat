@@ -48,14 +48,16 @@ definition(
 )
 
 mappings {
-    path("/status") { action: [GET: "apiStatus"] }
-    path("/run")    { action: [POST: "apiRun"]   }
-    path("/stop")   { action: [POST: "apiStop"]  }
-    path("/skip")   { action: [POST: "apiSkip"]  }
-    path("/delay")  { action: [POST: "apiDelay"] }
+    path("/status")        { action: [GET: "apiStatus"]   }
+    path("/run")           { action: [POST: "apiRun"]     }
+    path("/stop")          { action: [POST: "apiStop"]    }
+    path("/skip")          { action: [POST: "apiSkip"]    }
+    path("/delay")         { action: [POST: "apiDelay"]   }
+    path("/dashboard")     { action: [GET: "apiDashboard"]}
+    path("/calendar.ics")  { action: [GET: "apiCalendar"] }
 }
 
-String getAppVersion() { return "v0.4.0 (2026-06)" }
+String getAppVersion() { return "v0.5.0 (2026-06)" }
 
 // =========================================================================
 // Notification event keys & defaults
@@ -89,6 +91,10 @@ private static final Map NOTIFY_EVENTS = [
     "skip.pause"       : [section: "Skips",      default: '${app}: skipped — pause sensor active (${sensor})'],
     "skip.budget"      : [section: "Skips",      default: '${app}: ${zone} skipped — weekly budget exhausted'],
     "skip.moisture"    : [section: "Skips",      default: '${app}: ${zone} skipped — soil already at ${moisture}% (target ${target}%)'],
+    "skip.frost"       : [section: "Skips",      default: '${app}: skipped — overnight low ${tempF}°F (threshold ${threshold}°F)'],
+    "skip.cold"        : [section: "Skips",      default: '${app}: skipped — today\'s high ${tempF}°F (threshold ${threshold}°F)'],
+    "skip.wind"        : [section: "Skips",      default: '${app}: skipped — max wind ${windMph} mph (threshold ${threshold} mph)'],
+    "skip.coord"       : [section: "Skips",      default: '${app}: skipped — coordination switch held by another schedule (gave up after ${count} retries)'],
 
     // Pause & resume
     "pause.activate"   : [section: "Pause",      default: '${app}: PAUSED at ${zone} (${remaining}s remaining) — ${reason}'],
@@ -112,7 +118,11 @@ private static final Map NOTIFY_EVENTS = [
     // Moisture-aware
     "moisture.earlyStop": [section: "Sensors",    default: '${app}: ${zone} early-stopped — soil reached ${moisture}% (target ${target}%) after ${duration}'],
     "moisture.adapted":   [section: "Sensors",    default: '${app}: ${zone} adapted ${baseMin}m → ${adjMin}m (soil ${moisture}%, dryness ${dryness}×)', defaultOff: true],
-    "moisture.learned":   [section: "Sensors",    default: '${app}: ${zone} learning — ${delta}%/min over ${runMin}m run', defaultOff: true]
+    "moisture.learned":   [section: "Sensors",    default: '${app}: ${zone} learning — ${delta}%/min over ${runMin}m run', defaultOff: true],
+
+    // Fertilizer
+    "fertilizer.armed":    [section: "Lifecycle",  default: '${app}: ${zone} starting in fertilizer mode (${cycles}× ${perCycleMin}m, soak ${soakMin}m)'],
+    "fertilizer.disarmed": [section: "Lifecycle",  default: '${app}: ${zone} fertilizer mode complete and disarmed', defaultOff: true]
 ]
 
 private static final List NOTIFY_PRIORITIES = ["default", "-2 silent", "-1 quiet", "0 normal", "1 high", "2 emergency"]
@@ -144,6 +154,7 @@ preferences {
     page(name: "apiPage")
     page(name: "notifyEventsPage")
     page(name: "moisturePage")
+    page(name: "aboutPage")
 }
 
 def mainPage() {
@@ -213,6 +224,9 @@ def mainPage() {
             href name: "diagnosticsPage", title: "Diagnostics & test runs", page: "diagnosticsPage",
                  image: openmoji("1F50D"),
                  description: diagnosticsSummaryString()
+            href name: "aboutPage", title: "About / changelog", page: "aboutPage",
+                 image: openmoji("2139"),
+                 description: "Version ${getAppVersion()}"
         }
         section("<b>Run now / pause</b>") {
             input name: "btnRunNow",  type: "button", title: "Run schedule now"
@@ -346,6 +360,22 @@ def zoneDetailPage(Map params = [:]) {
                   title: "Soak time between cycles (minutes)",
                   range: "1..60", defaultValue: 10
         }
+        section("<b>Fertilizer mode (one-shot)</b>") {
+            paragraph "Arming fertilizer mode changes the NEXT run only: zone runs as <b>short bursts</b> with <b>long soak intervals</b> for dilution and uniform uptake. Auto-disarms after the run completes."
+            input name: "zone${zid}FertArmed", type: "bool",
+                  title: "Arm fertilizer mode for the next run of this zone",
+                  defaultValue: false
+            input name: "zone${zid}FertBurstMin", type: "number",
+                  title: "Burst length (minutes)",
+                  range: "1..20", defaultValue: 2
+            input name: "zone${zid}FertBurstCount", type: "number",
+                  title: "Number of bursts",
+                  range: "2..10", defaultValue: 3
+            input name: "zone${zid}FertSoakMin", type: "number",
+                  title: "Soak between bursts (minutes)",
+                  range: "1..60", defaultValue: 15
+        }
+
         section("<b>Weekly budget cap (optional)</b>") {
             input name: "zone${zid}WeeklyCapMinutes", type: "number",
                   title: "Maximum minutes per ISO week (0 = no cap)",
@@ -437,6 +467,19 @@ def schedulePage() {
                   title: "Delay between zones (seconds)",
                   range: "0..600", defaultValue: 10
         }
+        section("<b>Auto-stagger across schedules</b>") {
+            paragraph "If you have multiple instances of this app (one per yard area), they'd all start at their configured times — possibly overlapping and overwhelming pipe pressure. Pick a single <b>Virtual Switch</b> shared between every instance: each instance checks it before starting, turns it ON for the duration of its run, and OFF at the end. Other instances scheduled at the same time see the lock and defer."
+            input name: "coordSwitch", type: "capability.switch",
+                  title: "Shared coordination switch (any Virtual Switch — create one called \"Sprinkler Lock\" and pick the same device in every instance)",
+                  required: false, multiple: false
+            input name: "coordDeferSec", type: "number",
+                  title: "Wait this many seconds before retrying if locked",
+                  range: "10..600", defaultValue: 60
+            input name: "coordMaxRetries", type: "number",
+                  title: "Maximum retries before giving up and skipping this run",
+                  range: "0..30", defaultValue: 10
+        }
+
         section("<b>Software failsafe (per-zone cap)</b>") {
             input name: "scheduleMaxRunMinutes", type: "number",
                   title: "Maximum single zone run time (minutes)",
@@ -464,6 +507,22 @@ def weatherPage() {
                   title: "Skip if forecast or past-24h rain exceeds this many inches",
                   range: "0..5", defaultValue: 0.2
         }
+        section("<b>Smart skips (temperature / wind)</b>") {
+            paragraph "Skip runs based on forecast extremes — useful for off-season frost protection and avoiding water loss in high wind."
+            input name: "smartSkipFrostF", type: "number",
+                  title: "Skip if overnight low (today) is below this °F (frost protection)",
+                  description: "<i>Typical: 36 (below freezing risk) or 32 (hard freeze).</i>",
+                  range: "-40..60", required: false
+            input name: "smartSkipColdHighF", type: "number",
+                  title: "Skip if today's high is below this °F (winter mode)",
+                  description: "<i>Typical: 50 (cool-season grass stops growing) or 40 (no point watering anything).</i>",
+                  range: "-40..120", required: false
+            input name: "smartSkipWindMph", type: "number",
+                  title: "Skip if today's max wind is above this mph (atomized spray loss)",
+                  description: "<i>Typical: 15 mph causes significant drift on spray heads; 25 mph is severe.</i>",
+                  range: "0..100", required: false
+        }
+
         section("<b>Seasonal adjust</b>") {
             input name: "seasonalEnabled", type: "bool",
                   title: "Scale base run times by upcoming weather (hotter/drier → longer; cooler/wetter → shorter)",
@@ -853,7 +912,9 @@ def apiPage() {
             } else {
                 paragraph "<b>Token:</b> <code>${token}</code><br>" +
                           "<b>Local base URL:</b> <code>${localUri}</code><br><br>" +
-                          "<b>GET</b>  <code>${localUri}/status?access_token=${token}</code><br>" +
+                          "<b>GET</b>  <code>${localUri}/status?access_token=${token}</code> — JSON status<br>" +
+                          "<b>GET</b>  <code>${localUri}/dashboard?access_token=${token}</code> — HTML auto-refreshing dashboard<br>" +
+                          "<b>GET</b>  <code>${localUri}/calendar.ics?access_token=${token}</code> — iCalendar feed (next 30 days)<br>" +
                           "<b>POST</b> <code>${localUri}/run?access_token=${token}</code><br>" +
                           "<b>POST</b> <code>${localUri}/stop?access_token=${token}</code><br>" +
                           "<b>POST</b> <code>${localUri}/skip?access_token=${token}</code><br>" +
@@ -867,6 +928,39 @@ def apiPage() {
                       "curl -X POST '${localUri}/run?access_token=${token ?: 'TOKEN'}'\n" +
                       "curl -X POST '${localUri}/delay?access_token=${token ?: 'TOKEN'}&hours=24'" +
                       "</pre>"
+        }
+    }
+}
+
+def aboutPage() {
+    dynamicPage(name: "aboutPage", title: "About") {
+        section {
+            paragraph "<h2>Zooz Sprinkler Scheduler</h2>" +
+                      "<b>Version:</b> ${getAppVersion()}<br>" +
+                      "<b>Author:</b> RamSet<br>" +
+                      "<b>License:</b> Apache License, Version 2.0<br>" +
+                      "<b>Source:</b> <a href='https://github.com/RamSet/hubitat'>github.com/RamSet/hubitat</a><br>" +
+                      "<b>Import URL:</b> <code>https://raw.githubusercontent.com/RamSet/hubitat/main/zooz-sprinkler-scheduler.groovy</code>"
+        }
+        section("<b>What this is</b>") {
+            paragraph "A Hubitat app for running sprinkler zones via Zooz ZEN16 800LR multi-relay controllers — or any Hubitat device exposing the Switch capability. Hardware-agnostic, multi-instance, with Spruce-style weather adaptation, per-zone moisture-aware watering, restrictions (quiet hours / mode / HSM), pause-and-resume from external sensors, hub-independent hardware watchdog via Z-Wave parameters, full external JSON/HTML/iCal API, and granular templated notifications with Pushover support."
+        }
+        section("<b>Changelog</b>") {
+            paragraph "<b>v0.5</b> — Smart skips (frost/cold/wind via Open-Meteo), per-zone fertilizer mode (one-shot short-burst-with-soak), auto-stagger across instances via shared coordination switch, HTML dashboard endpoint, iCalendar export endpoint, About page."
+            paragraph "<b>v0.4</b> — Per-zone moisture modes (off / skip / earlyStop / adapt / learn), pre/post moisture capture with rolling rate, learned-rate prediction, Moisture page with per-zone history table."
+            paragraph "<b>v0.3</b> — Per-event notification system with 25 named events + templates + Pushover. Spruce-style weekly-minutes runtime. Per-zone weekly budget cap. Today's forecast preview on weather page."
+            paragraph "<b>v0.2</b> — Quiet hours, mode/HSM pause, pre-run lead notification, 7-day schedule preview, OAuth JSON API, backup/restore JSON, ZEN16 reachability watchdog."
+            paragraph "<b>v0.1</b> — Initial release: zones, schedule, weather (Open-Meteo), rain sensors, pause sensors with true pause-and-resume, pump/master, hardware safety push, history, test runs, diagnostics, dashboard child device."
+        }
+        section("<b>Acknowledgements</b>") {
+            paragraph "Inspired by the Plaid Systems <b>Spruce Scheduler</b> — same overall approach (per-zone plant/sprinkler/soil typing, weather-aware seasonal adjust, rain delay, optional pump/master, moisture sensors)."
+            paragraph "• <a href='https://www.support.getzooz.com/kb/article/371'>Zooz KB #371 — sprinkler use on Hubitat</a><br>" +
+                      "• <a href='https://www.support.getzooz.com/kb/article/376'>Zooz KB #376 — advanced settings</a><br>" +
+                      "• Weather by <a href='https://open-meteo.com'>Open-Meteo</a> (no API key required)<br>" +
+                      "• Icons by <a href='https://openmoji.org'>OpenMoji</a> (CC-BY-SA 4.0)"
+        }
+        section("<b>License (Apache 2.0)</b>") {
+            paragraph "<pre style='font-size:0.8em'>Licensed under the Apache License, Version 2.0 (the \"License\"); you may not use this file except in compliance with the License. You may obtain a copy of the License at\n\n  http://www.apache.org/licenses/LICENSE-2.0\n\nUnless required by applicable law or agreed to in writing, software distributed under the License is distributed on an \"AS IS\" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the specific language governing permissions and limitations under the License.</pre>"
         }
     }
 }
@@ -1319,10 +1413,37 @@ def runSchedule(Map opts = [:]) {
         recordRunSkip("rain sensor wet (${who})")
         return
     }
+    // Smart-skip: frost / cold / wind from forecast
+    Map smartSkipResult = smartSkipCheck()
+    if (smartSkipResult?.skip) {
+        String reason = smartSkipResult.reason as String
+        log.info "${app.label}: smart-skip — ${reason}"
+        recordRunSkip(reason)
+        notify(smartSkipResult.eventKey as String, smartSkipResult.ctx as Map)
+        return
+    }
     if (state.running) {
         log.warn "${app.label}: previous run still active (zone ${state.currentZoneIdx}). Skipping new trigger."
         return
     }
+    // Auto-stagger: if another instance holds the coordination switch, defer.
+    if (settings.coordSwitch && settings.coordSwitch.currentValue("switch") == "on") {
+        Integer retried = (state.coordRetries ?: 0) as int
+        Integer maxRetries = (settings.coordMaxRetries ?: 10) as int
+        Integer defer = (settings.coordDeferSec ?: 60) as int
+        if (retried >= maxRetries) {
+            log.warn "${app.label}: coordination switch held — gave up after ${retried} retries, skipping"
+            state.coordRetries = 0
+            recordRunSkip("coordination switch held (${retried} retries)")
+            notify("skip.coord", [count: retried])
+            return
+        }
+        state.coordRetries = retried + 1
+        log.info "${app.label}: coordination switch held — deferring ${defer}s (retry ${state.coordRetries}/${maxRetries})"
+        runIn(defer, "runSchedule")
+        return
+    }
+    state.coordRetries = 0
     Integer n = (settings.zoneCountPref ?: 0) as int
     if (n < 1) {
         log.warn "${app.label}: no zones configured — nothing to run"
@@ -1376,6 +1497,11 @@ def runSchedule(Map opts = [:]) {
     state.currentZoneIdx = 0
     state.running = true
     recordRunStart(plan, seasonalMult)
+    // Acquire the shared coordination lock for the duration of this run
+    if (settings.coordSwitch) {
+        try { settings.coordSwitch.on() }
+        catch (e) { log.warn "coordSwitch.on(): ${e.message}" }
+    }
     startPumpIfNeeded()
     publishDashboardState()
     Integer preSec = (settings.pumpSwitch && settings.pumpPreSec) ? (settings.pumpPreSec as int) : 0
@@ -1446,9 +1572,20 @@ def startNextZone() {
         }
     }
 
-    Integer cycles = ((settings."zone${zid}CycleSoak" ?: "1") as int)
-    Integer perCycleMin = Math.max(1, (adjMin / cycles) as int)
-    Integer soakMin     = (settings."zone${zid}SoakMinutes" ?: 10) as int
+    Integer cycles, perCycleMin, soakMin
+    boolean fertArmed = (settings."zone${zid}FertArmed" == true)
+    if (fertArmed) {
+        cycles      = (settings."zone${zid}FertBurstCount" ?: 3) as int
+        perCycleMin = (settings."zone${zid}FertBurstMin"   ?: 2) as int
+        soakMin     = (settings."zone${zid}FertSoakMin"    ?: 15) as int
+        adjMin      = cycles * perCycleMin   // override total
+        if (descTextEnable) log.info "${app.label}: ${zname} fertilizer mode — ${cycles}× ${perCycleMin}m bursts, ${soakMin}m soak"
+        notify("fertilizer.armed", [zone: zname, cycles: cycles, perCycleMin: perCycleMin, soakMin: soakMin])
+    } else {
+        cycles = ((settings."zone${zid}CycleSoak" ?: "1") as int)
+        perCycleMin = Math.max(1, (adjMin / cycles) as int)
+        soakMin     = (settings."zone${zid}SoakMinutes" ?: 10) as int
+    }
 
     state.currentZoneId       = zid
     state.currentZoneCycles   = cycles
@@ -1499,6 +1636,11 @@ def zoneCyclePhaseDone() {
         unsubscribeZoneMoisture(zid)
         recordZoneRun(zid, totalSec, "ok")
         consumeWeeklyBudget(zid, totalMin)
+        // Disarm fertilizer mode if it was armed for this run
+        if (settings."zone${zid}FertArmed" == true) {
+            app.updateSetting("zone${zid}FertArmed", [value: "false", type: "bool"])
+            notify("fertilizer.disarmed", [zone: zname])
+        }
         state.currentZoneIdx = (state.currentZoneIdx ?: 0) + 1
         Integer betweenSec = (settings.scheduleBetweenZoneSec ?: 10) as int
         runIn(betweenSec, "startNextZone")
@@ -1532,6 +1674,11 @@ def finishRun() {
     state.currentZoneIdx = 0
     Integer postSec = (settings.pumpSwitch && settings.pumpPostSec) ? (settings.pumpPostSec as int) : 0
     runIn(postSec, "stopPumpIfNeeded")
+    // Release the shared auto-stagger coordination lock
+    if (settings.coordSwitch) {
+        try { settings.coordSwitch.off() }
+        catch (e) { log.warn "coordSwitch.off(): ${e.message}" }
+    }
     notify("schedule.finish")
     publishDashboardState()
 }
@@ -1553,6 +1700,10 @@ def stopAllZones() {
     state.pausedRemainingSec = 0
     state.currentZoneIdx = 0
     stopPumpIfNeeded()
+    if (settings.coordSwitch) {
+        try { settings.coordSwitch.off() }
+        catch (e) { log.warn "coordSwitch.off(): ${e.message}" }
+    }
 }
 
 // =========================================================================
@@ -1619,7 +1770,7 @@ private Map omFetch() {
         query: [
             latitude: lat.toString(),
             longitude: lon.toString(),
-            daily: "temperature_2m_max,precipitation_sum,precipitation_probability_mean,sunrise,sunset",
+            daily: "temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_mean,wind_speed_10m_max,sunrise,sunset",
             hourly: "relative_humidity_2m,precipitation",
             past_days: 1,
             forecast_days: 4,
@@ -2169,6 +2320,38 @@ private String nextScheduledRunString() {
 }
 
 // =========================================================================
+// Smart-skip: frost / cold / wind via Open-Meteo
+// =========================================================================
+
+private Map smartSkipCheck() {
+    boolean wantFrost = settings.smartSkipFrostF != null
+    boolean wantCold  = settings.smartSkipColdHighF != null
+    boolean wantWind  = settings.smartSkipWindMph != null
+    if (!(wantFrost || wantCold || wantWind)) return [skip: false]
+    Map om = fetchWeather()
+    if (!om?.daily?.time) return [skip: false]
+    String todayISO = new Date().format("yyyy-MM-dd", location?.timeZone ?: TimeZone.getDefault())
+    int idx = (om.daily.time as List).findIndexOf { it == todayISO }
+    if (idx < 0) idx = (om.daily.time.size() > 1) ? 1 : 0
+    Number low  = (om.daily.temperature_2m_min ?: [])[idx]
+    Number high = (om.daily.temperature_2m_max ?: [])[idx]
+    Number wind = (om.daily.wind_speed_10m_max ?: [])[idx]
+    if (wantFrost && low != null && (low as float) < (settings.smartSkipFrostF as float)) {
+        return [skip: true, reason: "frost: low ${low}°F < ${settings.smartSkipFrostF}°F",
+                eventKey: "skip.frost", ctx: [tempF: low, threshold: settings.smartSkipFrostF]]
+    }
+    if (wantCold && high != null && (high as float) < (settings.smartSkipColdHighF as float)) {
+        return [skip: true, reason: "cold: high ${high}°F < ${settings.smartSkipColdHighF}°F",
+                eventKey: "skip.cold", ctx: [tempF: high, threshold: settings.smartSkipColdHighF]]
+    }
+    if (wantWind && wind != null && (wind as float) > (settings.smartSkipWindMph as float)) {
+        return [skip: true, reason: "wind: max ${wind} mph > ${settings.smartSkipWindMph} mph",
+                eventKey: "skip.wind", ctx: [windMph: wind, threshold: settings.smartSkipWindMph]]
+    }
+    return [skip: false]
+}
+
+// =========================================================================
 // Moisture-aware watering (skip / early-stop / adapt / learn)
 // =========================================================================
 
@@ -2502,6 +2685,159 @@ def apiDelay() {
     forceRainDelayHours(hours)
     render(contentType: "application/json",
            data: groovy.json.JsonOutput.toJson([ok:true, action:"rain-delay", hours:hours]))
+}
+
+def apiDashboard() {
+    render(contentType: "text/html", data: renderDashboardHtml())
+}
+
+def apiCalendar() {
+    render(contentType: "text/calendar", data: renderCalendarIcs())
+}
+
+private String renderDashboardHtml() {
+    String css = """
+    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;margin:0;background:#f5f5f7;color:#222}
+    header{background:#1a73e8;color:white;padding:12px 16px}
+    header h1{margin:0;font-size:1.2em}
+    section{background:white;margin:10px;padding:12px;border-radius:6px;box-shadow:0 1px 3px rgba(0,0,0,.07)}
+    section h2{margin:0 0 8px;font-size:1em;color:#555;text-transform:uppercase;letter-spacing:.5px}
+    .status-banner{padding:10px;border-radius:6px;font-weight:bold;text-align:center}
+    .banner-running{background:#e8f5e9;color:#2e7d32}
+    .banner-paused {background:#fff8e1;color:#f57c00}
+    .banner-idle   {background:#e3f2fd;color:#1565c0}
+    .banner-blocked{background:#ffebee;color:#c62828}
+    table{width:100%;border-collapse:collapse;font-size:.9em}
+    th,td{padding:6px;text-align:left;border-bottom:1px solid #eee}
+    th{background:#fafafa;font-weight:600;color:#555}
+    .kv{display:grid;grid-template-columns:max-content 1fr;column-gap:12px;row-gap:4px}
+    .kv b{color:#666;font-weight:500}
+    footer{text-align:center;color:#888;font-size:.85em;padding:12px}
+    """
+    String banner, bClass
+    if (state.running) { banner = "▶ RUNNING — ${runStatusString()}"; bClass = "banner-running" }
+    else if (state.paused) { banner = "⏸ PAUSED — ${state.pausedReason ?: ''}"; bClass = "banner-paused" }
+    else if (state.skipNextRun || ((state.forcedRainDelayUntilMs ?: 0L) as long) > now()) { banner = "⏸ BLOCKED — ${forcedDelayDisplayString()}"; bClass = "banner-blocked" }
+    else { banner = "○ idle"; bClass = "banner-idle" }
+
+    StringBuilder sb = new StringBuilder()
+    sb << "<!DOCTYPE html><html><head>"
+    sb << "<meta charset='utf-8'><meta http-equiv='refresh' content='30'>"
+    sb << "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+    sb << "<title>${app.label}</title><style>${css}</style></head><body>"
+    sb << "<header><h1>${app.label}</h1></header>"
+
+    // Status banner
+    sb << "<section><div class='status-banner ${bClass}'>${banner}</div></section>"
+
+    // Key facts
+    sb << "<section><h2>Status</h2><div class='kv'>"
+    [ "Zones configured": zoneCount(),
+      "Next scheduled":   nextScheduledRunString(),
+      "Seasonal mult":    state.seasonalMult ?: "1.0",
+      "Skip next":        state.skipNextRun ? "ARMED" : "no",
+      "Forced rain delay": ((state.forcedRainDelayUntilMs ?: 0L) as long) > now()
+                           ? new Date((state.forcedRainDelayUntilMs ?: 0L) as long).format("yyyy-MM-dd HH:mm")
+                           : "—",
+      "Quiet hours now":  quietHoursActive(),
+      "Mode pause now":   modeShouldPause(),
+      "HSM pause now":    hsmShouldPause(),
+      "Rain sensor wet":  rainSensorWet(),
+      "External pause":   externalPauseActive()
+    ].each { k, v -> sb << "<b>${k}</b><span>${v}</span>" }
+    sb << "</div></section>"
+
+    // Zones
+    sb << "<section><h2>Zones</h2><table><tr><th>#</th><th>Name</th><th>Switch</th><th>State</th><th>Last run</th><th>Wk min</th></tr>"
+    Integer n = zoneCount()
+    Map weekMin = (state.zoneMinutesThisWeek ?: [:]) as Map
+    for (int i = 1; i <= n; i++) {
+        String label = settings."zone${i}Name" ?: "Zone ${i}"
+        def sw = settings."zone${i}Switch"
+        String swLabel = sw ? sw.displayName : "—"
+        String swState = sw ? (sw.currentValue('switch') ?: '?') : "—"
+        String last   = (state.lastRunByZone ?: [:])[i.toString()] ?: "never"
+        String used   = "${weekMin[i.toString()] ?: 0}m"
+        sb << "<tr><td>${i}</td><td>${label}</td><td>${swLabel}</td><td>${swState}</td><td>${last}</td><td>${used}</td></tr>"
+    }
+    sb << "</table></section>"
+
+    // Recent runs
+    List h = (state.runHistory ?: []) as List
+    if (h) {
+        sb << "<section><h2>Last 10 runs</h2><table><tr><th>When</th><th>Outcome</th></tr>"
+        h.reverse()[0..Math.min(9, h.size() - 1)].each { r ->
+            sb << "<tr><td>${r.startedAt}</td><td>${r.outcome}</td></tr>"
+        }
+        sb << "</table></section>"
+    }
+
+    sb << "<footer>${getAppVersion()} · auto-refresh 30s</footer></body></html>"
+    return sb.toString()
+}
+
+private String renderCalendarIcs() {
+    StringBuilder sb = new StringBuilder()
+    sb << "BEGIN:VCALENDAR\r\n"
+    sb << "VERSION:2.0\r\n"
+    sb << "PRODID:-//Zooz Sprinkler Scheduler//${getAppVersion()}//EN\r\n"
+    sb << "CALSCALE:GREGORIAN\r\n"
+    sb << "X-WR-CALNAME:${escapeIcs(app.label)}\r\n"
+    if (!settings.scheduleEnabled || !settings.scheduleDays || !settings.scheduleStartTime) {
+        sb << "END:VCALENDAR\r\n"
+        return sb.toString()
+    }
+    Map<String, Integer> dowNum = [SUN:1, MON:2, TUE:3, WED:4, THU:5, FRI:6, SAT:7]
+    Set<Integer> wantDow = (settings.scheduleDays as List).collect { dowNum[it] }.findAll { it != null } as Set
+    List<String> windows = ["scheduleStartTime", "scheduleStartTime2", "scheduleStartTime3"]
+        .collect { settings[it] }.findAll { it != null }
+
+    // Estimate total minutes per run (sum of base runtimes)
+    Integer estimateMin = 0
+    Integer n = zoneCount()
+    for (int i = 1; i <= n; i++) {
+        if (settings."zone${i}Enabled" != false && settings."zone${i}Switch") {
+            estimateMin += resolveZoneBaseMinutes(i) + ((settings.scheduleBetweenZoneSec ?: 10) as int) / 60
+        }
+    }
+    if (estimateMin < 1) estimateMin = 15
+
+    Calendar c = Calendar.getInstance(location?.timeZone ?: TimeZone.getDefault())
+    for (int d = 0; d < 30; d++) {
+        if (wantDow.contains(c.get(Calendar.DAY_OF_WEEK))) {
+            String dateStr = c.getTime().format("yyyyMMdd", location?.timeZone ?: TimeZone.getDefault())
+            windows.each { String iso ->
+                String hhmm = timeFmt(iso)
+                if (hhmm) {
+                    String dtStart = "${dateStr}T${hhmm.replace(':', '')}00"
+                    Calendar end = (Calendar) c.clone()
+                    String[] hm = hhmm.tokenize(':')
+                    end.set(Calendar.HOUR_OF_DAY, hm[0].toInteger())
+                    end.set(Calendar.MINUTE, hm[1].toInteger())
+                    end.set(Calendar.SECOND, 0)
+                    end.add(Calendar.MINUTE, estimateMin)
+                    String endStr = end.getTime().format("yyyyMMdd'T'HHmmss", location?.timeZone ?: TimeZone.getDefault())
+                    String uid = "${app.id}-${dateStr}-${hhmm.replace(':', '')}@zooz-sprinkler"
+                    sb << "BEGIN:VEVENT\r\n"
+                    sb << "UID:${uid}\r\n"
+                    sb << "DTSTAMP:${new Date().format("yyyyMMdd'T'HHmmss'Z'", TimeZone.getTimeZone('UTC'))}\r\n"
+                    sb << "DTSTART;TZID=${location?.timeZone?.ID ?: 'UTC'}:${dtStart}\r\n"
+                    sb << "DTEND;TZID=${location?.timeZone?.ID ?: 'UTC'}:${endStr}\r\n"
+                    sb << "SUMMARY:${escapeIcs(app.label)}\r\n"
+                    sb << "DESCRIPTION:${escapeIcs("Estimated ${estimateMin}min — ${windows.size()} window(s)/day")}\r\n"
+                    sb << "END:VEVENT\r\n"
+                }
+            }
+        }
+        c.add(Calendar.DAY_OF_MONTH, 1)
+    }
+    sb << "END:VCALENDAR\r\n"
+    return sb.toString()
+}
+
+private String escapeIcs(String s) {
+    if (!s) return ""
+    return s.replace("\\", "\\\\").replace(",", "\\,").replace(";", "\\;").replace("\n", "\\n")
 }
 
 // =========================================================================
