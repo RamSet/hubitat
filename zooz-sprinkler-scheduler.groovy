@@ -2,8 +2,11 @@
  *  Zooz Sprinkler Scheduler — Hubitat app
  *  IMPORT URL: https://raw.githubusercontent.com/RamSet/hubitat/main/zooz-sprinkler-scheduler.groovy
  *
- *  Runs sprinkler zones via Zooz ZEN16 800LR (3-relay) controllers, or any
- *  Hubitat device exposing the Switch capability. Inspired by Plaid Systems'
+ *  Runs sprinkler zones via Zooz ZEN16 (3-relay) or ZEN17 (2-relay) 800LR
+ *  multi-relay controllers — or any Hubitat device exposing the Switch
+ *  capability. The hardware-watchdog push adapts to the relay count of
+ *  each picked controller, so mixing models in one schedule is fine.
+ *  Inspired by Plaid Systems'
  *  Spruce Scheduler — same overall flow (per-zone plant/soil/sprinkler types,
  *  weather-aware seasonal adjust, rain delay, optional pump/master) but
  *  hardware-agnostic so additional relays can be added without code changes.
@@ -38,7 +41,7 @@ definition(
     namespace: "ramset",
     author: "RamSet",
     importUrl: "https://raw.githubusercontent.com/RamSet/hubitat/main/zooz-sprinkler-scheduler.groovy",
-    description: "Sprinkler schedule using Zooz ZEN16 (or any switch) relays — Spruce-style logic, hardware-agnostic",
+    description: "Sprinkler schedule using Zooz ZEN16 / ZEN17 (or any Switch device) relays — Spruce-style logic, hardware-agnostic",
     category: "Green Living",
     // Resized via images.weserv.nl proxy — 618×618 source PNGs would render
     // gigantic in the iOS Hubitat app, which honours the native dimensions.
@@ -59,7 +62,18 @@ mappings {
     path("/calendar.ics")  { action: [GET: "apiCalendar"] }
 }
 
-String getAppVersion() { return "v0.6.0 (2026-06)" }
+String getAppVersion() { return "v0.6.1 (2026-06)" }
+
+// Zooz multi-relay model registry. Per-model lists of the Z-Wave parameter
+// numbers we push for the hardware watchdog:
+//   autoOff[i]   = parameter number that holds R(i+1)'s auto-off timer
+//   unitParam[i] = parameter that holds that timer's unit (we set 0 = minutes)
+// Add new models here when Zooz ships them.
+@groovy.transform.Field static final Map ZOOZ_RELAY_MODELS = [
+    "1": [name: "1 relay (single-relay Zooz)",          autoOff: [6],         unitParam: [15]],
+    "2": [name: "2 relays (ZEN17 / ZEN52 / ZEN72)",     autoOff: [6, 8],      unitParam: [15, 17]],
+    "3": [name: "3 relays (ZEN16 — default)",           autoOff: [6, 8, 10],  unitParam: [15, 17, 19]]
+]
 
 // =========================================================================
 // Notification event keys & defaults
@@ -111,7 +125,7 @@ String getAppVersion() { return "v0.6.0 (2026-06)" }
     "sensor.pause.off" : [section: "Sensors",    default: '${app}: pause sensor ${sensor} clear',  defaultOff: true],
 
     // Hardware & watchdog
-    "hardware.push"    : [section: "Hardware",   default: '${app}: ZEN16 watchdog set to ${minutes}min on ${count} controller(s)'],
+    "hardware.push"    : [section: "Hardware",   default: '${app}: Zooz relay watchdog set to ${minutes}min on ${count} controller(s)'],
     "watchdog.stale"   : [section: "Hardware",   default: '${app}: ${sensor} unreachable for ${hours}h'],
 
     // Test / manual
@@ -208,7 +222,7 @@ def mainPage() {
             href name: "pumpPage", title: "Pump / Master valve", page: "pumpPage",
                  image: openmoji("1F527"),
                  description: pumpSummaryString()
-            href name: "hardwarePage", title: "Hardware safety (ZEN16 watchdog)", page: "hardwarePage",
+            href name: "hardwarePage", title: "Hardware safety (Zooz relay watchdog)", page: "hardwarePage",
                  image: openmoji("1F6E1"),
                  description: hardwareSafetySummaryString()
             href name: "notificationPage", title: "Notifications", page: "notificationPage",
@@ -283,7 +297,7 @@ private List<String> quickWarnings() {
         w << "Weather is enabled but Hubitat location lat/long is not set (Settings → Location)."
     }
     if (!settings.hwZen16Parents) {
-        w << "Hub-independent hardware watchdog is OFF. Recommended: open Hardware safety and pick the ZEN16 parent device(s)."
+        w << "Hub-independent hardware watchdog is OFF. Recommended: open Hardware safety and pick your Zooz relay parent device(s) (ZEN16, ZEN17, etc.)."
     }
     if (state.skipNextRun) w << "Skip-next is armed: the next scheduled run will be skipped."
     Long rd = (state.forcedRainDelayUntilMs ?: 0L) as long
@@ -297,7 +311,7 @@ private List<String> quickWarnings() {
 def zoneListPage() {
     dynamicPage(name: "zoneListPage", title: "Zones") {
         section {
-            paragraph "Add as many zones as you have relays. Each zone maps to a single Hubitat Switch device — typically a child of your Zooz ZEN16 (one of the three relays per controller), but anything with the Switch capability works."
+            paragraph "Add as many zones as you have relays. Each zone maps to a single Hubitat Switch device — typically a child of your Zooz multi-relay controller (ZEN16 = 3 relays, ZEN17 = 2 relays, etc.), but anything with the Switch capability works."
             input name: "zoneCountPref", type: "number", title: "Number of zones",
                   range: "0..64", defaultValue: 0, submitOnChange: true, required: true
         }
@@ -328,7 +342,7 @@ def zoneDetailPage(Map params = [:]) {
                   required: true, submitOnChange: true
             input name: "zone${zid}PortLabel", type: "text",
                   title: "Port label",
-                  description: "Free text — e.g. \"ZEN16 #1 Port 2 (15A)\". Helps you match this zone to a physical relay during wiring audits.",
+                  description: "Free text — e.g. \"ZEN16 #1 R2 (15A)\" or \"ZEN17 #2 R1 (20A)\". Helps you match this zone to a physical relay during wiring audits.",
                   required: false
             input name: "zone${zid}Enabled",   type: "bool",   title: "Zone enabled in schedule",
                   defaultValue: true
@@ -336,7 +350,7 @@ def zoneDetailPage(Map params = [:]) {
         section("Relay (switch device)") {
             input name: "zone${zid}Switch", type: "capability.switch",
                   title: "Switch device",
-                  description: "ZEN16 relay child (or any Switch device)",
+                  description: "Zooz ZEN16/ZEN17 relay child — or any Switch device",
                   required: true, multiple: false, submitOnChange: true
             def sw = settings."zone${zid}Switch"
             if (sw) {
@@ -613,8 +627,8 @@ def rainSensorPage() {
                   multiple: true, required: false, submitOnChange: true
         }
 
-        section("Contact-based rain sensors (incl. ZEN16 inputs)") {
-            paragraph "Most rain sensors sold for irrigation are dry-contact devices — two terminals that get bridged when water collects on the sensor. Wire one to a Zooz ZEN16 input port (Sw1 / Sw2 / Sw3): the ZEN16 driver exposes each input as a child Contact Sensor in Hubitat. Pick that child here. Any other Contact Sensor device (door/window, leaf wetness sensor with contact output, etc.) works too."
+        section("Contact-based rain sensors (incl. Zooz relay inputs)") {
+            paragraph "Most rain sensors sold for irrigation are dry-contact devices — two terminals that get bridged when water collects on the sensor. Wire one to a Zooz multi-relay input port: ZEN16 has Sw1/Sw2/Sw3, ZEN17 has Sw1/Sw2. The Hubitat driver exposes each input as a child Contact Sensor — pick that child here. Any other Contact Sensor device (door/window, leaf-wetness sensor with contact output, etc.) works too."
             input name: "rainSensorContactDevices", type: "capability.contactSensor",
                   title: "Rain contact sensors",
                   multiple: true, required: false, submitOnChange: true
@@ -623,7 +637,7 @@ def rainSensorPage() {
                   options: ["closed": "closed (most rain sensors — contacts close when wet)",
                             "open":   "open   (normally-closed sensors)"],
                   defaultValue: "closed"
-            paragraph "ZEN16 wiring tip: the rain sensor's two leads go to a Sw input (e.g. Sw1) and its paired GND/COM terminal. Set parameter P2 (Sw1 input type) = 1 (toggle switch) so the ZEN16 reports the contact state as an event, then either let the built-in driver auto-create the Sw1 Contact child OR add it manually. Pick the resulting child device above."
+            paragraph "Wiring tip (ZEN16 / ZEN17): the rain sensor's two leads go to a Sw input and its paired GND/COM. Set parameter P2 (Sw1 input type — or P3/P4 for Sw2/Sw3 on ZEN16) = 1 (toggle switch) so the controller reports contact state as an event, then either let the built-in driver auto-create the Sw Contact child OR add it manually. Pick the resulting child device above."
         }
 
         section("Behavior") {
@@ -713,7 +727,7 @@ def pumpPage() {
             if (p) {
                 input name: "pumpPortLabel", type: "text",
                       title: "Physical port label (free text)",
-                      description: "e.g. \"ZEN16 #2 Port 1 (20A)\"", required: false
+                      description: "e.g. \"ZEN16 #2 R1 (20A)\" or \"ZEN17 #1 R1 (20A)\"", required: false
                 input name: "pumpPreSec",  type: "number",
                       title: "Pre-delay (seconds) — pump on, wait, then first zone",
                       range: "0..120", defaultValue: 5
@@ -729,26 +743,30 @@ def pumpPage() {
 def hardwarePage() {
     Integer maxRun = (settings.scheduleMaxRunMinutes ?: 60) as int
     Integer targetMin = Math.max(1, maxRun + 5)   // app max + 5min buffer
-    dynamicPage(name: "hardwarePage", title: "Hardware safety — ZEN16 watchdog") {
+    dynamicPage(name: "hardwarePage", title: "Hardware safety — Zooz relay watchdog") {
         section {
-            paragraph "Why this matters. If the hub crashes mid-cycle, dies, " +
-                      "loses Z-Wave, or the app errors out, the relay stays ON until " +
-                      "someone notices. That's how a stuck sprinkler floods a yard. " +
-                      "Zooz ZEN16 has per-relay hardware auto-off timers " +
-                      "(parameters 6 / 8 / 10) that fire inside the relay itself — " +
-                      "no hub required. We push them once and forget."
-            paragraph "Recommended target for this schedule: ${targetMin} minutes " +
-                      "(the schedule's max-zone-run-minutes plus a 5-minute safety buffer)."
+            paragraph "Why this matters. If the hub crashes mid-cycle, dies, loses Z-Wave, or the app errors out, the relay stays ON until someone notices. That's how a stuck sprinkler floods a yard. Zooz multi-relay devices (ZEN16, ZEN17, etc.) have per-relay hardware auto-off timers that fire inside the relay itself — no hub required. We push them once and forget."
+            paragraph "Recommended target for this schedule: ${targetMin} minutes (max-zone-run-minutes plus a 5-minute safety buffer)."
         }
-        section("Pick the ZEN16 parent controller(s)") {
-            paragraph "Pick the parent ZEN16 device (the one with name containing \"ZEN16\" — not its child relays). Hub will push parameters 6/8/10 (auto-off timer for R1/R2/R3), 15/17/19 (timer unit = minutes), 1 (power-fail state = OFF), and verify 24 (DC motor mode) is OFF."
+        section("Pick the Zooz relay parent controller(s)") {
+            paragraph "Pick the PARENT relay device (the one whose name typically contains ZEN16 / ZEN17 — not its child relays). The model determines which parameter numbers we push:"
+            paragraph "  ZEN16 (3 relays): P6 / P8 / P10 auto-off + P15 / P17 / P19 units\n  ZEN17 (2 relays): P6 / P8 auto-off + P15 / P17 units\n  Plus P1 (power-fail OFF) and P24 (DC-motor OFF) on both."
             input name: "hwZen16Parents", type: "capability.actuator",
-                  title: "ZEN16 parent device(s)",
+                  title: "Zooz relay parent device(s)",
                   multiple: true, required: false, submitOnChange: true
+            if (settings.hwZen16Parents) {
+                paragraph "For each picked controller, set the relay count below so we push only the parameters that model supports:"
+                settings.hwZen16Parents.eachWithIndex { dev, i ->
+                    input name: "hwModel_${dev.id}", type: "enum",
+                          title: "Model of ${dev.displayName}",
+                          options: ZOOZ_RELAY_MODELS.collectEntries { k, v -> [(k): v.name] },
+                          defaultValue: "3"
+                }
+            }
         }
         section("Recommended values") {
             input name: "hwAutoOffMinutes", type: "number",
-                  title: "Auto-off timer (minutes) to push to P6/P8/P10",
+                  title: "Auto-off timer (minutes) to push to every R1/R2/R3 timer",
                   description: "Default = schedule max-run + 5min. 0 disables (not recommended).",
                   range: "0..1440", defaultValue: targetMin
             input name: "hwPowerFailOff", type: "bool",
@@ -763,20 +781,23 @@ def hardwarePage() {
         if (settings.hwZen16Parents) {
             section("Push now") {
                 input name: "btnPushHardwareSafety", type: "button",
-                      title: "Push recommended Z-Wave parameters to selected ZEN16(s)"
+                      title: "Push recommended Z-Wave parameters to selected controller(s)"
                 paragraph "${state.hwLastPushSummary ?: 'No push performed yet.'}"
             }
             section("Selected controllers") {
                 settings.hwZen16Parents.each { dev ->
-                    paragraph "• ${dev.displayName} (id ${dev.id}) — supports setParameter: " +
-                              "${dev.hasCommand('setParameter') ? 'yes' : 'NO — push will fail; install krlaframboise driver or use the built-in ZEN16 driver that exposes setParameter'}"
+                    String modelKey = settings."hwModel_${dev.id}" ?: "3"
+                    String modelName = (ZOOZ_RELAY_MODELS[modelKey]?.name ?: "?") as String
+                    paragraph "• ${dev.displayName} (id ${dev.id}) — model: ${modelName} — setParameter: " +
+                              "${dev.hasCommand('setParameter') ? 'yes' : 'NO — install krlaframboise driver, or use the built-in driver that exposes setParameter'}"
                 }
             }
         }
         section {
             paragraph "References: " +
-                      "<a href='https://www.support.getzooz.com/kb/article/371'>Zooz KB #371 — Sprinkler use on Hubitat</a> · " +
-                      "<a href='https://www.support.getzooz.com/kb/article/376'>KB #376 — Advanced settings</a>"
+                      "<a href='https://www.support.getzooz.com/kb/article/371'>Zooz KB #371 — Sprinkler use on Hubitat (ZEN16)</a> · " +
+                      "<a href='https://www.support.getzooz.com/kb/article/376'>KB #376 — Advanced settings</a> · " +
+                      "ZEN17 parameter numbering follows the same scheme with two relays instead of three."
         }
     }
 }
@@ -1054,10 +1075,11 @@ def aboutPage() {
                       "Import URL: https://raw.githubusercontent.com/RamSet/hubitat/main/zooz-sprinkler-scheduler.groovy"
         }
         section("What this is") {
-            paragraph "A Hubitat app for running sprinkler zones via Zooz ZEN16 800LR multi-relay controllers — or any Hubitat device exposing the Switch capability. Hardware-agnostic, multi-instance, with Spruce-style weather adaptation, per-zone moisture-aware watering, restrictions (quiet hours / mode / HSM), pause-and-resume from external sensors, hub-independent hardware watchdog via Z-Wave parameters, full external JSON/HTML/iCal API, and granular templated notifications with Pushover support."
+            paragraph "A Hubitat app for running sprinkler zones via Zooz ZEN16 / ZEN17 800LR multi-relay controllers — or any Hubitat device exposing the Switch capability. Hardware-agnostic, multi-instance, with Spruce-style weather adaptation, per-zone moisture-aware watering, restrictions (quiet hours / mode / HSM), pause-and-resume from external sensors, hub-independent hardware watchdog via Z-Wave parameters (model-aware: pushes the right per-relay timers for ZEN16's 3 relays or ZEN17's 2 relays), full external JSON/HTML/iCal API, and granular templated notifications with Pushover support."
         }
         section("Changelog") {
-            paragraph "v0.6 — Per-zone child Virtual Switches for HomeKit/Rule-Machine/dashboard control with configurable manual-on auto-off timer (default 10 min, per-zone override). Contact-sensor rain support (incl. ZEN16 input child devices). HTML stripped from input/paragraph text on mobile clients. App icons resized for the iOS Hubitat app."
+            paragraph "v0.6.1 — Generalised hardware-safety push: works with ZEN16 (3 relays), ZEN17 (2 relays), and other Zooz multi-relay models. Per-controller model selector on the Hardware Safety page; push iterates only the parameters relevant to each picked controller. Every UI string and notification message broadened to \"Zooz multi-relay\" instead of \"ZEN16\" specifically."
+            paragraph "v0.6 — Per-zone child Virtual Switches for HomeKit/Rule-Machine/dashboard control with configurable manual-on auto-off timer (default 10 min, per-zone override). Contact-sensor rain support (incl. Zooz relay input child devices). HTML stripped from input/paragraph text on mobile clients. App icons resized for the iOS Hubitat app."
             paragraph "v0.5 — Smart skips (frost/cold/wind via Open-Meteo), per-zone fertilizer mode (one-shot short-burst-with-soak), auto-stagger across instances via shared coordination switch, HTML dashboard endpoint, iCalendar export endpoint, About page."
             paragraph "v0.4 — Per-zone moisture modes (off / skip / earlyStop / adapt / learn), pre/post moisture capture with rolling rate, learned-rate prediction, Moisture page with per-zone history table."
             paragraph "v0.3 — Per-event notification system with 25 named events + templates + Pushover. Spruce-style weekly-minutes runtime. Per-zone weekly budget cap. Today's forecast preview on weather page."
@@ -2221,7 +2243,7 @@ private String forcedDelayDisplayString() {
 def pushHardwareSafety() {
     def parents = settings.hwZen16Parents
     if (!parents) {
-        log.warn "${app.label}: no ZEN16 parents picked — nothing to push"
+        log.warn "${app.label}: no Zooz relay parents picked — nothing to push"
         state.hwLastPushSummary = "No parents selected"
         return
     }
@@ -2234,20 +2256,23 @@ def pushHardwareSafety() {
             fail++
             return
         }
+        String modelKey = settings."hwModel_${dev.id}" ?: "3"
+        Map model = (ZOOZ_RELAY_MODELS[modelKey] ?: ZOOZ_RELAY_MODELS["3"]) as Map
+        List<Integer> autoOffParams = (model.autoOff   ?: []) as List<Integer>
+        List<Integer> unitParams    = (model.unitParam ?: []) as List<Integer>
         try {
-            // Timer unit = minutes (P15, P17, P19)
-            dev.setParameter(15, 1, 0)
-            dev.setParameter(17, 1, 0)
-            dev.setParameter(19, 1, 0)
-            // Auto-off timer for R1/R2/R3 (P6, P8, P10)
-            dev.setParameter(6,  4, mins)
-            dev.setParameter(8,  4, mins)
-            dev.setParameter(10, 4, mins)
-            // Power-fail state = OFF (P1) for safety
+            // Timer unit = minutes
+            unitParams.each { p -> dev.setParameter(p as int, 1, 0) }
+            // Auto-off timer for each relay
+            autoOffParams.each { p -> dev.setParameter(p as int, 4, mins) }
+            // Power-fail state = OFF (P1) — same on all current Zooz multi-relays
             if (settings.hwPowerFailOff != false) dev.setParameter(1, 1, 0)
-            // DC motor interlock = OFF (P24)
-            if (settings.hwForceDcMotorOff != false) dev.setParameter(24, 1, 0)
-            log_ << "${dev.displayName}: pushed P6/P8/P10=${mins}min, P15/17/19=min, P1=off, P24=off"
+            // DC-motor interlock = OFF (P24) — ZEN16 only, harmless on ZEN17 (param doesn't exist; setParameter may silently error)
+            if (settings.hwForceDcMotorOff != false) {
+                try { dev.setParameter(24, 1, 0) } catch (ignored) {}
+            }
+            String pStr = "P${autoOffParams.join('/P')}=${mins}min, P${unitParams.join('/P')}=min"
+            log_ << "${dev.displayName} (${model.name}): pushed ${pStr}, P1=off, P24=off"
             ok++
         } catch (e) {
             log_ << "${dev.displayName}: FAILED — ${e.message}"
