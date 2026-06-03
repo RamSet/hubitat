@@ -2643,8 +2643,8 @@ def apiStatus() {
         nextRunHint:     nextScheduledRunString(),
         seasonalMult:    state.seasonalMult ?: "1.0",
         skipNextArmed:   (state.skipNextRun ?: false),
-        forcedRainDelayUntil: ((state.forcedRainDelayUntilMs ?: 0L) as long > now())
-                              ? new Date((state.forcedRainDelayUntilMs ?: 0L) as long).format("yyyy-MM-dd HH:mm")
+        forcedRainDelayUntil: (((state.forcedRainDelayUntilMs ?: 0L) as long) > now())
+                              ? new Date(((state.forcedRainDelayUntilMs ?: 0L) as long)).format("yyyy-MM-dd HH:mm")
                               : null,
         quietHoursActive: quietHoursActive(),
         modeShouldPause:  modeShouldPause(),
