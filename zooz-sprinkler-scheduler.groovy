@@ -1178,6 +1178,14 @@ def initialize() {
     schedule("0 1 0 ? * 2", "rolloverWeeklyBudget")
     // Lazy check at every wake: if we crossed a week boundary while powered off
     rolloverWeeklyBudgetIfNeeded()
+
+    // Subscribe to rain sensors so a "wet" event during a run can stop it.
+    if (settings.rainSensorWaterDevices) {
+        subscribe(settings.rainSensorWaterDevices, "water", "rainSensorEvent")
+    }
+    // Subscribe to pause sensors (contacts + switches) for mid-run safety stop.
+    if (settings.pauseContacts) subscribe(settings.pauseContacts, "contact", "pauseSensorEvent")
+    if (settings.pauseSwitches) subscribe(settings.pauseSwitches, "switch",  "pauseSensorEvent")
 }
 
 // ---- Restriction-edge handlers ----
@@ -1218,15 +1226,6 @@ def preRunNotify() {
     String msg = "${app.label}: schedule starts in ${lead} minute${lead == 1 ? '' : 's'}"
     notify("pre-run", msg)
     if (descTextEnable) log.info msg
-}
-
-    // Subscribe to rain sensors so a "wet" event during a run can stop it.
-    if (settings.rainSensorWaterDevices) {
-        subscribe(settings.rainSensorWaterDevices, "water", "rainSensorEvent")
-    }
-    // Subscribe to pause sensors (contacts + switches) for mid-run safety stop.
-    if (settings.pauseContacts) subscribe(settings.pauseContacts, "contact", "pauseSensorEvent")
-    if (settings.pauseSwitches) subscribe(settings.pauseSwitches, "switch",  "pauseSensorEvent")
 }
 
 // ---- Mid-run safety event handlers ----
