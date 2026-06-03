@@ -165,7 +165,7 @@ preferences {
 }
 
 def mainPage() {
-    dynamicPage(name: "mainPage", title: "<b>Zooz Sprinkler Scheduler</b> — ${getAppVersion()}",
+    dynamicPage(name: "mainPage", title: "Zooz Sprinkler Scheduler — ${getAppVersion()}",
                 install: true, uninstall: true) {
         // Warnings banner: surface the most actionable config issues at the
         // top of every visit to the main page so they aren't buried.
@@ -179,7 +179,7 @@ def mainPage() {
             }
         }
         section {
-            label title: "<b>Schedule name</b> (shown in the Apps list)",
+            label title: "Schedule name (shown in the Apps list)",
                   required: true
         }
         section("<b>Configuration</b>") {
@@ -244,7 +244,7 @@ def mainPage() {
         }
         section("<b>Logging</b>") {
             input name: "debugOutput", type: "bool", title: "Enable debug logging",
-                  description: "<i>Auto-turns off after 30 minutes</i>", defaultValue: false
+                  description: "Auto-turns off after 30 minutes", defaultValue: false
             input name: "descTextEnable", type: "bool", title: "Enable description text logging",
                   defaultValue: true
         }
@@ -288,7 +288,7 @@ def zoneListPage() {
     dynamicPage(name: "zoneListPage", title: "Zones") {
         section {
             paragraph "Add as many zones as you have relays. Each zone maps to a single Hubitat <b>Switch</b> device — typically a child of your Zooz ZEN16 (one of the three relays per controller), but anything with the Switch capability works."
-            input name: "zoneCountPref", type: "number", title: "<b>Number of zones</b>",
+            input name: "zoneCountPref", type: "number", title: "Number of zones",
                   range: "0..64", defaultValue: 0, submitOnChange: true, required: true
         }
         Integer n = (settings.zoneCountPref ?: 0) as int
@@ -317,16 +317,16 @@ def zoneDetailPage(Map params = [:]) {
             input name: "zone${zid}Name",      type: "text",   title: "Zone name (e.g. \"Front Lawn N\")",
                   required: true, submitOnChange: true
             input name: "zone${zid}PortLabel", type: "text",
-                  title: "Physical port label (free text — e.g. \"ZEN16 #1 Port 2 (15A)\")",
-                  description: "<i>Useful for matching this zone to a relay during wiring audits.</i>",
+                  title: "Port label",
+                  description: "Free text — e.g. \"ZEN16 #1 Port 2 (15A)\". Helps you match this zone to a physical relay during wiring audits.",
                   required: false
             input name: "zone${zid}Enabled",   type: "bool",   title: "Zone enabled in schedule",
                   defaultValue: true
         }
         section("<b>Relay (switch device)</b>") {
             input name: "zone${zid}Switch", type: "capability.switch",
-                  title: "Switch device for this zone",
-                  description: "Pick the ZEN16 relay child device that drives this valve",
+                  title: "Switch device",
+                  description: "ZEN16 relay child (or any Switch device)",
                   required: true, multiple: false, submitOnChange: true
             def sw = settings."zone${zid}Switch"
             if (sw) {
@@ -345,7 +345,7 @@ def zoneDetailPage(Map params = [:]) {
             if ((settings."zone${zid}RuntimeMode" ?: "fixed") == "weekly") {
                 input name: "zone${zid}WeeklyMinutes", type: "number",
                       title: "Total minutes per week (target)",
-                      description: "<i>Distributed across the days-per-week below. Seasonal scaling still applies.</i>",
+                      description: "Distributed across the days-per-week below. Seasonal scaling still applies.",
                       range: "1..1000", defaultValue: 30, required: true
                 input name: "zone${zid}DaysPerWeek", type: "number",
                       title: "Days per week (how often this zone gets watered)",
@@ -354,7 +354,7 @@ def zoneDetailPage(Map params = [:]) {
             } else {
                 input name: "zone${zid}RunMinutes", type: "number",
                       title: "Base run time per cycle (minutes)",
-                      description: "<i>Seasonal weather adjust will scale this if enabled in Weather settings.</i>",
+                      description: "Seasonal weather adjust will scale this if enabled in Weather settings.",
                       range: "1..240", defaultValue: 10, required: true
             }
             input name: "zone${zid}CycleSoak", type: "enum",
@@ -386,7 +386,7 @@ def zoneDetailPage(Map params = [:]) {
         section("<b>Weekly budget cap (optional)</b>") {
             input name: "zone${zid}WeeklyCapMinutes", type: "number",
                   title: "Maximum minutes per ISO week (0 = no cap)",
-                  description: "<i>Hard ceiling tracked per zone. If a run would exceed, the cycle is clipped; if no minutes remain, the zone is skipped (notified via the skip.budget event).</i>",
+                  description: "Hard weekly ceiling. Over-budget runs are clipped; if nothing left, zone is skipped.",
                   range: "0..1000", defaultValue: 0
             paragraph "<i>Used this week: <b>${(state.zoneMinutesThisWeek ?: [:])[zid.toString()] ?: 0} min</b></i>"
         }
@@ -407,7 +407,7 @@ def zoneDetailPage(Map params = [:]) {
         section("<b>Moisture-aware watering (optional)</b>") {
             input name: "zone${zid}MoistureSensor", type: "capability.relativeHumidityMeasurement",
                   title: "Soil moisture sensor",
-                  description: "<i>Any device exposing the <code>humidity</code> attribute (most Hubitat soil moisture sensors), or a <code>moisture</code> attribute for some niche drivers.</i>",
+                  description: "Any device with a humidity attribute (most soil sensors) — or pick the moisture attribute below.",
                   required: false, multiple: false, submitOnChange: true
             if (settings."zone${zid}MoistureSensor") {
                 input name: "zone${zid}MoistureMode", type: "enum",
@@ -425,7 +425,7 @@ def zoneDetailPage(Map params = [:]) {
                       range: "0..100", defaultValue: 50, required: false
                 input name: "zone${zid}MoistureMin", type: "number",
                       title: "Dry-bottom moisture % (zone is \"bone dry\" at or below this)",
-                      description: "<i>Used by adaptive modes to scale runtime. Lower = more aggressive watering when the soil is dry.</i>",
+                      description: "Adaptive scaling uses this. Lower = more water when dry.",
                       range: "0..100", defaultValue: 20, required: false
                 String attrPick = settings."zone${zid}MoistureAttribute" ?: "humidity"
                 input name: "zone${zid}MoistureAttribute", type: "enum",
@@ -490,7 +490,7 @@ def schedulePage() {
         section("<b>Software failsafe (per-zone cap)</b>") {
             input name: "scheduleMaxRunMinutes", type: "number",
                   title: "Maximum single zone run time (minutes)",
-                  description: "<i>Caps every zone's seasonally-adjusted runtime. Set the matching <b>Hardware safety</b> auto-off timer to this value + 5min for hub-independent protection.</i>",
+                  description: "Caps each zone's adjusted runtime. Set Hardware safety auto-off to this +5min for backup.",
                   range: "1..240", defaultValue: 60
         }
     }
@@ -508,7 +508,8 @@ def weatherPage() {
                   title: "Skip schedule when rain is expected or has fallen recently",
                   defaultValue: true
             input name: "rainPopThreshold", type: "number",
-                  title: "Skip if today's precipitation probability is above this % (0 = skip on any chance)",
+                  title: "Skip if today's rain probability ≥ this %",
+                  description: "0 = skip on any chance.",
                   range: "0..100", defaultValue: 60
             input name: "rainAmountThreshold", type: "decimal",
                   title: "Skip if forecast or past-24h rain exceeds this many inches",
@@ -518,25 +519,26 @@ def weatherPage() {
             paragraph "Skip runs based on forecast extremes — useful for off-season frost protection and avoiding water loss in high wind."
             input name: "smartSkipFrostF", type: "number",
                   title: "Skip if overnight low (today) is below this °F (frost protection)",
-                  description: "<i>Typical: 36 (below freezing risk) or 32 (hard freeze).</i>",
+                  description: "Typical: 36 (below freezing risk) or 32 (hard freeze).",
                   range: "-40..60", required: false
             input name: "smartSkipColdHighF", type: "number",
                   title: "Skip if today's high is below this °F (winter mode)",
-                  description: "<i>Typical: 50 (cool-season grass stops growing) or 40 (no point watering anything).</i>",
+                  description: "Typical: 50 (cool-season grass stops growing) or 40 (no point watering anything).",
                   range: "-40..120", required: false
             input name: "smartSkipWindMph", type: "number",
                   title: "Skip if today's max wind is above this mph (atomized spray loss)",
-                  description: "<i>Typical: 15 mph causes significant drift on spray heads; 25 mph is severe.</i>",
+                  description: "Typical: 15 mph causes significant drift on spray heads; 25 mph is severe.",
                   range: "0..100", required: false
         }
 
         section("<b>Seasonal adjust</b>") {
             input name: "seasonalEnabled", type: "bool",
-                  title: "Scale base run times by upcoming weather (hotter/drier → longer; cooler/wetter → shorter)",
+                  title: "Scale runtimes by upcoming weather",
+                  description: "Hotter/drier → longer; cooler/wetter → shorter.",
                   defaultValue: true
             input name: "seasonalMaxPct", type: "number",
                   title: "Cap the seasonal scaling at ±%",
-                  description: "<i>Prevents extreme adjustments. 50 means run time can be scaled from 50% to 150% of baseline.</i>",
+                  description: "Prevents extreme swings. 50 means runtime scales between 50% and 150% of baseline.",
                   range: "0..100", defaultValue: 50
         }
         section("<b>Optional external rain gauge</b>") {
@@ -592,7 +594,7 @@ def rainSensorPage() {
                   title: "Stop a running schedule if a rain sensor goes wet mid-run",
                   defaultValue: true
             input name: "rainSensorClearMinutes", type: "number",
-                  title: "After all rain sensors return to dry, wait this many minutes before un-blocking the schedule",
+                  title: "After sensors go dry, wait N minutes before unblocking",
                   range: "0..720", defaultValue: 60
         }
         if (settings.rainSensorWaterDevices) {
@@ -622,7 +624,7 @@ def pauseSensorPage() {
         section("<b>Switches</b>") {
             input name: "pauseSwitches", type: "capability.switch",
                   title: "Pause when ANY of these switches are in the trigger state",
-                  description: "<i>e.g. a virtual switch tied to Alexa, a wall override, a tablet button</i>",
+                  description: "e.g. a virtual switch tied to Alexa, a wall override, a tablet button",
                   multiple: true, required: false, submitOnChange: true
             input name: "pauseSwitchesState", type: "enum",
                   title: "Trigger state for switches",
@@ -637,7 +639,7 @@ def pauseSensorPage() {
                   defaultValue: "pause"
             input name: "pauseResumeDelaySec", type: "number",
                   title: "After all pause sensors clear, wait this many seconds before resuming",
-                  description: "<i>Lets the door fully close / person walk away before water comes back on.</i>",
+                  description: "Lets the door fully close / person walk away before water comes back on.",
                   range: "0..600", defaultValue: 30
         }
         if (settings.pauseContacts || settings.pauseSwitches) {
@@ -665,7 +667,7 @@ def pumpPage() {
             if (p) {
                 input name: "pumpPortLabel", type: "text",
                       title: "Physical port label (free text)",
-                      description: "<i>e.g. \"ZEN16 #2 Port 1 (20A)\"</i>", required: false
+                      description: "e.g. \"ZEN16 #2 Port 1 (20A)\"</i>", required: false
                 input name: "pumpPreSec",  type: "number",
                       title: "Pre-delay (seconds) — pump on, wait, then first zone",
                       range: "0..120", defaultValue: 5
@@ -701,13 +703,15 @@ def hardwarePage() {
         section("<b>Recommended values</b>") {
             input name: "hwAutoOffMinutes", type: "number",
                   title: "Auto-off timer (minutes) to push to P6/P8/P10",
-                  description: "<i>Default = schedule max-run + 5min buffer. Set 0 to disable hardware watchdog (NOT recommended).</i>",
+                  description: "Default = schedule max-run + 5min. 0 disables (not recommended).",
                   range: "0..1440", defaultValue: targetMin
             input name: "hwPowerFailOff", type: "bool",
-                  title: "Set P1 (power-fail state) = OFF so relays don't auto-resume after a power blip",
+                  title: "Set P1 power-fail state = OFF",
+                  description: "Stops relays auto-resuming after a power blip.",
                   defaultValue: true
             input name: "hwForceDcMotorOff", type: "bool",
-                  title: "Confirm P24 (DC motor interlock mode) = OFF — interlocks R1/R2 if accidentally enabled",
+                  title: "Force P24 DC-motor mode = OFF",
+                  description: "Prevents accidental R1/R2 interlock.",
                   defaultValue: true
         }
         if (settings.hwZen16Parents) {
@@ -1096,7 +1100,7 @@ def notifyEventsPage() {
                     String safeKey = key.replace(".", "_").replace("-", "_")
                     boolean defOn = !(meta.defaultOff == true)
                     input name: "notifyEvent_${safeKey}", type: "bool",
-                          title: "<b>${key}</b> — ${escapeForUi(meta.default as String)}",
+                          title: "${key} — ${escapeForUi(meta.default as String)}",
                           defaultValue: defOn
                     input name: "notifyMsg_${safeKey}", type: "text",
                           title: "Override message (leave blank for default)",
