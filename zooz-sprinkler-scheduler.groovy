@@ -2081,7 +2081,7 @@ def pushHardwareSafety() {
         state.hwLastPushSummary = "No parents selected"
         return
     }
-    Integer mins = (settings.hwAutoOffMinutes ?: ((settings.scheduleMaxRunMinutes ?: 60) as int + 5)) as int
+    Integer mins = (settings.hwAutoOffMinutes ?: (((settings.scheduleMaxRunMinutes ?: 60) as int) + 5)) as int
     int ok = 0, fail = 0
     List<String> log_ = []
     parents.each { dev ->
@@ -3023,7 +3023,7 @@ private String pauseSensorSummaryString() {
 private String hardwareSafetySummaryString() {
     def parents = settings.hwZen16Parents
     if (!parents) return "Not configured — hub-independent watchdog OFF (recommended ON)"
-    Integer mins = (settings.hwAutoOffMinutes ?: ((settings.scheduleMaxRunMinutes ?: 60) as int + 5)) as int
+    Integer mins = (settings.hwAutoOffMinutes ?: (((settings.scheduleMaxRunMinutes ?: 60) as int) + 5)) as int
     return "${parents.size()} controller(s) · auto-off ${mins}min"
 }
 
