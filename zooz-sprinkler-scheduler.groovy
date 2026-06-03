@@ -43,8 +43,17 @@ definition(
     iconUrl:   "https://raw.githubusercontent.com/hfg-gmuend/openmoji/master/color/618x618/1F4A7.png",
     iconX2Url: "https://raw.githubusercontent.com/hfg-gmuend/openmoji/master/color/618x618/1F4A7.png",
     iconX3Url: "https://raw.githubusercontent.com/hfg-gmuend/openmoji/master/color/618x618/1F4A7.png",
-    singleInstance: false
+    singleInstance: false,
+    oauth: true
 )
+
+mappings {
+    path("/status") { action: [GET: "apiStatus"] }
+    path("/run")    { action: [POST: "apiRun"]   }
+    path("/stop")   { action: [POST: "apiStop"]  }
+    path("/skip")   { action: [POST: "apiSkip"]  }
+    path("/delay")  { action: [POST: "apiDelay"] }
+}
 
 String getAppVersion() { return "v0.1.0 (2026-06)" }
 private String openmoji(String code) {
@@ -69,6 +78,10 @@ preferences {
     page(name: "dashboardPage")
     page(name: "notificationPage")
     page(name: "diagnosticsPage")
+    page(name: "restrictionsPage")
+    page(name: "previewPage")
+    page(name: "backupPage")
+    page(name: "apiPage")
 }
 
 def mainPage() {
@@ -120,6 +133,18 @@ def mainPage() {
             href name: "dashboardPage", title: "Dashboard tile", page: "dashboardPage",
                  image: openmoji("1F4F1"),
                  description: dashboardSummaryString()
+            href name: "restrictionsPage", title: "Restrictions (quiet hours / mode / HSM)", page: "restrictionsPage",
+                 image: openmoji("1F6AB"),
+                 description: restrictionsSummaryString()
+            href name: "previewPage", title: "Next 7 days preview", page: "previewPage",
+                 image: openmoji("1F4C5"),
+                 description: previewSummaryString()
+            href name: "backupPage", title: "Backup / restore configuration", page: "backupPage",
+                 image: openmoji("1F4BE"),
+                 description: backupSummaryString()
+            href name: "apiPage", title: "External JSON API", page: "apiPage",
+                 image: openmoji("1F517"),
+                 description: apiSummaryString()
             href name: "diagnosticsPage", title: "Diagnostics & test runs", page: "diagnosticsPage",
                  image: openmoji("1F50D"),
                  description: diagnosticsSummaryString()
@@ -577,6 +602,124 @@ def diagnosticsPage() {
     }
 }
 
+def restrictionsPage() {
+    dynamicPage(name: "restrictionsPage", title: "Restrictions") {
+        section("<b>Quiet hours blackout</b>") {
+            paragraph "Block runs between these times. If a scheduled trigger falls in the quiet window, it's skipped. Optionally, an in-progress run is stopped when quiet hours begin (the rest of the plan is skipped — pick up next scheduled window)."
+            input name: "quietHoursEnabled", type: "bool",
+                  title: "Enable quiet hours", defaultValue: false, submitOnChange: true
+            if (settings.quietHoursEnabled) {
+                input name: "quietStartTime", type: "time",
+                      title: "Start of quiet window (no runs after)",
+                      required: true
+                input name: "quietEndTime", type: "time",
+                      title: "End of quiet window (runs allowed after)",
+                      required: true
+                input name: "quietStopInProgress", type: "bool",
+                      title: "Stop a run already in progress when quiet hours begin",
+                      defaultValue: true
+            }
+        }
+
+        section("<b>Hubitat mode pause</b>") {
+            paragraph "Pause/skip the schedule when the Hubitat location is in any of these modes."
+            input name: "pauseModes", type: "mode",
+                  title: "Pause when mode is", multiple: true, required: false
+        }
+
+        section("<b>HSM (Hubitat Safety Monitor) pause</b>") {
+            paragraph "Pause if HSM enters an alarmed state (intrusion / water / smoke). Re-enables when HSM clears."
+            input name: "hsmPauseEnabled", type: "bool",
+                  title: "Pause schedule when HSM is in any alarmed state",
+                  defaultValue: false
+            input name: "hsmPauseArmedAway", type: "bool",
+                  title: "Also pause when HSM is in armedAway",
+                  defaultValue: false
+        }
+
+        section("<b>Pre-run lead notification</b>") {
+            paragraph "Send a notification N minutes BEFORE each scheduled window starts. Lets people clear the yard. Uses the notification devices selected on the Notifications page."
+            input name: "preRunLeadMinutes", type: "number",
+                  title: "Minutes before scheduled start (0 = disabled)",
+                  range: "0..60", defaultValue: 0
+        }
+
+        if (settings.quietHoursEnabled || settings.pauseModes || settings.hsmPauseEnabled) {
+            section("<b>Current state</b>") {
+                paragraph quietHoursActive() ? "🌙 In quiet hours right now — runs blocked" : "✓ Outside quiet hours"
+                if (settings.pauseModes) paragraph "Current mode: <b>${location?.mode ?: '?'}</b> — " +
+                                                    "${modeShouldPause() ? '⏸ in pause list' : '✓ not in pause list'}"
+                if (settings.hsmPauseEnabled) paragraph "HSM state: <b>${location?.hsmStatus ?: 'unknown'}</b> — " +
+                                                       "${hsmShouldPause() ? '⏸ alarmed' : '✓ disarmed/clear'}"
+            }
+        }
+    }
+}
+
+def previewPage() {
+    dynamicPage(name: "previewPage", title: "Next 7 days preview") {
+        section {
+            paragraph "Calendar view of the next 7 days. Shows when each window would run, after accounting for skip-next, forced rain delay, day-of-week filters, and quiet hours. (Weather rain-skip is dynamic and can't be predicted ahead of time.)"
+        }
+        section("<b>Schedule</b>") {
+            paragraph previewNextSevenDaysHtml()
+        }
+    }
+}
+
+def backupPage() {
+    dynamicPage(name: "backupPage", title: "Backup / restore configuration") {
+        section("<b>Export</b>") {
+            paragraph "<i>Copy the JSON below to back up this schedule. Device references (switches, sensors, controllers) are stored as labels — you'll have to re-pick the actual devices after restore on a different hub.</i>"
+            input name: "btnRefreshExport", type: "button", title: "Refresh export"
+            paragraph "<textarea readonly style='width:100%;height:240px;font-family:monospace;font-size:0.85em'>${exportConfigJson()}</textarea>"
+        }
+        section("<b>Import</b>") {
+            paragraph "<i>Paste a previously exported JSON and tap Apply. Non-device settings (run times, weather thresholds, days, etc.) are restored. Existing zones are preserved unless overwritten by the import.</i>"
+            input name: "importJson", type: "text",
+                  title: "Paste JSON here",
+                  required: false
+            input name: "btnImportConfig", type: "button", title: "Apply import"
+            if (state.lastImportSummary) {
+                paragraph "<i>${state.lastImportSummary}</i>"
+            }
+        }
+    }
+}
+
+def apiPage() {
+    String token = state.apiAccessToken ?: ""
+    String localUri = ""
+    try { localUri = getFullLocalApiServerUrl() } catch (ignored) {}
+    dynamicPage(name: "apiPage", title: "External JSON API") {
+        section("<b>What this is</b>") {
+            paragraph "Read-only status JSON plus a small set of POST endpoints (run / stop / skip / delay). Token-protected. Use it for a phone widget, a Grafana panel, a script that triggers watering after sunset, etc."
+        }
+        section("<b>Endpoints</b>") {
+            if (!token) {
+                paragraph "<i>Token not yet generated. Tap below to generate one (Hubitat will create an OAuth access token for this app).</i>"
+                input name: "btnGenerateApiToken", type: "button", title: "Generate access token"
+            } else {
+                paragraph "<b>Token:</b> <code>${token}</code><br>" +
+                          "<b>Local base URL:</b> <code>${localUri}</code><br><br>" +
+                          "<b>GET</b>  <code>${localUri}/status?access_token=${token}</code><br>" +
+                          "<b>POST</b> <code>${localUri}/run?access_token=${token}</code><br>" +
+                          "<b>POST</b> <code>${localUri}/stop?access_token=${token}</code><br>" +
+                          "<b>POST</b> <code>${localUri}/skip?access_token=${token}</code><br>" +
+                          "<b>POST</b> <code>${localUri}/delay?access_token=${token}&hours=24</code>"
+                input name: "btnRevokeApiToken", type: "button", title: "Revoke / regenerate token"
+            }
+        }
+        section("<b>Example</b>") {
+            paragraph "<pre style='font-size:0.85em;background:#f4f4f4;padding:6px'>" +
+                      "curl -s '${localUri}/status?access_token=${token ?: 'TOKEN'}'\n" +
+                      "curl -X POST '${localUri}/run?access_token=${token ?: 'TOKEN'}'\n" +
+                      "curl -X POST '${localUri}/delay?access_token=${token ?: 'TOKEN'}&hours=24'" +
+                      "</pre>"
+        }
+    }
+}
+
 def notificationPage() {
     dynamicPage(name: "notificationPage", title: "Notifications") {
         section {
@@ -623,11 +766,75 @@ def initialize() {
                 String cron = buildCron(t, settings.scheduleDays)
                 if (descTextEnable) log.info "${app.label}: window ${i + 1} scheduled at cron='${cron}'"
                 schedule(cron, "runSchedule")
+                // Pre-run lead notification (N minutes before the window)
+                Integer lead = (settings.preRunLeadMinutes ?: 0) as int
+                if (lead > 0) {
+                    String leadCron = buildLeadCron(t, settings.scheduleDays, lead)
+                    if (leadCron) {
+                        schedule(leadCron, "preRunNotify")
+                    }
+                }
             }
         }
     }
+
+    // Quiet hours edge-trigger: when the start time arrives, run the
+    // in-progress-stop check.
+    if (settings.quietHoursEnabled && settings.quietStartTime) {
+        schedule(buildDailyCron(settings.quietStartTime), "quietHoursStart")
+    }
+
+    // Mode / HSM subscriptions
+    if (settings.pauseModes) subscribe(location, "mode", "modeChanged")
+    if (settings.hsmPauseEnabled || settings.hsmPauseArmedAway) {
+        subscribe(location, "hsmStatus", "hsmChanged")
+        subscribe(location, "hsmAlert",  "hsmChanged")
+    }
+
     maintainDashboardChild()
     runEvery1Hour("publishDashboardState")
+    runEvery1Hour("zen16Watchdog")
+}
+
+// ---- Restriction-edge handlers ----
+
+def quietHoursStart() {
+    if (!state.running) return
+    if (settings.quietStopInProgress == false) return
+    log.warn "${app.label}: quiet hours starting — stopping in-progress run"
+    notify("quiet", "${app.label}: quiet hours — stopped in-progress run")
+    stopAllZones()
+}
+
+def modeChanged(evt) {
+    if (modeShouldPause() && state.running) {
+        log.warn "${app.label}: Hubitat mode changed to ${evt?.value} — pausing run"
+        pauseRunningSchedule("mode=${evt?.value}")
+    } else if (!modeShouldPause() && state.paused && (state.pausedReason ?: "").startsWith("mode=")) {
+        log.info "${app.label}: mode cleared — resuming"
+        Integer delaySec = (settings.pauseResumeDelaySec ?: 30) as int
+        runIn(Math.max(1, delaySec), "doResumeAfterPause")
+    }
+}
+
+def hsmChanged(evt) {
+    if (hsmShouldPause() && state.running) {
+        log.warn "${app.label}: HSM=${location?.hsmStatus} — pausing run"
+        pauseRunningSchedule("hsm=${location?.hsmStatus}")
+    } else if (!hsmShouldPause() && state.paused && (state.pausedReason ?: "").startsWith("hsm=")) {
+        log.info "${app.label}: HSM cleared — resuming"
+        Integer delaySec = (settings.pauseResumeDelaySec ?: 30) as int
+        runIn(Math.max(1, delaySec), "doResumeAfterPause")
+    }
+}
+
+def preRunNotify() {
+    Integer lead = (settings.preRunLeadMinutes ?: 0) as int
+    if (lead <= 0) return
+    String msg = "${app.label}: schedule starts in ${lead} minute${lead == 1 ? '' : 's'}"
+    notify("pre-run", msg)
+    if (descTextEnable) log.info msg
+}
 
     // Subscribe to rain sensors so a "wet" event during a run can stop it.
     if (settings.rainSensorWaterDevices) {
@@ -788,6 +995,24 @@ def runSchedule(Map opts = [:]) {
         log.info "${app.label}: forced rain delay active until ${until}"
         recordRunSkip("forced rain delay until ${until}")
         if (settings.notifyOnSkip) notify("rain-delay", "${app.label}: forced rain delay until ${until}")
+        return
+    }
+    if (quietHoursActive()) {
+        log.info "${app.label}: skipped — in quiet hours"
+        recordRunSkip("quiet hours")
+        if (settings.notifyOnSkip) notify("quiet", "${app.label}: skipped — quiet hours active")
+        return
+    }
+    if (modeShouldPause()) {
+        log.info "${app.label}: skipped — Hubitat mode is ${location?.mode}"
+        recordRunSkip("mode=${location?.mode}")
+        if (settings.notifyOnSkip) notify("mode", "${app.label}: skipped — mode is ${location?.mode}")
+        return
+    }
+    if (hsmShouldPause()) {
+        log.info "${app.label}: skipped — HSM is ${location?.hsmStatus}"
+        recordRunSkip("HSM=${location?.hsmStatus}")
+        if (settings.notifyOnSkip) notify("hsm", "${app.label}: skipped — HSM is ${location?.hsmStatus}")
         return
     }
     if (externalPauseActive()) {
@@ -1534,6 +1759,283 @@ private String nextScheduledRunString() {
 }
 
 // =========================================================================
+// Quiet hours / mode / HSM gating
+// =========================================================================
+
+private boolean quietHoursActive() {
+    if (!settings.quietHoursEnabled) return false
+    if (!settings.quietStartTime || !settings.quietEndTime) return false
+    return timeOfDayIsBetween(
+        toDateTime(settings.quietStartTime),
+        toDateTime(settings.quietEndTime),
+        new Date(),
+        location?.timeZone
+    )
+}
+
+private boolean modeShouldPause() {
+    def modes = settings.pauseModes as List
+    if (!modes) return false
+    return modes.any { it == location?.mode }
+}
+
+private boolean hsmShouldPause() {
+    String hsm = location?.hsmStatus
+    if (!hsm) return false
+    if (settings.hsmPauseEnabled) {
+        if (hsm in ["intrusion", "intrusion-home", "intrusion-night", "smoke", "water", "rules"]) return true
+        if (hsm?.endsWith("Alert")) return true
+    }
+    if (settings.hsmPauseArmedAway && hsm == "armedAway") return true
+    return false
+}
+
+// Build a cron expression that fires `leadMin` minutes before `timeStr` on
+// the configured days. Returns null if subtraction crosses midnight (we
+// don't support that edge case for simplicity).
+private String buildLeadCron(String timeStr, List daysList, int leadMin) {
+    Date t = timeToday(timeStr, location?.timeZone)
+    Calendar c = Calendar.getInstance(location?.timeZone ?: TimeZone.getDefault())
+    c.setTime(t)
+    c.add(Calendar.MINUTE, -leadMin)
+    int hour = c.get(Calendar.HOUR_OF_DAY)
+    int min  = c.get(Calendar.MINUTE)
+    Map<String, Integer> mapDow = [SUN:1, MON:2, TUE:3, WED:4, THU:5, FRI:6, SAT:7]
+    List<Integer> dowNums = daysList.collect { mapDow[it] }.findAll { it != null }
+    String dowStr = dowNums.sort().join(",")
+    return "0 ${min} ${hour} ? * ${dowStr}"
+}
+
+private String buildDailyCron(String timeStr) {
+    Date t = timeToday(timeStr, location?.timeZone)
+    Calendar c = Calendar.getInstance(location?.timeZone ?: TimeZone.getDefault())
+    c.setTime(t)
+    return "0 ${c.get(Calendar.MINUTE)} ${c.get(Calendar.HOUR_OF_DAY)} * * ?"
+}
+
+// =========================================================================
+// 7-day schedule preview
+// =========================================================================
+
+private String previewNextSevenDaysHtml() {
+    if (!settings.scheduleEnabled || !settings.scheduleStartTime || !settings.scheduleDays) {
+        return "<i>Schedule disabled — nothing to preview.</i>"
+    }
+    Map<Integer, String> dowName = [1:"Sun",2:"Mon",3:"Tue",4:"Wed",5:"Thu",6:"Fri",7:"Sat"]
+    Map<String, Integer> dowNum  = [SUN:1, MON:2, TUE:3, WED:4, THU:5, FRI:6, SAT:7]
+    Set<Integer> wantDow = (settings.scheduleDays as List).collect { dowNum[it] } as Set
+    Set<Integer> wantDow0 = wantDow.findAll { it != null } as Set
+
+    List<String> windows = ["scheduleStartTime", "scheduleStartTime2", "scheduleStartTime3"]
+        .collect { settings[it] }
+        .findAll { it != null }
+        .collect { timeFmt(it) }
+
+    Long skipUntilMs = (state.forcedRainDelayUntilMs ?: 0L) as long
+    boolean skipNextArmed = state.skipNextRun
+    Calendar c = Calendar.getInstance(location?.timeZone ?: TimeZone.getDefault())
+    StringBuilder sb = new StringBuilder("<table style='width:100%;font-family:monospace;font-size:0.9em'>")
+    sb << "<tr><th align='left'>Date</th><th align='left'>Day</th><th align='left'>Windows</th><th align='left'>Status</th></tr>"
+    for (int d = 0; d < 7; d++) {
+        Date day = c.getTime()
+        int dow = c.get(Calendar.DAY_OF_WEEK)
+        String dateStr = day.format("yyyy-MM-dd", location?.timeZone ?: TimeZone.getDefault())
+        boolean runsToday = wantDow0.contains(dow)
+        String windowsStr = runsToday ? windows.join(", ") : "—"
+        List<String> blockers = []
+        if (!runsToday) blockers << "not a watering day"
+        if (d == 0 && skipNextArmed) blockers << "next-run will be skipped"
+        if (skipUntilMs > day.getTime() && skipUntilMs > now()) {
+            String until = new Date(skipUntilMs).format("yyyy-MM-dd HH:mm", location?.timeZone ?: TimeZone.getDefault())
+            blockers << "blocked by forced rain delay until ${until}"
+        }
+        if (settings.quietHoursEnabled && windows && windowsStr != "—") {
+            // Cheap quiet-hours hint: just remind that quiet hours apply.
+            blockers << "quiet hours apply"
+        }
+        String status = blockers.isEmpty() ? (runsToday ? "✓ will run" : "—") : "⚠ ${blockers.join('; ')}"
+        sb << "<tr><td>${dateStr}</td><td>${dowName[dow]}</td><td>${windowsStr}</td><td>${status}</td></tr>"
+        c.add(Calendar.DAY_OF_MONTH, 1)
+    }
+    sb << "</table>"
+    return sb.toString()
+}
+
+private String timeFmt(String iso) {
+    if (!iso) return ""
+    if (iso.contains("T")) return iso.tokenize("T")[1].substring(0,5)
+    return iso
+}
+
+// =========================================================================
+// External API endpoints (OAuth)
+// =========================================================================
+
+def apiStatus() {
+    Map body = [
+        appLabel:        app.label,
+        version:         getAppVersion(),
+        status:          runStatusString(),
+        running:         state.running ?: false,
+        paused:          state.paused ?: false,
+        currentZoneId:   state.currentZoneId ?: 0,
+        currentZoneName: state.currentZoneId ? (settings."zone${state.currentZoneId}Name" ?: "Zone ${state.currentZoneId}") : null,
+        zoneCount:       zoneCount(),
+        nextRunHint:     nextScheduledRunString(),
+        seasonalMult:    state.seasonalMult ?: "1.0",
+        skipNextArmed:   (state.skipNextRun ?: false),
+        forcedRainDelayUntil: ((state.forcedRainDelayUntilMs ?: 0L) as long > now())
+                              ? new Date((state.forcedRainDelayUntilMs ?: 0L) as long).format("yyyy-MM-dd HH:mm")
+                              : null,
+        quietHoursActive: quietHoursActive(),
+        modeShouldPause:  modeShouldPause(),
+        hsmShouldPause:   hsmShouldPause(),
+        rainSensorWet:    rainSensorWet(),
+        externalPause:    externalPauseActive(),
+        recentRuns:       (state.runHistory ?: [])[-5..-1] ?: []
+    ]
+    render(contentType: "application/json", data: groovy.json.JsonOutput.toJson(body))
+}
+
+def apiRun() {
+    log.info "${app.label}: API run requested"
+    runIn(1, "runSchedule")
+    render(contentType: "application/json", data: '{"ok":true,"action":"run"}')
+}
+
+def apiStop() {
+    log.info "${app.label}: API stop requested"
+    stopAllZones()
+    render(contentType: "application/json", data: '{"ok":true,"action":"stop"}')
+}
+
+def apiSkip() {
+    log.info "${app.label}: API skip requested"
+    skipNext()
+    render(contentType: "application/json", data: '{"ok":true,"action":"skip-next-armed"}')
+}
+
+def apiDelay() {
+    int hours = (params?.hours ?: 24) as int
+    if (hours <= 0) {
+        clearForcedDelays()
+        render(contentType: "application/json", data: '{"ok":true,"action":"cleared"}')
+        return
+    }
+    forceRainDelayHours(hours)
+    render(contentType: "application/json",
+           data: groovy.json.JsonOutput.toJson([ok:true, action:"rain-delay", hours:hours]))
+}
+
+// =========================================================================
+// Configuration backup / restore
+// =========================================================================
+
+private String exportConfigJson() {
+    Integer n = zoneCount()
+    Map data = [
+        exportedAt: nowString(),
+        version:    getAppVersion(),
+        scheduleEnabled:        settings.scheduleEnabled,
+        scheduleDays:           settings.scheduleDays,
+        scheduleStartTime:      settings.scheduleStartTime,
+        scheduleStartTime2:     settings.scheduleStartTime2,
+        scheduleStartTime3:     settings.scheduleStartTime3,
+        scheduleOrder:          settings.scheduleOrder,
+        scheduleBetweenZoneSec: settings.scheduleBetweenZoneSec,
+        scheduleMaxRunMinutes:  settings.scheduleMaxRunMinutes,
+        rainDelayEnabled:       settings.rainDelayEnabled,
+        rainPopThreshold:       settings.rainPopThreshold,
+        rainAmountThreshold:    settings.rainAmountThreshold,
+        seasonalEnabled:        settings.seasonalEnabled,
+        seasonalMaxPct:         settings.seasonalMaxPct,
+        quietHoursEnabled:      settings.quietHoursEnabled,
+        quietStartTime:         settings.quietStartTime,
+        quietEndTime:           settings.quietEndTime,
+        quietStopInProgress:    settings.quietStopInProgress,
+        preRunLeadMinutes:      settings.preRunLeadMinutes,
+        pauseResumeDelaySec:    settings.pauseResumeDelaySec,
+        zoneCountPref:          settings.zoneCountPref,
+        zones: (1..n).collect { i -> [
+            id:           i,
+            name:         settings."zone${i}Name",
+            portLabel:    settings."zone${i}PortLabel",
+            switchLabel:  settings."zone${i}Switch"?.displayName,
+            enabled:      settings."zone${i}Enabled",
+            runMinutes:   settings."zone${i}RunMinutes",
+            cycleSoak:    settings."zone${i}CycleSoak",
+            soakMinutes:  settings."zone${i}SoakMinutes",
+            plant:        settings."zone${i}Plant",
+            sprinkler:    settings."zone${i}Sprinkler",
+            soil:         settings."zone${i}Soil"
+        ] }
+    ]
+    return groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(data))
+}
+
+private void importConfig(String json) {
+    if (!json?.trim()) {
+        state.lastImportSummary = "Nothing pasted."
+        return
+    }
+    Map data
+    try {
+        data = new groovy.json.JsonSlurper().parseText(json) as Map
+    } catch (e) {
+        state.lastImportSummary = "Could not parse JSON: ${e.message}"
+        return
+    }
+    int applied = 0
+    int skipped = 0
+    data.each { k, v ->
+        if (k in ["exportedAt", "version", "zones"]) { skipped++; return }
+        try { app.updateSetting(k as String, v); applied++ } catch (e) { skipped++ }
+    }
+    (data.zones ?: []).each { Map z ->
+        int i = (z.id ?: 0) as int
+        if (i <= 0) return
+        ["name":"Name","portLabel":"PortLabel","enabled":"Enabled","runMinutes":"RunMinutes",
+         "cycleSoak":"CycleSoak","soakMinutes":"SoakMinutes","plant":"Plant","sprinkler":"Sprinkler","soil":"Soil"
+        ].each { src, sfx ->
+            def val = z[src]
+            if (val != null) {
+                try { app.updateSetting("zone${i}${sfx}" as String, val); applied++ } catch (e) { skipped++ }
+            }
+        }
+    }
+    state.lastImportSummary = "Applied ${applied} setting(s), skipped ${skipped} @ ${nowString()}. Re-pick device references for the affected zones."
+    log.info "${app.label}: import ${state.lastImportSummary}"
+}
+
+// =========================================================================
+// ZEN16 reachability watchdog
+// =========================================================================
+
+def zen16Watchdog() {
+    def parents = settings.hwZen16Parents
+    if (!parents) return
+    long now = now()
+    long staleMs = ((settings.zen16StaleHours ?: 6) as int) * 3600L * 1000L
+    parents.each { dev ->
+        try {
+            // Hubitat exposes lastActivity as Date for many drivers; fall back to currentValue("switch") time.
+            Long last = null
+            if (dev.respondsTo("getLastActivity")) {
+                Date la = dev.getLastActivity()
+                if (la) last = la.getTime()
+            }
+            if (last && (now - last) > staleMs) {
+                long hrs = (now - last) / 3600000L
+                log.warn "${app.label}: ZEN16 '${dev.displayName}' has been quiet for ${hrs}h"
+                notify("watchdog", "${app.label}: ${dev.displayName} unreachable for ${hrs}h")
+            }
+        } catch (e) {
+            // ignore — driver may not expose lastActivity
+        }
+    }
+}
+
+// =========================================================================
 // UI summary strings & helpers
 // =========================================================================
 
@@ -1630,6 +2132,28 @@ private String diagnosticsSummaryString() {
     return "Health, test runs, skip-next/rain-delay — ${status}"
 }
 
+private String restrictionsSummaryString() {
+    List parts = []
+    if (settings.quietHoursEnabled) parts << "quiet ${timeFmt(settings.quietStartTime)}-${timeFmt(settings.quietEndTime)}"
+    if (settings.pauseModes) parts << "mode-pause: ${(settings.pauseModes as List).join(',')}"
+    if (settings.hsmPauseEnabled) parts << "HSM-pause"
+    Integer lead = (settings.preRunLeadMinutes ?: 0) as int
+    if (lead > 0) parts << "pre-run ${lead}min"
+    return parts.isEmpty() ? "None configured" : parts.join(" · ")
+}
+
+private String previewSummaryString() {
+    return settings.scheduleEnabled ? "Calendar of next 7 days" : "(schedule disabled)"
+}
+
+private String backupSummaryString() {
+    return state.lastImportSummary ? "Last import: ${state.lastImportSummary.take(80)}…" : "Export / restore JSON"
+}
+
+private String apiSummaryString() {
+    return state.apiAccessToken ? "Token active" : "No token — tap to generate"
+}
+
 private String notificationSummaryString() {
     if (!settings.notifyDevices) return "No notification devices"
     List flags = []
@@ -1710,6 +2234,24 @@ def appButtonHandler(String btn) {
             break
         case "btnClearRainDelay":
             clearForcedDelays()
+            break
+        case "btnRefreshExport":
+            // No-op; rendering exportConfigJson() is what refreshes the page.
+            break
+        case "btnImportConfig":
+            importConfig(settings.importJson as String)
+            break
+        case "btnGenerateApiToken":
+            try {
+                state.apiAccessToken = createAccessToken()
+                log.info "${app.label}: API token generated"
+            } catch (e) {
+                log.warn "${app.label}: createAccessToken failed (is OAuth enabled in app settings?) — ${e.message}"
+            }
+            break
+        case "btnRevokeApiToken":
+            state.apiAccessToken = null
+            log.info "${app.label}: API token revoked"
             break
         default:
             // Per-zone test buttons: "btnTestZone_<N>"
