@@ -40,9 +40,11 @@ definition(
     importUrl: "https://raw.githubusercontent.com/RamSet/hubitat/main/zooz-sprinkler-scheduler.groovy",
     description: "Sprinkler schedule using Zooz ZEN16 (or any switch) relays — Spruce-style logic, hardware-agnostic",
     category: "Green Living",
-    iconUrl:   "https://raw.githubusercontent.com/hfg-gmuend/openmoji/master/color/618x618/1F4A7.png",
-    iconX2Url: "https://raw.githubusercontent.com/hfg-gmuend/openmoji/master/color/618x618/1F4A7.png",
-    iconX3Url: "https://raw.githubusercontent.com/hfg-gmuend/openmoji/master/color/618x618/1F4A7.png",
+    // Resized via images.weserv.nl proxy — 618×618 source PNGs would render
+    // gigantic in the iOS Hubitat app, which honours the native dimensions.
+    iconUrl:   "https://images.weserv.nl/?url=raw.githubusercontent.com/hfg-gmuend/openmoji/master/color/618x618/1F4A7.png&w=64&h=64",
+    iconX2Url: "https://images.weserv.nl/?url=raw.githubusercontent.com/hfg-gmuend/openmoji/master/color/618x618/1F4A7.png&w=128&h=128",
+    iconX3Url: "https://images.weserv.nl/?url=raw.githubusercontent.com/hfg-gmuend/openmoji/master/color/618x618/1F4A7.png&w=192&h=192",
     singleInstance: false,
     oauth: true
 )
@@ -126,8 +128,13 @@ String getAppVersion() { return "v0.5.0 (2026-06)" }
 ]
 
 @groovy.transform.Field static final List NOTIFY_PRIORITIES = ["default", "-2 silent", "-1 quiet", "0 normal", "1 high", "2 emergency"]
+// Icon URL builder. The Hubitat mobile app honours the source PNG's native
+// dimensions — OpenMoji ships them at 618×618, which makes them gigantic on
+// phones. We route through images.weserv.nl (free, no auth) to resize to 72px,
+// matching the size the web UI scales them to with CSS.
 private String openmoji(String code) {
-    return "https://raw.githubusercontent.com/hfg-gmuend/openmoji/master/color/618x618/${code}.png"
+    String src = "raw.githubusercontent.com/hfg-gmuend/openmoji/master/color/618x618/${code}.png"
+    return "https://images.weserv.nl/?url=${src}&w=72&h=72"
 }
 
 // =========================================================================
