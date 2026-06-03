@@ -70,7 +70,7 @@ String getAppVersion() { return "v0.5.0 (2026-06)" }
 // ${remaining}, ${sensor}, ${count}, ${minutes}, ${hours}, ${detail}, ${planSize},
 // ${seasonalMult}, ${until}, ${mode}, ${hsm}, ${delay}. Missing variables
 // render as the empty string.
-private static final Map NOTIFY_EVENTS = [
+@groovy.transform.Field static final Map NOTIFY_EVENTS = [
     // Lifecycle
     "schedule.start"   : [section: "Lifecycle",  default: '${app}: ▶ schedule starting — ${planSize} zone(s), seasonal ×${seasonalMult}'],
     "schedule.finish"  : [section: "Lifecycle",  default: '${app}: ■ schedule complete'],
@@ -125,7 +125,7 @@ private static final Map NOTIFY_EVENTS = [
     "fertilizer.disarmed": [section: "Lifecycle",  default: '${app}: ${zone} fertilizer mode complete and disarmed', defaultOff: true]
 ]
 
-private static final List NOTIFY_PRIORITIES = ["default", "-2 silent", "-1 quiet", "0 normal", "1 high", "2 emergency"]
+@groovy.transform.Field static final List NOTIFY_PRIORITIES = ["default", "-2 silent", "-1 quiet", "0 normal", "1 high", "2 emergency"]
 private String openmoji(String code) {
     return "https://raw.githubusercontent.com/hfg-gmuend/openmoji/master/color/618x618/${code}.png"
 }
