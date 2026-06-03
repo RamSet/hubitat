@@ -55,7 +55,61 @@ mappings {
     path("/delay")  { action: [POST: "apiDelay"] }
 }
 
-String getAppVersion() { return "v0.1.0 (2026-06)" }
+String getAppVersion() { return "v0.3.0 (2026-06)" }
+
+// =========================================================================
+// Notification event keys & defaults
+// =========================================================================
+// Every notification flows through notify(key, context). Each event has:
+//   - An on/off toggle  : settings."notifyEvent_${key}"      (default true unless noted)
+//   - A custom message  : settings."notifyMsg_${key}"        (overrides DEFAULT)
+//   - A Pushover priority override : settings."notifyPriority_${key}"
+// Default messages support ${app}, ${zone}, ${reason}, ${duration}, ${cycle},
+// ${remaining}, ${sensor}, ${count}, ${minutes}, ${hours}, ${detail}, ${planSize},
+// ${seasonalMult}, ${until}, ${mode}, ${hsm}, ${delay}. Missing variables
+// render as the empty string.
+private static final Map NOTIFY_EVENTS = [
+    // Lifecycle
+    "schedule.start"   : [section: "Lifecycle",  default: '${app}: ▶ schedule starting — ${planSize} zone(s), seasonal ×${seasonalMult}'],
+    "schedule.finish"  : [section: "Lifecycle",  default: '${app}: ■ schedule complete'],
+    "zone.start"       : [section: "Lifecycle",  default: '${app}: ▶ ${zone} for ${duration} (cycle ${cycle}/${totalCycles})', defaultOff: true],
+    "zone.finish"      : [section: "Lifecycle",  default: '${app}: ■ ${zone} done', defaultOff: true],
+    "pre-run"          : [section: "Lifecycle",  default: '${app}: schedule starts in ${minutes} minute(s) — clear the yard'],
+    "error"            : [section: "Lifecycle",  default: '${app}: error — ${detail}'],
+
+    // Skips
+    "skip.manual"      : [section: "Skips",      default: '${app}: skipped — manual pause'],
+    "skip.next"        : [section: "Skips",      default: '${app}: skipped — user-requested skip-next'],
+    "skip.rain.weather": [section: "Skips",      default: '${app}: skipped — weather rain delay (${reason})'],
+    "skip.rain.sensor" : [section: "Skips",      default: '${app}: skipped — rain sensor wet (${sensor})'],
+    "skip.forced"      : [section: "Skips",      default: '${app}: skipped — forced rain delay until ${until}'],
+    "skip.quiet"       : [section: "Skips",      default: '${app}: skipped — quiet hours active'],
+    "skip.mode"        : [section: "Skips",      default: '${app}: skipped — Hubitat mode is ${mode}'],
+    "skip.hsm"         : [section: "Skips",      default: '${app}: skipped — HSM is ${hsm}'],
+    "skip.pause"       : [section: "Skips",      default: '${app}: skipped — pause sensor active (${sensor})'],
+    "skip.budget"      : [section: "Skips",      default: '${app}: ${zone} skipped — weekly budget exhausted'],
+
+    // Pause & resume
+    "pause.activate"   : [section: "Pause",      default: '${app}: PAUSED at ${zone} (${remaining}s remaining) — ${reason}'],
+    "pause.clear"      : [section: "Pause",      default: '${app}: pause sensors clear — resuming in ${delay}s'],
+    "pause.resume"     : [section: "Pause",      default: '${app}: resumed ${zone} (${remaining}s left)'],
+    "rain.mid.stop"    : [section: "Pause",      default: '${app}: rain detected (${sensor}) — stopped mid-run'],
+
+    // Sensors
+    "sensor.rain.wet"  : [section: "Sensors",    default: '${app}: rain sensor ${sensor} → WET',  defaultOff: true],
+    "sensor.rain.dry"  : [section: "Sensors",    default: '${app}: rain sensor ${sensor} → DRY',  defaultOff: true],
+    "sensor.pause.on"  : [section: "Sensors",    default: '${app}: pause sensor ${sensor} active', defaultOff: true],
+    "sensor.pause.off" : [section: "Sensors",    default: '${app}: pause sensor ${sensor} clear',  defaultOff: true],
+
+    // Hardware & watchdog
+    "hardware.push"    : [section: "Hardware",   default: '${app}: ZEN16 watchdog set to ${minutes}min on ${count} controller(s)'],
+    "watchdog.stale"   : [section: "Hardware",   default: '${app}: ${sensor} unreachable for ${hours}h'],
+
+    // Test / manual
+    "test.run"         : [section: "Test",       default: '${app}: testing ${zone} for ${duration}', defaultOff: true]
+]
+
+private static final List NOTIFY_PRIORITIES = ["default", "-2 silent", "-1 quiet", "0 normal", "1 high", "2 emergency"]
 private String openmoji(String code) {
     return "https://raw.githubusercontent.com/hfg-gmuend/openmoji/master/color/618x618/${code}.png"
 }
@@ -82,6 +136,7 @@ preferences {
     page(name: "previewPage")
     page(name: "backupPage")
     page(name: "apiPage")
+    page(name: "notifyEventsPage")
 }
 
 def mainPage() {
@@ -249,10 +304,28 @@ def zoneDetailPage(Map params = [:]) {
             }
         }
         section("<b>Run time</b>") {
-            input name: "zone${zid}RunMinutes", type: "number",
-                  title: "Base run time per cycle (minutes)",
-                  description: "<i>Seasonal weather adjust will scale this if enabled in Weather settings.</i>",
-                  range: "1..240", defaultValue: 10, required: true
+            input name: "zone${zid}RuntimeMode", type: "enum",
+                  title: "How to compute base runtime",
+                  options: [
+                    "fixed":  "Fixed: N minutes per cycle",
+                    "weekly": "Weekly target: total minutes per week ÷ days per week (Spruce-style)"
+                  ],
+                  defaultValue: "fixed", submitOnChange: true
+            if ((settings."zone${zid}RuntimeMode" ?: "fixed") == "weekly") {
+                input name: "zone${zid}WeeklyMinutes", type: "number",
+                      title: "Total minutes per week (target)",
+                      description: "<i>Distributed across the days-per-week below. Seasonal scaling still applies.</i>",
+                      range: "1..1000", defaultValue: 30, required: true
+                input name: "zone${zid}DaysPerWeek", type: "number",
+                      title: "Days per week (how often this zone gets watered)",
+                      range: "1..7", defaultValue: 3, required: true
+                paragraph "<i>Effective base = ${zoneEffectiveBaseString(zid)} per cycle.</i>"
+            } else {
+                input name: "zone${zid}RunMinutes", type: "number",
+                      title: "Base run time per cycle (minutes)",
+                      description: "<i>Seasonal weather adjust will scale this if enabled in Weather settings.</i>",
+                      range: "1..240", defaultValue: 10, required: true
+            }
             input name: "zone${zid}CycleSoak", type: "enum",
                   title: "Cycle & soak (split run to reduce runoff)",
                   options: ["1": "No cycle (run all at once)",
@@ -262,6 +335,13 @@ def zoneDetailPage(Map params = [:]) {
             input name: "zone${zid}SoakMinutes", type: "number",
                   title: "Soak time between cycles (minutes)",
                   range: "1..60", defaultValue: 10
+        }
+        section("<b>Weekly budget cap (optional)</b>") {
+            input name: "zone${zid}WeeklyCapMinutes", type: "number",
+                  title: "Maximum minutes per ISO week (0 = no cap)",
+                  description: "<i>Hard ceiling tracked per zone. If a run would exceed, the cycle is clipped; if no minutes remain, the zone is skipped (notified via the skip.budget event).</i>",
+                  range: "0..1000", defaultValue: 0
+            paragraph "<i>Used this week: <b>${(state.zoneMinutesThisWeek ?: [:])[zid.toString()] ?: 0} min</b></i>"
         }
         section("<b>Landscape (informational + seasonal adjust)</b>") {
             input name: "zone${zid}Plant", type: "enum",
@@ -361,7 +441,41 @@ def weatherPage() {
                   title: "Local weather station / rain gauge (must expose a numeric \"rainToday\" attribute, in inches)",
                   required: false
         }
+        section("<b>Today's forecast (live from Open-Meteo)</b>") {
+            paragraph forecastPreviewHtml()
+            input name: "btnRefreshForecast", type: "button", title: "Refresh forecast cache"
+        }
     }
+}
+
+private String forecastPreviewHtml() {
+    Map om = fetchWeather()
+    if (!om?.daily?.time) return "<i>No forecast data — check hub location lat/lon.</i>"
+    String todayISO = new Date().format("yyyy-MM-dd", location?.timeZone ?: TimeZone.getDefault())
+    int idx = (om.daily.time as List).findIndexOf { it == todayISO }
+    if (idx < 0) idx = (om.daily.time.size() > 1) ? 1 : 0
+    StringBuilder sb = new StringBuilder("<table style='font-family:monospace;font-size:0.9em'>")
+    sb << "<tr><th align='left'>Day</th><th align='left'>High °F</th><th align='left'>POP %</th><th align='left'>Precip in</th><th align='left'>Sunrise</th><th align='left'>Sunset</th></tr>"
+    int n = Math.min(5, om.daily.time.size() - idx)
+    for (int j = 0; j < n; j++) {
+        int i = idx + j
+        sb << "<tr>"
+        sb << "<td>${om.daily.time[i]}${j == 0 ? ' (today)' : ''}</td>"
+        sb << "<td>${(om.daily.temperature_2m_max ?: [])[i] ?: '?'}</td>"
+        sb << "<td>${(om.daily.precipitation_probability_mean ?: [])[i] ?: '?'}</td>"
+        sb << "<td>${(om.daily.precipitation_sum ?: [])[i] ?: '?'}</td>"
+        sb << "<td>${(om.daily.sunrise ?: [])[i]?.tokenize('T')?.getAt(1) ?: '?'}</td>"
+        sb << "<td>${(om.daily.sunset  ?: [])[i]?.tokenize('T')?.getAt(1) ?: '?'}</td>"
+        sb << "</tr>"
+    }
+    sb << "</table>"
+    sb << "<br><i>Past-24h precipitation: ${String.format('%.2f', omPrecipLast24h(om))} in"
+    if (state.__omCacheAt) {
+        long ageSec = (now() - (state.__omCacheAt as long)) / 1000
+        sb << " · cache age ${ageSec}s"
+    }
+    sb << "</i>"
+    return sb.toString()
 }
 
 def rainSensorPage() {
@@ -722,16 +836,88 @@ def apiPage() {
 
 def notificationPage() {
     dynamicPage(name: "notificationPage", title: "Notifications") {
-        section {
+        section("<b>Where to send notifications</b>") {
             input name: "notifyDevices", type: "capability.notification",
-                  title: "Notification devices",
+                  title: "Notification devices (any Hubitat capability.notification)",
                   multiple: true, required: false
-            input name: "notifyOnStart",  type: "bool", title: "Notify on schedule start", defaultValue: false
-            input name: "notifyOnFinish", type: "bool", title: "Notify on schedule finish", defaultValue: true
-            input name: "notifyOnSkip",   type: "bool", title: "Notify on rain-skip", defaultValue: true
-            input name: "notifyOnError",  type: "bool", title: "Notify on errors", defaultValue: true
+        }
+        section("<b>Pushover (optional)</b>") {
+            paragraph "Install the community <a href='https://community.hubitat.com/t/release-pushover-notifications/29795'>Pushover Notifications</a> driver, pair your account, then pick the resulting device here. Pushover messages mirror everything sent to the regular notification devices above, with optional per-event priority/sound overrides on the next page."
+            input name: "pushoverDevice", type: "capability.notification",
+                  title: "Pushover device(s)",
+                  multiple: true, required: false, submitOnChange: true
+            if (settings.pushoverDevice) {
+                input name: "pushoverDefaultPriority", type: "enum",
+                      title: "Default Pushover priority",
+                      options: NOTIFY_PRIORITIES, defaultValue: "0 normal"
+                input name: "pushoverDefaultSound", type: "text",
+                      title: "Default Pushover sound (e.g. \"cosmic\", \"siren\", \"tugboat\" — leave blank for device default)",
+                      required: false
+                input name: "pushoverEmergencyOnError", type: "bool",
+                      title: "Force emergency priority for `error` events",
+                      defaultValue: false
+                paragraph "<i>If your Pushover driver supports the bracketed prefix format <code>[priority|sound|message]</code>, the app will use it; otherwise messages go through as plain deviceNotification.</i>"
+            }
+        }
+        section("<b>Per-event configuration</b>") {
+            href name: "notifyEventsPage", title: "Configure per-event toggles and custom messages →",
+                 page: "notifyEventsPage",
+                 description: notifyEventsSummaryString()
+        }
+        section("<b>Test</b>") {
+            input name: "btnNotifyTest", type: "button",
+                  title: "Send a test notification to every selected channel"
         }
     }
+}
+
+def notifyEventsPage() {
+    dynamicPage(name: "notifyEventsPage", title: "Per-event notifications") {
+        section {
+            paragraph "Every notification the scheduler can emit is listed below, grouped by category. Toggle individual events on/off. To customise the wording, paste your own message in the override field — leave blank to use the default. Custom messages support these template variables (any missing variable renders as empty):"
+            paragraph "<code>\${app}</code> · <code>\${zone}</code> · <code>\${duration}</code> · <code>\${remaining}</code> · " +
+                      "<code>\${reason}</code> · <code>\${sensor}</code> · <code>\${cycle}</code> · <code>\${totalCycles}</code> · " +
+                      "<code>\${count}</code> · <code>\${minutes}</code> · <code>\${hours}</code> · <code>\${detail}</code> · " +
+                      "<code>\${planSize}</code> · <code>\${seasonalMult}</code> · <code>\${until}</code> · " +
+                      "<code>\${mode}</code> · <code>\${hsm}</code> · <code>\${delay}</code>"
+        }
+        // Group events by section preserving NOTIFY_EVENTS insertion order
+        Map<String, List<Map>> grouped = [:]
+        NOTIFY_EVENTS.each { key, meta ->
+            String sec = meta.section as String
+            grouped[sec] = (grouped[sec] ?: []) + [[key: key, meta: meta]]
+        }
+        grouped.each { sec, items ->
+            section("<b>${sec}</b>") {
+                items.each { item ->
+                    String key = item.key
+                    Map meta = item.meta
+                    String safeKey = key.replace(".", "_").replace("-", "_")
+                    boolean defOn = !(meta.defaultOff == true)
+                    input name: "notifyEvent_${safeKey}", type: "bool",
+                          title: "<b>${key}</b> — ${escapeForUi(meta.default as String)}",
+                          defaultValue: defOn
+                    input name: "notifyMsg_${safeKey}", type: "text",
+                          title: "Override message (leave blank for default)",
+                          required: false
+                    if (settings.pushoverDevice) {
+                        input name: "notifyPriority_${safeKey}", type: "enum",
+                              title: "Pushover priority override (default = use device default)",
+                              options: NOTIFY_PRIORITIES, required: false
+                    }
+                    paragraph "<hr style='margin:4px 0'>"
+                }
+            }
+        }
+        section {
+            input name: "btnResetEventDefaults", type: "button",
+                  title: "Clear every override (restore defaults across the board)"
+        }
+    }
+}
+
+private String escapeForUi(String s) {
+    return s ? s.replace("<", "&lt;").replace(">", "&gt;") : ""
 }
 
 // =========================================================================
@@ -794,6 +980,10 @@ def initialize() {
     maintainDashboardChild()
     runEvery1Hour("publishDashboardState")
     runEvery1Hour("zen16Watchdog")
+    // Weekly-budget rollover every Monday 00:01 local
+    schedule("0 1 0 ? * 2", "rolloverWeeklyBudget")
+    // Lazy check at every wake: if we crossed a week boundary while powered off
+    rolloverWeeklyBudgetIfNeeded()
 }
 
 // ---- Restriction-edge handlers ----
@@ -802,7 +992,7 @@ def quietHoursStart() {
     if (!state.running) return
     if (settings.quietStopInProgress == false) return
     log.warn "${app.label}: quiet hours starting — stopping in-progress run"
-    notify("quiet", "${app.label}: quiet hours — stopped in-progress run")
+    notify("rain.mid.stop", [sensor: "quiet hours", reason: "quiet hours start"])
     stopAllZones()
 }
 
@@ -852,7 +1042,7 @@ def rainSensorEvent(evt) {
     if (descTextEnable) log.info "${app.label}: ${evt.displayName} → wet"
     if (state.running && settings.rainSensorStopRunning != false) {
         log.warn "${app.label}: rain detected mid-run (${evt.displayName}) — stopping all zones"
-        notify("rain-stop", "${app.label}: rain detected (${evt.displayName}) — stopped mid-run")
+        notify("rain.mid.stop", [sensor: evt.displayName, reason: "rain sensor wet"])
         stopAllZones()
     }
 }
@@ -865,7 +1055,7 @@ def pauseSensorEvent(evt) {
         if (mode == "stop") {
             if (state.running) {
                 log.warn "${app.label}: external pause active mid-run — STOP mode, killing schedule"
-                notify("pause", "${app.label}: paused by ${evt?.displayName} (${evt?.value}) — schedule stopped")
+                notify("pause.activate", [zone: "schedule", remaining: 0, reason: "${evt?.displayName} → ${evt?.value} (stop mode)"])
                 stopAllZones()
             }
         } else {  // pause mode
@@ -879,7 +1069,7 @@ def pauseSensorEvent(evt) {
         if (state.paused) {
             Integer delaySec = (settings.pauseResumeDelaySec ?: 30) as int
             log.info "${app.label}: all pause sensors clear — resuming in ${delaySec}s"
-            notify("pause-clear", "${app.label}: pause sensors clear — resuming in ${delaySec}s")
+            notify("pause.clear", [delay: delaySec])
             runIn(Math.max(1, delaySec), "doResumeAfterPause")
         }
     }
@@ -906,7 +1096,7 @@ private void pauseRunningSchedule(String reason) {
         def sw = settings."zone${zid}Switch"
         if (sw) try { sw.off() } catch (e) { log.warn "pause: ${e.message}" }
         log.warn "${app.label}: PAUSED at ${settings."zone${zid}Name" ?: "zone ${zid}"} — ${remainingSec}s remaining in cycle ${((state.currentZoneCycleIdx ?: 0) as int) + 1}/${state.currentZoneCycles}. Reason: ${reason}"
-        notify("pause", "${app.label}: paused at ${settings."zone${zid}Name" ?: "zone ${zid}"} (${remainingSec}s remaining)")
+        notify("pause.activate", [zone: (settings."zone${zid}Name" ?: "Zone ${zid}"), remaining: remainingSec, reason: reason])
     }
 
     // Cancel any pending phase / soak / next-zone callbacks.
@@ -942,7 +1132,7 @@ def doResumeAfterPause() {
     def sw = settings."zone${zid}Switch"
     if (sw) try { sw.on() } catch (e) { log.warn "resume: ${e.message}" }
     log.info "${app.label}: RESUMED ${zname} — ${remainingSec}s left in this cycle"
-    notify("resume", "${app.label}: resumed ${zname} (${remainingSec}s left)")
+    notify("pause.resume", [zone: zname, remaining: remainingSec])
     state.currentPhaseStartMs = now()
     state.currentPhaseDurationSec = remainingSec
     runIn(Math.max(1, remainingSec), "zoneCyclePhaseDone")
@@ -978,7 +1168,7 @@ def runSchedule(Map opts = [:]) {
     boolean manual = (opts?.manual == true)
     if (isPaused()) {
         if (descTextEnable) log.info "${app.label}: manually paused — skipping run"
-        notify("warning", "${app.label} paused — skipped scheduled run")
+        notify("skip.manual")
         recordRunSkip("manual pause")
         return
     }
@@ -986,7 +1176,7 @@ def runSchedule(Map opts = [:]) {
         log.info "${app.label}: skip-next-run flag consumed"
         state.skipNextRun = false
         recordRunSkip("skip-next requested")
-        notify("skip", "${app.label}: skipped (user requested skip-next)")
+        notify("skip.next")
         return
     }
     Long rd = (state.forcedRainDelayUntilMs ?: 0L) as long
@@ -994,38 +1184,38 @@ def runSchedule(Map opts = [:]) {
         String until = new Date(rd).format("yyyy-MM-dd HH:mm", location?.timeZone ?: TimeZone.getDefault())
         log.info "${app.label}: forced rain delay active until ${until}"
         recordRunSkip("forced rain delay until ${until}")
-        if (settings.notifyOnSkip) notify("rain-delay", "${app.label}: forced rain delay until ${until}")
+        notify("skip.forced", [until: until])
         return
     }
     if (quietHoursActive()) {
         log.info "${app.label}: skipped — in quiet hours"
         recordRunSkip("quiet hours")
-        if (settings.notifyOnSkip) notify("quiet", "${app.label}: skipped — quiet hours active")
+        notify("skip.quiet")
         return
     }
     if (modeShouldPause()) {
         log.info "${app.label}: skipped — Hubitat mode is ${location?.mode}"
         recordRunSkip("mode=${location?.mode}")
-        if (settings.notifyOnSkip) notify("mode", "${app.label}: skipped — mode is ${location?.mode}")
+        notify("skip.mode", [mode: location?.mode])
         return
     }
     if (hsmShouldPause()) {
         log.info "${app.label}: skipped — HSM is ${location?.hsmStatus}"
         recordRunSkip("HSM=${location?.hsmStatus}")
-        if (settings.notifyOnSkip) notify("hsm", "${app.label}: skipped — HSM is ${location?.hsmStatus}")
+        notify("skip.hsm", [hsm: location?.hsmStatus])
         return
     }
     if (externalPauseActive()) {
         String who = externalPauseReason()
         log.info "${app.label}: skipped by pause sensor (${who})"
-        if (settings.notifyOnSkip) notify("pause-skip", "${app.label}: skipped — pause sensor active (${who})")
+        notify("skip.pause", [sensor: who])
         recordRunSkip("pause sensor active (${who})")
         return
     }
     if (rainSensorWet()) {
         String who = rainSensorReason()
         log.info "${app.label}: skipped by binary rain sensor (${who})"
-        if (settings.notifyOnSkip) notify("rain-skip", "${app.label}: skipped — rain sensor wet (${who})")
+        notify("skip.rain.sensor", [sensor: who])
         recordRunSkip("rain sensor wet (${who})")
         return
     }
@@ -1044,7 +1234,7 @@ def runSchedule(Map opts = [:]) {
     if (settings.rainDelayEnabled && weather && shouldSkipForRain(weather)) {
         String reason = rainSkipReason(weather)
         log.info "${app.label}: skipping schedule — ${reason}"
-        if (settings.notifyOnSkip) notify("rain-skip", "${app.label}: skipped — ${reason}")
+        notify("skip.rain.weather", [reason: reason])
         return
     }
 
@@ -1078,7 +1268,7 @@ def runSchedule(Map opts = [:]) {
     if (descTextEnable) {
         log.info "${app.label}: starting run — plan=${plan}, seasonal=×${seasonalMult}"
     }
-    if (settings.notifyOnStart) notify("start", "${app.label}: starting (${plan.size()} zones, seasonal ×${seasonalMult})")
+    notify("schedule.start", [planSize: plan.size(), seasonalMult: seasonalMult])
 
     state.zonesPlan = plan
     state.currentZoneIdx = 0
@@ -1112,10 +1302,28 @@ def startNextZone() {
         return
     }
 
-    Integer baseMin = (settings."zone${zid}RunMinutes" ?: 10) as int
+    Integer baseMin = resolveZoneBaseMinutes(zid)
     BigDecimal mult = (state.seasonalMult ?: "1.0") as BigDecimal
     Integer adjMin = Math.max(1, Math.min((settings.scheduleMaxRunMinutes ?: 60) as int,
                                           Math.round((baseMin * mult).floatValue())))
+
+    // Weekly budget enforcement
+    Integer cap = (settings."zone${zid}WeeklyCapMinutes" ?: 0) as int
+    if (cap > 0) {
+        Integer used = (state.zoneMinutesThisWeek ?: [:])[zid.toString()] ?: 0
+        Integer left = Math.max(0, cap - used)
+        if (left <= 0) {
+            log.info "${app.label}: ${zname} skipped — weekly budget exhausted (${used}/${cap}min)"
+            notify("skip.budget", [zone: zname, reason: "budget exhausted (${used}/${cap}min)"])
+            state.currentZoneIdx = idx + 1
+            runIn(1, "startNextZone")
+            return
+        }
+        if (adjMin > left) {
+            if (descTextEnable) log.info "${app.label}: ${zname} clipped from ${adjMin}m to ${left}m by weekly budget"
+            adjMin = left
+        }
+    }
 
     Integer cycles = ((settings."zone${zid}CycleSoak" ?: "1") as int)
     Integer perCycleMin = Math.max(1, (adjMin / cycles) as int)
@@ -1155,8 +1363,10 @@ def zoneCyclePhaseDone() {
     if (cycleIdx >= cycles) {
         // Zone finished — advance after between-zone delay
         if (descTextEnable) log.info "${app.label}: ■ ${zname} done"
-        Integer totalSec = ((state.currentZoneTotalAdjMin ?: 0) as int) * 60
+        Integer totalMin = ((state.currentZoneTotalAdjMin ?: 0) as int)
+        Integer totalSec = totalMin * 60
         recordZoneRun(zid, totalSec, "ok")
+        consumeWeeklyBudget(zid, totalMin)
         state.currentZoneIdx = (state.currentZoneIdx ?: 0) + 1
         Integer betweenSec = (settings.scheduleBetweenZoneSec ?: 10) as int
         runIn(betweenSec, "startNextZone")
@@ -1190,7 +1400,7 @@ def finishRun() {
     state.currentZoneIdx = 0
     Integer postSec = (settings.pumpSwitch && settings.pumpPostSec) ? (settings.pumpPostSec as int) : 0
     runIn(postSec, "stopPumpIfNeeded")
-    if (settings.notifyOnFinish) notify("finish", "${app.label}: schedule complete")
+    notify("schedule.finish")
     publishDashboardState()
 }
 
@@ -1377,14 +1587,81 @@ private BigDecimal computeSeasonalMultiplier(Map om) {
 // Notifications
 // =========================================================================
 
-private void notify(String type, String message) {
-    def devs = settings.notifyDevices
-    if (!devs) return
-    try {
-        devs.each { it.deviceNotification("[${type}] ${message}") }
-    } catch (e) {
-        log.warn "notify(${type}): ${e.message}"
+// notify(key, contextOrMessage)
+//   - Preferred form: notify("schedule.start", [planSize: 5, seasonalMult: "1.15"])
+//   - Legacy form:    notify("legacy.tag", "raw message string")
+// Routes through per-event enable/template-message lookup, substitutes
+// template variables, and fans out to every regular notification device
+// AND every Pushover device. Per-event Pushover priority/sound overrides
+// apply; otherwise the device defaults are used.
+private void notify(String key, def ctx = [:]) {
+    String safeKey = key.replace(".", "_").replace("-", "_")
+    Map meta = NOTIFY_EVENTS[key] as Map
+    // Per-event enable check (if event isn't in NOTIFY_EVENTS map, default ON)
+    if (meta != null) {
+        boolean defOn = !(meta.defaultOff == true)
+        def enabled = settings."notifyEvent_${safeKey}"
+        if (enabled == false || (enabled == null && !defOn)) return
     }
+    // Resolve message: per-event override > NOTIFY_EVENTS default > raw string ctx
+    String template
+    if (settings."notifyMsg_${safeKey}") {
+        template = settings."notifyMsg_${safeKey}"
+    } else if (meta?.default) {
+        template = meta.default as String
+    } else if (ctx instanceof String) {
+        template = ctx as String
+    } else {
+        template = "[${key}]"
+    }
+    Map context = (ctx instanceof Map) ? (ctx as Map) : [:]
+    if (!context.app) context.app = app.label
+    String msg = applyTemplate(template, context)
+
+    // Regular notification devices (any capability.notification)
+    try { settings.notifyDevices?.each { it.deviceNotification(msg) } }
+    catch (e) { log.warn "notify(${key}) regular: ${e.message}" }
+
+    // Pushover (if any)
+    if (settings.pushoverDevice) {
+        String prio = settings."notifyPriority_${safeKey}" ?: settings.pushoverDefaultPriority ?: "0 normal"
+        if (key == "error" && settings.pushoverEmergencyOnError) prio = "2 emergency"
+        String sound = settings.pushoverDefaultSound
+        sendPushover(msg, prio, sound)
+    }
+}
+
+private String applyTemplate(String template, Map context) {
+    if (!template) return ""
+    String out = template
+    context.each { k, v -> out = out.replace('${' + k + '}', (v == null ? "" : v.toString())) }
+    // Strip any remaining ${...} tokens (variable was not supplied)
+    out = out.replaceAll(/\$\{[^}]+\}/, "")
+    return out
+}
+
+private void sendPushover(String msg, String priority, String sound) {
+    if (!settings.pushoverDevice) return
+    // Many community Pushover drivers accept a "[priority|sound|message]" prefix.
+    // Pushover priority code is the leading number on the option string.
+    String pCode = (priority ?: "0").toString().tokenize(" ")[0]
+    String prefix
+    if (sound) prefix = "[${pCode}|${sound}|"
+    else if (pCode && pCode != "0") prefix = "[${pCode}|"
+    else prefix = null
+    String wire = prefix ? "${prefix}${msg}]" : msg
+    try { settings.pushoverDevice.each { it.deviceNotification(wire) } }
+    catch (e) {
+        // Fallback to plain message if the bracket format isn't supported.
+        try { settings.pushoverDevice.each { it.deviceNotification(msg) } }
+        catch (e2) { log.warn "sendPushover: ${e2.message}" }
+    }
+}
+
+// Test-button helper
+def sendNotificationTest() {
+    notify("error", [detail: "test notification at ${nowString()}"])
+    log.info "${app.label}: test notification dispatched"
 }
 
 // =========================================================================
@@ -1489,7 +1766,7 @@ private void forceRainDelayHours(int hours) {
     state.forcedRainDelayUntilMs = until
     String untilStr = new Date(until).format("yyyy-MM-dd HH:mm", location?.timeZone ?: TimeZone.getDefault())
     log.info "${app.label}: forced rain delay until ${untilStr} (${hours}h)"
-    notify("rain-delay", "${app.label}: forced rain delay until ${untilStr}")
+    notify("skip.forced", [until: untilStr])
 }
 
 private void clearForcedDelays() {
@@ -1553,7 +1830,7 @@ def pushHardwareSafety() {
     String summary = "Pushed to ${ok} controller(s), ${fail} failed @ ${nowString()}\n" + log_.join("\n")
     state.hwLastPushSummary = summary
     log.info "${app.label}: hardware safety push — ${ok} ok, ${fail} failed (${mins}min auto-off)"
-    notify("hardware-push", "${app.label}: ZEN16 watchdog set to ${mins}min on ${ok} controller(s)")
+    notify("hardware.push", [minutes: mins, count: ok])
 }
 
 // =========================================================================
@@ -1627,7 +1904,7 @@ def testZoneRun(Integer zid) {
     Integer secs = Math.max(5, Math.min(600, (settings.testRunSeconds ?: 30) as int))
     String label = settings."zone${zid}Name" ?: "Zone ${zid}"
     log.info "${app.label}: TEST ▶ ${label} for ${secs}s"
-    notify("test", "${app.label}: testing ${label} for ${secs}s")
+    notify("test.run", [zone: label, duration: "${secs}s"])
     state.testRunningZid = zid
     try {
         sw.on()
@@ -1756,6 +2033,55 @@ private String nextScheduledRunString() {
     String t = settings.scheduleStartTime
     if (t?.contains("T")) t = t.tokenize("T")[1].substring(0,5)
     return "${(settings.scheduleDays as List).join(',')}  @ ${t}"
+}
+
+// =========================================================================
+// Runtime calc (fixed minutes vs. Spruce-style weekly) + weekly budget
+// =========================================================================
+
+private Integer resolveZoneBaseMinutes(int zid) {
+    String mode = (settings."zone${zid}RuntimeMode" ?: "fixed") as String
+    if (mode == "weekly") {
+        Integer weeklyMin = (settings."zone${zid}WeeklyMinutes" ?: 30) as int
+        Integer dpw       = Math.max(1, (settings."zone${zid}DaysPerWeek" ?: 3) as int)
+        return Math.max(1, Math.round(weeklyMin / (float) dpw) as int)
+    }
+    return (settings."zone${zid}RunMinutes" ?: 10) as int
+}
+
+private String zoneEffectiveBaseString(int zid) {
+    Integer baseMin = resolveZoneBaseMinutes(zid)
+    return "${baseMin} min"
+}
+
+private void consumeWeeklyBudget(int zid, int minutes) {
+    if (minutes <= 0) return
+    Map m = (state.zoneMinutesThisWeek ?: [:]) as Map
+    String k = zid.toString()
+    m[k] = ((m[k] ?: 0) as int) + minutes
+    state.zoneMinutesThisWeek = m
+}
+
+def rolloverWeeklyBudget() {
+    state.zoneMinutesThisWeek = [:]
+    state.weekStartIso = currentWeekIso()
+    if (descTextEnable) log.info "${app.label}: weekly budget reset (week ${state.weekStartIso})"
+}
+
+private void rolloverWeeklyBudgetIfNeeded() {
+    String cur = currentWeekIso()
+    if (state.weekStartIso != cur) {
+        rolloverWeeklyBudget()
+    }
+}
+
+private String currentWeekIso() {
+    Calendar c = Calendar.getInstance(location?.timeZone ?: TimeZone.getDefault())
+    c.setFirstDayOfWeek(Calendar.MONDAY)
+    c.setMinimalDaysInFirstWeek(4) // ISO
+    int year = c.get(Calendar.YEAR)
+    int week = c.get(Calendar.WEEK_OF_YEAR)
+    return String.format("%04d-W%02d", year, week)
 }
 
 // =========================================================================
@@ -2027,7 +2353,7 @@ def zen16Watchdog() {
             if (last && (now - last) > staleMs) {
                 long hrs = (now - last) / 3600000L
                 log.warn "${app.label}: ZEN16 '${dev.displayName}' has been quiet for ${hrs}h"
-                notify("watchdog", "${app.label}: ${dev.displayName} unreachable for ${hrs}h")
+                notify("watchdog.stale", [sensor: dev.displayName, hours: hrs])
             }
         } catch (e) {
             // ignore — driver may not expose lastActivity
@@ -2155,13 +2481,23 @@ private String apiSummaryString() {
 }
 
 private String notificationSummaryString() {
-    if (!settings.notifyDevices) return "No notification devices"
-    List flags = []
-    if (settings.notifyOnStart)  flags << "start"
-    if (settings.notifyOnFinish) flags << "finish"
-    if (settings.notifyOnSkip)   flags << "rain-skip"
-    if (settings.notifyOnError)  flags << "errors"
-    return "${settings.notifyDevices.size()} device(s) · ${flags.join(', ')}"
+    int regular = (settings.notifyDevices ?: []).size()
+    int push    = (settings.pushoverDevice ?: []).size()
+    if (regular == 0 && push == 0) return "No notification channels configured"
+    List parts = []
+    if (regular > 0) parts << "${regular} regular"
+    if (push > 0)    parts << "${push} Pushover"
+    return parts.join(" + ") + " channel(s)"
+}
+
+private String notifyEventsSummaryString() {
+    int total = NOTIFY_EVENTS.size()
+    int overridden = 0
+    NOTIFY_EVENTS.each { k, _ ->
+        String safe = (k as String).replace(".", "_").replace("-", "_")
+        if (settings."notifyMsg_${safe}") overridden++
+    }
+    return "${total} event types · ${overridden} custom message override(s)"
 }
 
 private String runStatusString() {
@@ -2252,6 +2588,24 @@ def appButtonHandler(String btn) {
         case "btnRevokeApiToken":
             state.apiAccessToken = null
             log.info "${app.label}: API token revoked"
+            break
+        case "btnNotifyTest":
+            sendNotificationTest()
+            break
+        case "btnRefreshForecast":
+            state.__omCacheAt = 0L
+            state.__omCacheData = null
+            log.info "${app.label}: forecast cache cleared"
+            break
+        case "btnResetEventDefaults":
+            // Wipe every per-event override
+            NOTIFY_EVENTS.each { k, _ ->
+                String safe = (k as String).replace(".", "_").replace("-", "_")
+                app.removeSetting("notifyMsg_${safe}")
+                app.removeSetting("notifyEvent_${safe}")
+                app.removeSetting("notifyPriority_${safe}")
+            }
+            log.info "${app.label}: per-event notification overrides cleared"
             break
         default:
             // Per-zone test buttons: "btnTestZone_<N>"
