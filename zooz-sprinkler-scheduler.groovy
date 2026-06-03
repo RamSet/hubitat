@@ -62,7 +62,7 @@ mappings {
     path("/calendar.ics")  { action: [GET: "apiCalendar"] }
 }
 
-String getAppVersion() { return "v0.6.1 (2026-06)" }
+String getAppVersion() { return "v0.6.2 (2026-06)" }
 
 // Zooz multi-relay model registry. Per-model lists of the Z-Wave parameter
 // numbers we push for the hardware watchdog:
@@ -793,11 +793,18 @@ def hardwarePage() {
                 }
             }
         }
+        section("Driver options") {
+            paragraph "Hubitat's built-in Zooz driver works for the basics (zone child switches + setParameter). If it ever doesn't expose setParameter on the parent, or you want richer parameter UI, install jtp10181's Advanced drivers:"
+            paragraph "• ZEN16:  https://raw.githubusercontent.com/RamSet/hubitat/main/zooz-zen16-multirelay.groovy\n" +
+                      "• ZEN17:  https://raw.githubusercontent.com/RamSet/hubitat/main/zooz-zen17-universal-relay.groovy\n" +
+                      "(Vendored from jtp10181/Hubitat — upstream: https://github.com/jtp10181/Hubitat/tree/main/Drivers/zooz)"
+            paragraph "The scheduler auto-detects the setParameter argument order (built-in is paramNumber/size/value; jtp10181 is paramNumber/value/size) so the same Hardware Safety push works with either driver."
+        }
         section {
             paragraph "References: " +
                       "<a href='https://www.support.getzooz.com/kb/article/371'>Zooz KB #371 — Sprinkler use on Hubitat (ZEN16)</a> · " +
                       "<a href='https://www.support.getzooz.com/kb/article/376'>KB #376 — Advanced settings</a> · " +
-                      "ZEN17 parameter numbering follows the same scheme with two relays instead of three."
+                      "<a href='https://community.hubitat.com/t/driver-zooz-relays-advanced-zen16-zen17-zen51-zen52/98194'>Community thread (jtp10181 drivers)</a>"
         }
     }
 }
@@ -1078,6 +1085,7 @@ def aboutPage() {
             paragraph "A Hubitat app for running sprinkler zones via Zooz ZEN16 / ZEN17 800LR multi-relay controllers — or any Hubitat device exposing the Switch capability. Hardware-agnostic, multi-instance, with Spruce-style weather adaptation, per-zone moisture-aware watering, restrictions (quiet hours / mode / HSM), pause-and-resume from external sensors, hub-independent hardware watchdog via Z-Wave parameters (model-aware: pushes the right per-relay timers for ZEN16's 3 relays or ZEN17's 2 relays), full external JSON/HTML/iCal API, and granular templated notifications with Pushover support."
         }
         section("Changelog") {
+            paragraph "v0.6.2 — Vendored jtp10181's ZEN16/ZEN17 Advanced drivers into the repo as failsafes. Scheduler auto-detects the setParameter argument order (built-in uses paramNumber/size/value; jtp10181 uses paramNumber/value/size) so the same Hardware Safety push works with either driver."
             paragraph "v0.6.1 — Generalised hardware-safety push: works with ZEN16 (3 relays), ZEN17 (2 relays), and other Zooz multi-relay models. Per-controller model selector on the Hardware Safety page; push iterates only the parameters relevant to each picked controller. Every UI string and notification message broadened to \"Zooz multi-relay\" instead of \"ZEN16\" specifically."
             paragraph "v0.6 — Per-zone child Virtual Switches for HomeKit/Rule-Machine/dashboard control with configurable manual-on auto-off timer (default 10 min, per-zone override). Contact-sensor rain support (incl. Zooz relay input child devices). HTML stripped from input/paragraph text on mobile clients. App icons resized for the iOS Hubitat app."
             paragraph "v0.5 — Smart skips (frost/cold/wind via Open-Meteo), per-zone fertilizer mode (one-shot short-burst-with-soak), auto-stagger across instances via shared coordination switch, HTML dashboard endpoint, iCalendar export endpoint, About page."
@@ -2240,6 +2248,36 @@ private String forcedDelayDisplayString() {
 // ZEN16 hardware safety push
 // =========================================================================
 
+// Detect setParameter argument order on a given device. Hubitat's built-in
+// Zooz driver uses (paramNumber, size, value); jtp10181's Advanced driver
+// uses (paramNumber, value, size). We peek at the command's argument names.
+private String detectSetParameterStyle(dev) {
+    try {
+        def cmd = dev.getSupportedCommands()?.find { it.name == "setParameter" }
+        if (!cmd) return "builtin"
+        // Walk the argument list and find which index holds "size" vs "value"
+        int sizeIdx = -1, valueIdx = -1
+        cmd.arguments?.eachWithIndex { arg, int i ->
+            String n = (arg instanceof Map ? (arg.name ?: "") : arg as String)
+                       .toLowerCase().replace("*", "").trim()
+            if (n == "size")  sizeIdx = i
+            if (n == "value") valueIdx = i
+        }
+        if (valueIdx == 1 && sizeIdx == 2) return "jtp10181"  // (num, value, size)
+        return "builtin"                                       // (num, size, value)
+    } catch (e) {
+        return "builtin"
+    }
+}
+
+private void callSetParameter(dev, String style, int paramNum, int size, int value) {
+    if (style == "jtp10181") {
+        dev.setParameter(paramNum, value, size)
+    } else {
+        dev.setParameter(paramNum, size, value)
+    }
+}
+
 def pushHardwareSafety() {
     def parents = settings.hwZen16Parents
     if (!parents) {
@@ -2252,7 +2290,7 @@ def pushHardwareSafety() {
     List<String> log_ = []
     parents.each { dev ->
         if (!dev.hasCommand("setParameter")) {
-            log_ << "${dev.displayName}: setParameter() unsupported"
+            log_ << "${dev.displayName}: setParameter() unsupported — switch to a driver that exposes it (Hubitat built-in or jtp10181's Advanced)"
             fail++
             return
         }
@@ -2260,19 +2298,20 @@ def pushHardwareSafety() {
         Map model = (ZOOZ_RELAY_MODELS[modelKey] ?: ZOOZ_RELAY_MODELS["3"]) as Map
         List<Integer> autoOffParams = (model.autoOff   ?: []) as List<Integer>
         List<Integer> unitParams    = (model.unitParam ?: []) as List<Integer>
+        String style = detectSetParameterStyle(dev)
         try {
             // Timer unit = minutes
-            unitParams.each { p -> dev.setParameter(p as int, 1, 0) }
-            // Auto-off timer for each relay
-            autoOffParams.each { p -> dev.setParameter(p as int, 4, mins) }
+            unitParams.each { p -> callSetParameter(dev, style, p as int, 1, 0) }
+            // Auto-off timer for each relay (size 4 — 32-bit minutes value)
+            autoOffParams.each { p -> callSetParameter(dev, style, p as int, 4, mins) }
             // Power-fail state = OFF (P1) — same on all current Zooz multi-relays
-            if (settings.hwPowerFailOff != false) dev.setParameter(1, 1, 0)
-            // DC-motor interlock = OFF (P24) — ZEN16 only, harmless on ZEN17 (param doesn't exist; setParameter may silently error)
+            if (settings.hwPowerFailOff != false) callSetParameter(dev, style, 1, 1, 0)
+            // DC-motor interlock = OFF (P24) — ZEN16 only; ZEN17 may not expose
             if (settings.hwForceDcMotorOff != false) {
-                try { dev.setParameter(24, 1, 0) } catch (ignored) {}
+                try { callSetParameter(dev, style, 24, 1, 0) } catch (ignored) {}
             }
             String pStr = "P${autoOffParams.join('/P')}=${mins}min, P${unitParams.join('/P')}=min"
-            log_ << "${dev.displayName} (${model.name}): pushed ${pStr}, P1=off, P24=off"
+            log_ << "${dev.displayName} (${model.name}, ${style} driver): pushed ${pStr}, P1=off, P24=off"
             ok++
         } catch (e) {
             log_ << "${dev.displayName}: FAILED — ${e.message}"
