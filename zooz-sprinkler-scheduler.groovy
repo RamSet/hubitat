@@ -55,7 +55,7 @@ mappings {
     path("/delay")  { action: [POST: "apiDelay"] }
 }
 
-String getAppVersion() { return "v0.3.0 (2026-06)" }
+String getAppVersion() { return "v0.4.0 (2026-06)" }
 
 // =========================================================================
 // Notification event keys & defaults
@@ -88,6 +88,7 @@ private static final Map NOTIFY_EVENTS = [
     "skip.hsm"         : [section: "Skips",      default: '${app}: skipped — HSM is ${hsm}'],
     "skip.pause"       : [section: "Skips",      default: '${app}: skipped — pause sensor active (${sensor})'],
     "skip.budget"      : [section: "Skips",      default: '${app}: ${zone} skipped — weekly budget exhausted'],
+    "skip.moisture"    : [section: "Skips",      default: '${app}: ${zone} skipped — soil already at ${moisture}% (target ${target}%)'],
 
     // Pause & resume
     "pause.activate"   : [section: "Pause",      default: '${app}: PAUSED at ${zone} (${remaining}s remaining) — ${reason}'],
@@ -106,7 +107,12 @@ private static final Map NOTIFY_EVENTS = [
     "watchdog.stale"   : [section: "Hardware",   default: '${app}: ${sensor} unreachable for ${hours}h'],
 
     // Test / manual
-    "test.run"         : [section: "Test",       default: '${app}: testing ${zone} for ${duration}', defaultOff: true]
+    "test.run"         : [section: "Test",       default: '${app}: testing ${zone} for ${duration}', defaultOff: true],
+
+    // Moisture-aware
+    "moisture.earlyStop": [section: "Sensors",    default: '${app}: ${zone} early-stopped — soil reached ${moisture}% (target ${target}%) after ${duration}'],
+    "moisture.adapted":   [section: "Sensors",    default: '${app}: ${zone} adapted ${baseMin}m → ${adjMin}m (soil ${moisture}%, dryness ${dryness}×)', defaultOff: true],
+    "moisture.learned":   [section: "Sensors",    default: '${app}: ${zone} learning — ${delta}%/min over ${runMin}m run', defaultOff: true]
 ]
 
 private static final List NOTIFY_PRIORITIES = ["default", "-2 silent", "-1 quiet", "0 normal", "1 high", "2 emergency"]
@@ -137,6 +143,7 @@ preferences {
     page(name: "backupPage")
     page(name: "apiPage")
     page(name: "notifyEventsPage")
+    page(name: "moisturePage")
 }
 
 def mainPage() {
@@ -200,6 +207,9 @@ def mainPage() {
             href name: "apiPage", title: "External JSON API", page: "apiPage",
                  image: openmoji("1F517"),
                  description: apiSummaryString()
+            href name: "moisturePage", title: "Moisture learning", page: "moisturePage",
+                 image: openmoji("1F33F"),
+                 description: moistureSummaryString()
             href name: "diagnosticsPage", title: "Diagnostics & test runs", page: "diagnosticsPage",
                  image: openmoji("1F50D"),
                  description: diagnosticsSummaryString()
@@ -357,13 +367,40 @@ def zoneDetailPage(Map params = [:]) {
                   options: ["Loam", "Sand", "Clay", "Slope"],
                   defaultValue: "Loam"
         }
-        section("<b>Optional moisture sensor</b>") {
+        section("<b>Moisture-aware watering (optional)</b>") {
             input name: "zone${zid}MoistureSensor", type: "capability.relativeHumidityMeasurement",
-                  title: "Moisture sensor (skip zone if reading is above target)",
-                  required: false, multiple: false
-            input name: "zone${zid}MoistureTarget", type: "number",
-                  title: "Skip if moisture reading is above this %",
-                  range: "0..100", defaultValue: 50, required: false
+                  title: "Soil moisture sensor",
+                  description: "<i>Any device exposing the <code>humidity</code> attribute (most Hubitat soil moisture sensors), or a <code>moisture</code> attribute for some niche drivers.</i>",
+                  required: false, multiple: false, submitOnChange: true
+            if (settings."zone${zid}MoistureSensor") {
+                input name: "zone${zid}MoistureMode", type: "enum",
+                      title: "Moisture mode",
+                      options: [
+                        "off":       "Off (sensor reading ignored — still recorded)",
+                        "skip":      "Skip-only: skip the whole zone if moisture is already above target",
+                        "earlyStop": "Early stop: run normally but cut the cycle when target is reached mid-run",
+                        "adapt":     "Adaptive: scale baseline runtime by current dryness (also early-stops at target)",
+                        "learn":     "Adaptive + learning: use historical pre/post deltas to predict runtime to target"
+                      ],
+                      defaultValue: "skip", submitOnChange: true
+                input name: "zone${zid}MoistureTarget", type: "number",
+                      title: "Target moisture % (zone is \"wet enough\" at or above this)",
+                      range: "0..100", defaultValue: 50, required: false
+                input name: "zone${zid}MoistureMin", type: "number",
+                      title: "Dry-bottom moisture % (zone is \"bone dry\" at or below this)",
+                      description: "<i>Used by adaptive modes to scale runtime. Lower = more aggressive watering when the soil is dry.</i>",
+                      range: "0..100", defaultValue: 20, required: false
+                String attrPick = settings."zone${zid}MoistureAttribute" ?: "humidity"
+                input name: "zone${zid}MoistureAttribute", type: "enum",
+                      title: "Sensor attribute to read",
+                      options: ["humidity": "humidity (default — most Hubitat soil moisture sensors)",
+                                "moisture": "moisture (some specialised drivers)"],
+                      defaultValue: "humidity"
+                def sw = settings."zone${zid}MoistureSensor"
+                def cur = sw?.currentValue(attrPick)
+                paragraph "<i>Current reading: <b>${cur != null ? "${cur}%" : "n/a"}</b> · " +
+                          "${zoneAdaptiveStatusString(zid)}</i>"
+            }
         }
         section {
             paragraph "<i>Last run: ${state.lastRunByZone?.get(zid as String) ?: 'never'}</i>"
@@ -834,6 +871,69 @@ def apiPage() {
     }
 }
 
+def moisturePage() {
+    dynamicPage(name: "moisturePage", title: "Moisture learning") {
+        section {
+            paragraph "Per-zone moisture status. The scheduler captures a pre-moisture reading at zone start and a post-moisture reading at zone end. From the pre/post delta and the actual run minutes, it derives a soil-response rate (% per minute). In <b>learn</b> mode, future runs use this rate to predict the runtime needed to lift moisture from current level up to target."
+        }
+        Integer n = zoneCount()
+        boolean any = false
+        for (int i = 1; i <= n; i++) {
+            if (!settings."zone${i}MoistureSensor") continue
+            any = true
+            String label = settings."zone${i}Name" ?: "Zone ${i}"
+            String mode  = settings."zone${i}MoistureMode" ?: "skip"
+            Float cur    = readZoneMoisture(i)
+            Integer target = (settings."zone${i}MoistureTarget" ?: 50) as int
+            Integer minPct = (settings."zone${i}MoistureMin" ?: 20) as int
+            Float rate   = learnedRate(i)
+            String status = zoneAdaptiveStatusString(i)
+            section("<b>${i}. ${label}</b>") {
+                paragraph "<i>Mode:</i> <b>${mode}</b> · " +
+                          "<i>Current:</i> <b>${cur != null ? "${cur}%" : 'n/a'}</b> · " +
+                          "<i>Target:</i> ${target}% · <i>Min:</i> ${minPct}% · " +
+                          "<i>Status:</i> ${status}"
+                List recs = ((state.moistureLearning ?: [:])[i.toString()] ?: []) as List
+                if (recs) {
+                    StringBuilder sb = new StringBuilder("<table style='width:100%;font-family:monospace;font-size:0.85em'>")
+                    sb << "<tr><th align='left'>When</th><th align='right'>Pre %</th><th align='right'>Post %</th>"
+                    sb << "<th align='right'>Δ %</th><th align='right'>RunMin</th><th align='right'>%/min</th></tr>"
+                    recs.reverse().each { r ->
+                        sb << "<tr><td>${r.ts}</td><td align='right'>${r.pre}</td><td align='right'>${r.post}</td>"
+                        sb << "<td align='right'>${r.delta}</td><td align='right'>${r.runMin}</td><td align='right'>${r.rate}</td></tr>"
+                    }
+                    sb << "</table>"
+                    paragraph sb.toString()
+                    paragraph "<i>Weighted-average rate (recent runs weigh more): <b>${rate ?: 'insufficient data'}</b></i>"
+                    input name: "btnClearMoisture_${i}", type: "button", title: "Clear learning history for this zone"
+                } else {
+                    paragraph "<i>No learning records yet. Run the zone at least once with a moisture sensor in any mode to start collecting data.</i>"
+                }
+            }
+        }
+        if (!any) {
+            section {
+                paragraph "<i>No zones have a moisture sensor assigned. Pick one on each zone's detail page to enable moisture-aware watering.</i>"
+            }
+        }
+    }
+}
+
+private String moistureSummaryString() {
+    Integer n = zoneCount()
+    int withSensor = 0
+    int adaptive = 0
+    for (int i = 1; i <= n; i++) {
+        if (settings."zone${i}MoistureSensor") {
+            withSensor++
+            String mode = settings."zone${i}MoistureMode" ?: "skip"
+            if (mode in ["adapt", "learn", "earlyStop"]) adaptive++
+        }
+    }
+    if (withSensor == 0) return "No moisture sensors configured"
+    return "${withSensor} zone(s) with sensor · ${adaptive} adaptive/early-stop"
+}
+
 def notificationPage() {
     dynamicPage(name: "notificationPage", title: "Notifications") {
         section("<b>Where to send notifications</b>") {
@@ -1242,13 +1342,15 @@ def runSchedule(Map opts = [:]) {
     List<Integer> plan = []
     for (int i = 1; i <= n; i++) {
         if (settings."zone${i}Enabled" != false && settings."zone${i}Switch") {
-            // Moisture gate per-zone
-            def moist = settings."zone${i}MoistureSensor"
-            Integer target = (settings."zone${i}MoistureTarget" ?: 50) as int
-            if (moist) {
-                def v = moist.currentValue("humidity") ?: moist.currentValue("moisture")
-                if (v != null && (v as float) > target) {
-                    if (descTextEnable) log.info "${app.label}: zone ${i} skipped (moisture ${v}% > ${target}%)"
+            // Per-zone moisture skip (skip + adapt + learn all honor target threshold at start)
+            String mode = settings."zone${i}MoistureMode" ?: (settings."zone${i}MoistureSensor" ? "skip" : "off")
+            if (mode in ["skip", "earlyStop", "adapt", "learn"]) {
+                Float cur = readZoneMoisture(i)
+                Integer target = (settings."zone${i}MoistureTarget" ?: 50) as int
+                if (cur != null && cur >= target) {
+                    if (descTextEnable) log.info "${app.label}: zone ${i} skipped (moisture ${cur}% ≥ target ${target}%)"
+                    String zname = settings."zone${i}Name" ?: "Zone ${i}"
+                    notify("skip.moisture", [zone: zname, moisture: cur, target: target])
                     continue
                 }
             }
@@ -1304,8 +1406,27 @@ def startNextZone() {
 
     Integer baseMin = resolveZoneBaseMinutes(zid)
     BigDecimal mult = (state.seasonalMult ?: "1.0") as BigDecimal
-    Integer adjMin = Math.max(1, Math.min((settings.scheduleMaxRunMinutes ?: 60) as int,
-                                          Math.round((baseMin * mult).floatValue())))
+
+    // Capture pre-moisture and (if mode is adapt/learn) compute an adaptive
+    // multiplier on top of the seasonal one.
+    Float preMoisture = readZoneMoisture(zid)
+    String moistureMode = settings."zone${zid}MoistureMode" ?: (settings."zone${zid}MoistureSensor" ? "skip" : "off")
+    state.currentZonePreMoisture = preMoisture
+    state.currentZoneMoistureMode = moistureMode
+    BigDecimal moistureMult = 1.0
+    if (moistureMode in ["adapt", "learn"] && preMoisture != null) {
+        moistureMult = computeMoistureMultiplier(zid, preMoisture, baseMin)
+        if (descTextEnable) {
+            log.info "${app.label}: ${zname} moisture-adapted ×${moistureMult} (current=${preMoisture}%)"
+        }
+    }
+
+    Integer rawAdj = Math.round((baseMin * mult.multiply(moistureMult)).floatValue()) as int
+    Integer adjMin = Math.max(1, Math.min((settings.scheduleMaxRunMinutes ?: 60) as int, rawAdj))
+    if (moistureMode in ["adapt", "learn"] && preMoisture != null && adjMin != baseMin) {
+        notify("moisture.adapted", [zone: zname, baseMin: baseMin, adjMin: adjMin,
+                                    moisture: preMoisture, dryness: moistureMult.setScale(2, BigDecimal.ROUND_HALF_UP)])
+    }
 
     // Weekly budget enforcement
     Integer cap = (settings."zone${zid}WeeklyCapMinutes" ?: 0) as int
@@ -1341,6 +1462,14 @@ def startNextZone() {
     }
     state.lastRunByZone[zid.toString()] = new Date().format("yyyy-MM-dd HH:mm", location?.timeZone ?: TimeZone.getDefault())
     sw.on()
+    // Early-stop subscription on the moisture sensor for the duration of this zone
+    if (moistureMode in ["earlyStop", "adapt", "learn"]) {
+        def msens = settings."zone${zid}MoistureSensor"
+        if (msens) {
+            String attr = settings."zone${zid}MoistureAttribute" ?: "humidity"
+            subscribe(msens, attr, "moistureEvent")
+        }
+    }
     // Track phase start + duration so pauseRunningSchedule() can compute
     // exactly how many seconds are left if we have to stop mid-cycle.
     state.currentPhaseStartMs = now()
@@ -1365,6 +1494,9 @@ def zoneCyclePhaseDone() {
         if (descTextEnable) log.info "${app.label}: ■ ${zname} done"
         Integer totalMin = ((state.currentZoneTotalAdjMin ?: 0) as int)
         Integer totalSec = totalMin * 60
+        Float postMoisture = readZoneMoisture(zid)
+        recordZoneLearning(zid, state.currentZonePreMoisture as Float, postMoisture, totalMin)
+        unsubscribeZoneMoisture(zid)
         recordZoneRun(zid, totalSec, "ok")
         consumeWeeklyBudget(zid, totalMin)
         state.currentZoneIdx = (state.currentZoneIdx ?: 0) + 1
@@ -1414,6 +1546,7 @@ def stopAllZones() {
     for (int i = 1; i <= n; i++) {
         def sw = settings."zone${i}Switch"
         if (sw) try { sw.off() } catch (e) { log.warn "stop zone ${i}: ${e.message}" }
+        unsubscribeZoneMoisture(i)
     }
     state.running = false
     state.paused = false
@@ -2036,6 +2169,124 @@ private String nextScheduledRunString() {
 }
 
 // =========================================================================
+// Moisture-aware watering (skip / early-stop / adapt / learn)
+// =========================================================================
+
+private Float readZoneMoisture(int zid) {
+    def dev = settings."zone${zid}MoistureSensor"
+    if (!dev) return null
+    String attr = settings."zone${zid}MoistureAttribute" ?: "humidity"
+    def v = dev.currentValue(attr) ?: dev.currentValue(attr == "humidity" ? "moisture" : "humidity")
+    return v == null ? null : (v as float)
+}
+
+// Mid-run moisture-sensor event. Subscribed only while a zone is running.
+// On reaching target, stop the running cycle and advance.
+def moistureEvent(evt) {
+    if (!state.running) return
+    Integer zid = (state.currentZoneId ?: 0) as int
+    if (zid <= 0) return
+    def expectedSensor = settings."zone${zid}MoistureSensor"
+    if (!expectedSensor || evt?.deviceId != expectedSensor.id) return
+    String mode = settings."zone${zid}MoistureMode" ?: "off"
+    if (!(mode in ["earlyStop", "adapt", "learn"])) return
+    Float cur
+    try { cur = (evt.value as float) } catch (e) { return }
+    Integer target = (settings."zone${zid}MoistureTarget" ?: 50) as int
+    if (cur < target) return
+    // Reached target — cut this cycle short
+    String zname = settings."zone${zid}Name" ?: "Zone ${zid}"
+    Long startMs = (state.currentPhaseStartMs ?: now()) as long
+    Integer elapsedSec = ((now() - startMs) / 1000L) as int
+    String dur = "${(int)(elapsedSec/60)}m${String.format('%02d', (int)(elapsedSec%60))}s"
+    log.info "${app.label}: ${zname} early-stop — soil at ${cur}% (target ${target}%) after ${dur}"
+    notify("moisture.earlyStop", [zone: zname, moisture: cur, target: target, duration: dur])
+    // Mark this cycle as the last cycle so zoneCyclePhaseDone advances out.
+    state.currentZoneCycleIdx = (state.currentZoneCycles ?: 1) - 1
+    unschedule("zoneCyclePhaseDone")
+    runIn(1, "zoneCyclePhaseDone")
+}
+
+private void unsubscribeZoneMoisture(int zid) {
+    def dev = settings."zone${zid}MoistureSensor"
+    if (dev) try { unsubscribe(dev) } catch (ignored) {}
+}
+
+// Adaptive multiplier: dryness in [0..2]
+//   moisture <= moistureMin   → 2.0× baseline (very dry)
+//   moisture == moistureTarget → 0.0× (already wet — skip handled upstream)
+//   between                   → linear
+private BigDecimal computeMoistureMultiplier(int zid, float current, int baseMin) {
+    Integer target = (settings."zone${zid}MoistureTarget" ?: 50) as int
+    Integer minPct = (settings."zone${zid}MoistureMin" ?: 20) as int
+    if (target <= minPct) return 1.0  // misconfigured — no scaling
+    if (current >= target) return 0.0
+    float dryness = (target - current) / (float)(target - minPct)
+    if (dryness < 0) dryness = 0
+    if (dryness > 2) dryness = 2
+    // "learn" mode further refines with learned %/min rate
+    if ((settings."zone${zid}MoistureMode" ?: "") == "learn") {
+        Float rate = learnedRate(zid)
+        if (rate != null && rate > 0.0) {
+            // Predict minutes to lift moisture from current to target
+            float needed = (target - current) / rate
+            if (needed > 0) {
+                // Express prediction as a multiplier on baseline
+                return new BigDecimal((needed / (float) baseMin).toString())
+                       .setScale(2, BigDecimal.ROUND_HALF_UP)
+            }
+        }
+    }
+    return new BigDecimal((dryness as String)).setScale(2, BigDecimal.ROUND_HALF_UP)
+}
+
+// Capture a learning record. state.moistureLearning[zid] is a list of maps,
+// capped at 20 entries per zone.
+private void recordZoneLearning(int zid, Float pre, Float post, int runMin) {
+    if (pre == null || post == null || runMin <= 0) return
+    float delta = post - pre
+    if (delta < 0) delta = 0  // skip evaporation cases
+    float ratePerMin = delta / (float) runMin
+    Map all = (state.moistureLearning ?: [:]) as Map
+    String k = zid.toString()
+    List recs = (all[k] ?: []) as List
+    recs << [ts: nowString(), pre: pre, post: post, runMin: runMin,
+             delta: delta.round(1), rate: ratePerMin.round(3)]
+    while (recs.size() > 20) recs.remove(0)
+    all[k] = recs
+    state.moistureLearning = all
+    String zname = settings."zone${zid}Name" ?: "Zone ${zid}"
+    notify("moisture.learned", [zone: zname, delta: ratePerMin.round(3), runMin: runMin])
+}
+
+private Float learnedRate(int zid) {
+    List recs = ((state.moistureLearning ?: [:])[zid.toString()] ?: []) as List
+    if (!recs) return null
+    // Weighted average — newest entries weigh more
+    float sum = 0; float weight = 0
+    recs.eachWithIndex { rec, i ->
+        float w = (i + 1) as float  // older = lower weight
+        sum += (rec.rate as float) * w
+        weight += w
+    }
+    if (weight == 0) return null
+    return (sum / weight) as Float
+}
+
+private String zoneAdaptiveStatusString(int zid) {
+    Float cur = readZoneMoisture(zid)
+    Integer target = (settings."zone${zid}MoistureTarget" ?: 50) as int
+    Integer minPct = (settings."zone${zid}MoistureMin" ?: 20) as int
+    if (cur == null) return "no reading"
+    if (cur >= target) return "wet — would SKIP"
+    int baseMin = resolveZoneBaseMinutes(zid)
+    BigDecimal m = computeMoistureMultiplier(zid, cur, baseMin)
+    Float rate = learnedRate(zid)
+    String rateStr = rate ? ", learned rate ${rate}%/min" : ""
+    return "dryness ${m}× (target ${target}%, min ${minPct}%${rateStr})"
+}
+
+// =========================================================================
 // Runtime calc (fixed minutes vs. Spruce-style weekly) + weekly budget
 // =========================================================================
 
@@ -2612,6 +2863,12 @@ def appButtonHandler(String btn) {
             if (btn?.startsWith("btnTestZone_")) {
                 Integer zid = btn.replaceFirst("btnTestZone_", "").toInteger()
                 testZoneRun(zid)
+            } else if (btn?.startsWith("btnClearMoisture_")) {
+                Integer zid = btn.replaceFirst("btnClearMoisture_", "").toInteger()
+                Map all = (state.moistureLearning ?: [:]) as Map
+                all.remove(zid.toString())
+                state.moistureLearning = all
+                log.info "${app.label}: cleared moisture learning for zone ${zid}"
             } else {
                 log.warn "unknown button: ${btn}"
             }
