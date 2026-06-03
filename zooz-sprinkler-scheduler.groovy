@@ -173,7 +173,7 @@ def mainPage() {
         if (banners) {
             section {
                 paragraph "<div style='background:#fff8e1;border-left:4px solid #f39c12;padding:8px;'>" +
-                          "<b>⚠ Attention</b><ul style='margin:4px 0'>" +
+                          "⚠ Attention<ul style='margin:4px 0'>" +
                           banners.collect { "<li>${it}</li>" }.join("") +
                           "</ul></div>"
             }
@@ -182,7 +182,7 @@ def mainPage() {
             label title: "Schedule name (shown in the Apps list)",
                   required: true
         }
-        section("<b>Configuration</b>") {
+        section("Configuration") {
             href name: "zoneListPage", title: "Zones (${zoneCount()})", page: "zoneListPage",
                  image: openmoji("1F33F"),
                  description: zoneSummaryString()
@@ -235,14 +235,14 @@ def mainPage() {
                  image: openmoji("2139"),
                  description: "Version ${getAppVersion()}"
         }
-        section("<b>Run now / pause</b>") {
+        section("Run now / pause") {
             input name: "btnRunNow",  type: "button", title: "Run schedule now"
             input name: "btnStopAll", type: "button", title: "Stop all zones now"
-            paragraph "<i>Status: ${runStatusString()}</i>"
+            paragraph "Status: ${runStatusString()}"
             input name: "pauseHours", type: "number", title: "Pause schedule for N hours (0 = active)",
                   range: "0..72", required: false, defaultValue: 0, submitOnChange: true
         }
-        section("<b>Logging</b>") {
+        section("Logging") {
             input name: "debugOutput", type: "bool", title: "Enable debug logging",
                   description: "Auto-turns off after 30 minutes", defaultValue: false
             input name: "descTextEnable", type: "bool", title: "Enable description text logging",
@@ -250,7 +250,7 @@ def mainPage() {
         }
         section {
             paragraph "<div style='font-size:0.85em;color:#666'>" +
-                      "<b>Zooz Sprinkler Scheduler</b> ${getAppVersion()} · " +
+                      "Zooz Sprinkler Scheduler ${getAppVersion()} · " +
                       "<a href='https://www.support.getzooz.com/kb/article/371'>Zooz KB #371 (sprinkler on Hubitat)</a> · " +
                       "<a href='https://www.support.getzooz.com/kb/article/376'>KB #376 (advanced settings)</a> · " +
                       "weather by <a href='https://open-meteo.com'>Open-Meteo</a>" +
@@ -287,14 +287,14 @@ private List<String> quickWarnings() {
 def zoneListPage() {
     dynamicPage(name: "zoneListPage", title: "Zones") {
         section {
-            paragraph "Add as many zones as you have relays. Each zone maps to a single Hubitat <b>Switch</b> device — typically a child of your Zooz ZEN16 (one of the three relays per controller), but anything with the Switch capability works."
+            paragraph "Add as many zones as you have relays. Each zone maps to a single Hubitat Switch device — typically a child of your Zooz ZEN16 (one of the three relays per controller), but anything with the Switch capability works."
             input name: "zoneCountPref", type: "number", title: "Number of zones",
                   range: "0..64", defaultValue: 0, submitOnChange: true, required: true
         }
         Integer n = (settings.zoneCountPref ?: 0) as int
         if (n > 0) {
-            section("<b>Configure each zone</b>") {
-                paragraph "<i>Tap a zone to set its switch device, run time, plant/soil/sprinkler type and the physical port label so you know which Zooz relay drives it.</i>"
+            section("Configure each zone") {
+                paragraph "Tap a zone to set its switch device, run time, plant/soil/sprinkler type and the physical port label so you know which Zooz relay drives it."
                 for (int i = 1; i <= n; i++) {
                     String label = settings."zone${i}Name" ?: "Zone ${i}"
                     String hint  = zoneOneLineSummary(i)
@@ -313,7 +313,7 @@ def zoneDetailPage(Map params = [:]) {
     Integer zid = (params?.zoneId ?: state.editingZone ?: 1) as int
     state.editingZone = zid
     dynamicPage(name: "zoneDetailPage", title: "Zone ${zid}") {
-        section("<b>Identity</b>") {
+        section("Identity") {
             input name: "zone${zid}Name",      type: "text",   title: "Zone name (e.g. \"Front Lawn N\")",
                   required: true, submitOnChange: true
             input name: "zone${zid}PortLabel", type: "text",
@@ -323,18 +323,18 @@ def zoneDetailPage(Map params = [:]) {
             input name: "zone${zid}Enabled",   type: "bool",   title: "Zone enabled in schedule",
                   defaultValue: true
         }
-        section("<b>Relay (switch device)</b>") {
+        section("Relay (switch device)") {
             input name: "zone${zid}Switch", type: "capability.switch",
                   title: "Switch device",
                   description: "ZEN16 relay child (or any Switch device)",
                   required: true, multiple: false, submitOnChange: true
             def sw = settings."zone${zid}Switch"
             if (sw) {
-                paragraph "<i>Selected device:</i> <b>${sw.displayName}</b><br>" +
-                          "<i>Current state:</i> <b>${sw.currentValue('switch') ?: 'unknown'}</b>"
+                paragraph "Selected device: ${sw.displayName}<br>" +
+                          "Current state: ${sw.currentValue('switch') ?: 'unknown'}"
             }
         }
-        section("<b>Run time</b>") {
+        section("Run time") {
             input name: "zone${zid}RuntimeMode", type: "enum",
                   title: "How to compute base runtime",
                   options: [
@@ -350,7 +350,7 @@ def zoneDetailPage(Map params = [:]) {
                 input name: "zone${zid}DaysPerWeek", type: "number",
                       title: "Days per week (how often this zone gets watered)",
                       range: "1..7", defaultValue: 3, required: true
-                paragraph "<i>Effective base = ${zoneEffectiveBaseString(zid)} per cycle.</i>"
+                paragraph "Effective base = ${zoneEffectiveBaseString(zid)} per cycle."
             } else {
                 input name: "zone${zid}RunMinutes", type: "number",
                       title: "Base run time per cycle (minutes)",
@@ -367,8 +367,8 @@ def zoneDetailPage(Map params = [:]) {
                   title: "Soak time between cycles (minutes)",
                   range: "1..60", defaultValue: 10
         }
-        section("<b>Fertilizer mode (one-shot)</b>") {
-            paragraph "Arming fertilizer mode changes the NEXT run only: zone runs as <b>short bursts</b> with <b>long soak intervals</b> for dilution and uniform uptake. Auto-disarms after the run completes."
+        section("Fertilizer mode (one-shot)") {
+            paragraph "Arming fertilizer mode changes the NEXT run only: zone runs as short bursts with long soak intervals for dilution and uniform uptake. Auto-disarms after the run completes."
             input name: "zone${zid}FertArmed", type: "bool",
                   title: "Arm fertilizer mode for the next run of this zone",
                   defaultValue: false
@@ -383,14 +383,14 @@ def zoneDetailPage(Map params = [:]) {
                   range: "1..60", defaultValue: 15
         }
 
-        section("<b>Weekly budget cap (optional)</b>") {
+        section("Weekly budget cap (optional)") {
             input name: "zone${zid}WeeklyCapMinutes", type: "number",
                   title: "Maximum minutes per ISO week (0 = no cap)",
                   description: "Hard weekly ceiling. Over-budget runs are clipped; if nothing left, zone is skipped.",
                   range: "0..1000", defaultValue: 0
-            paragraph "<i>Used this week: <b>${(state.zoneMinutesThisWeek ?: [:])[zid.toString()] ?: 0} min</b></i>"
+            paragraph "Used this week: ${(state.zoneMinutesThisWeek ?: [:])[zid.toString()] ?: 0} min"
         }
-        section("<b>Landscape (informational + seasonal adjust)</b>") {
+        section("Landscape (informational + seasonal adjust)") {
             input name: "zone${zid}Plant", type: "enum",
                   title: "Plant type",
                   options: ["Lawn", "Garden", "Flowers", "Shrubs", "Trees", "Xeriscape", "New Plants"],
@@ -404,7 +404,7 @@ def zoneDetailPage(Map params = [:]) {
                   options: ["Loam", "Sand", "Clay", "Slope"],
                   defaultValue: "Loam"
         }
-        section("<b>Moisture-aware watering (optional)</b>") {
+        section("Moisture-aware watering (optional)") {
             input name: "zone${zid}MoistureSensor", type: "capability.relativeHumidityMeasurement",
                   title: "Soil moisture sensor",
                   description: "Any device with a humidity attribute (most soil sensors) — or pick the moisture attribute below.",
@@ -435,19 +435,19 @@ def zoneDetailPage(Map params = [:]) {
                       defaultValue: "humidity"
                 def sw = settings."zone${zid}MoistureSensor"
                 def cur = sw?.currentValue(attrPick)
-                paragraph "<i>Current reading: <b>${cur != null ? "${cur}%" : "n/a"}</b> · " +
-                          "${zoneAdaptiveStatusString(zid)}</i>"
+                paragraph "Current reading: ${cur != null ? "${cur}%" : "n/a"} · " +
+                          "${zoneAdaptiveStatusString(zid)}"
             }
         }
         section {
-            paragraph "<i>Last run: ${state.lastRunByZone?.get(zid as String) ?: 'never'}</i>"
+            paragraph "Last run: ${state.lastRunByZone?.get(zid as String) ?: 'never'}"
         }
     }
 }
 
 def schedulePage() {
     dynamicPage(name: "schedulePage", title: "Schedule") {
-        section("<b>When to run</b>") {
+        section("When to run") {
             input name: "scheduleEnabled", type: "bool",
                   title: "Schedule enabled",
                   defaultValue: true
@@ -456,7 +456,7 @@ def schedulePage() {
                   options: ["MON","TUE","WED","THU","FRI","SAT","SUN"],
                   multiple: true, required: true,
                   defaultValue: ["MON","WED","FRI"]
-            paragraph "<b>Watering windows.</b> Each window starts a full sweep through all enabled zones. Skip slots 2 and 3 if you only want one start time."
+            paragraph "Watering windows. Each window starts a full sweep through all enabled zones. Skip slots 2 and 3 if you only want one start time."
             input name: "scheduleStartTime",  type: "time",
                   title: "Window 1 start time", required: true
             input name: "scheduleStartTime2", type: "time",
@@ -464,7 +464,7 @@ def schedulePage() {
             input name: "scheduleStartTime3", type: "time",
                   title: "Window 3 start time (optional)", required: false
         }
-        section("<b>Behaviour</b>") {
+        section("Behaviour") {
             input name: "scheduleOrder", type: "enum",
                   title: "Zone ordering",
                   options: ["sequential": "Sequential (by zone number)",
@@ -474,8 +474,8 @@ def schedulePage() {
                   title: "Delay between zones (seconds)",
                   range: "0..600", defaultValue: 10
         }
-        section("<b>Auto-stagger across schedules</b>") {
-            paragraph "If you have multiple instances of this app (one per yard area), they'd all start at their configured times — possibly overlapping and overwhelming pipe pressure. Pick a single <b>Virtual Switch</b> shared between every instance: each instance checks it before starting, turns it ON for the duration of its run, and OFF at the end. Other instances scheduled at the same time see the lock and defer."
+        section("Auto-stagger across schedules") {
+            paragraph "If you have multiple instances of this app (one per yard area), they'd all start at their configured times — possibly overlapping and overwhelming pipe pressure. Pick a single Virtual Switch shared between every instance: each instance checks it before starting, turns it ON for the duration of its run, and OFF at the end. Other instances scheduled at the same time see the lock and defer."
             input name: "coordSwitch", type: "capability.switch",
                   title: "Shared coordination switch (any Virtual Switch — create one called \"Sprinkler Lock\" and pick the same device in every instance)",
                   required: false, multiple: false
@@ -487,7 +487,7 @@ def schedulePage() {
                   range: "0..30", defaultValue: 10
         }
 
-        section("<b>Software failsafe (per-zone cap)</b>") {
+        section("Software failsafe (per-zone cap)") {
             input name: "scheduleMaxRunMinutes", type: "number",
                   title: "Maximum single zone run time (minutes)",
                   description: "Caps each zone's adjusted runtime. Set Hardware safety auto-off to this +5min for backup.",
@@ -498,12 +498,12 @@ def schedulePage() {
 
 def weatherPage() {
     dynamicPage(name: "weatherPage", title: "Weather (Open-Meteo)") {
-        section("<b>Provider</b>") {
+        section("Provider") {
             paragraph "Weather data comes from <a href='https://open-meteo.com'>Open-Meteo</a>. " +
                       "No API key needed. Uses your hub's configured location " +
                       "(Settings → Location → ${location?.latitude}, ${location?.longitude})."
         }
-        section("<b>Rain delay</b>") {
+        section("Rain delay") {
             input name: "rainDelayEnabled", type: "bool",
                   title: "Skip schedule when rain is expected or has fallen recently",
                   defaultValue: true
@@ -515,7 +515,7 @@ def weatherPage() {
                   title: "Skip if forecast or past-24h rain exceeds this many inches",
                   range: "0..5", defaultValue: 0.2
         }
-        section("<b>Smart skips (temperature / wind)</b>") {
+        section("Smart skips (temperature / wind)") {
             paragraph "Skip runs based on forecast extremes — useful for off-season frost protection and avoiding water loss in high wind."
             input name: "smartSkipFrostF", type: "number",
                   title: "Skip if overnight low (today) is below this °F (frost protection)",
@@ -531,7 +531,7 @@ def weatherPage() {
                   range: "0..100", required: false
         }
 
-        section("<b>Seasonal adjust</b>") {
+        section("Seasonal adjust") {
             input name: "seasonalEnabled", type: "bool",
                   title: "Scale runtimes by upcoming weather",
                   description: "Hotter/drier → longer; cooler/wetter → shorter.",
@@ -541,12 +541,12 @@ def weatherPage() {
                   description: "Prevents extreme swings. 50 means runtime scales between 50% and 150% of baseline.",
                   range: "0..100", defaultValue: 50
         }
-        section("<b>Optional external rain gauge</b>") {
+        section("Optional external rain gauge") {
             input name: "rainSensorDevice", type: "capability.relativeHumidityMeasurement",
                   title: "Local weather station / rain gauge (must expose a numeric \"rainToday\" attribute, in inches)",
                   required: false
         }
-        section("<b>Today's forecast (live from Open-Meteo)</b>") {
+        section("Today's forecast (live from Open-Meteo)") {
             paragraph forecastPreviewHtml()
             input name: "btnRefreshForecast", type: "button", title: "Refresh forecast cache"
         }
@@ -586,22 +586,51 @@ private String forecastPreviewHtml() {
 def rainSensorPage() {
     dynamicPage(name: "rainSensorPage", title: "Rain sensors") {
         section {
-            paragraph "Binary rain sensors (Water Sensor capability). If ANY of the selected sensors reports <b>wet</b>, the schedule is skipped, and if a run is already in progress it is stopped immediately. Use this for hard-wired rain sensors (e.g. the rain input on a controller that exposes wet/dry) or wireless leak/rain detectors."
+            paragraph "Any combination of the three options below can be used together. If ANY of them detects rain, the schedule is skipped — and if a run is in progress and \"stop mid-run\" is on, it is stopped immediately."
+        }
+
+        section("Water sensors (wet/dry capability)") {
+            paragraph "For dedicated rain detectors that report water/wet/dry — e.g. wireless leak sensors, weather-station rain pucks, or any Hubitat device with the Water Sensor capability."
             input name: "rainSensorWaterDevices", type: "capability.waterSensor",
-                  title: "Rain sensors (wet/dry)",
+                  title: "Rain water sensors",
                   multiple: true, required: false, submitOnChange: true
+        }
+
+        section("Contact-based rain sensors (incl. ZEN16 inputs)") {
+            paragraph "Most rain sensors sold for irrigation are dry-contact devices — two terminals that get bridged when water collects on the sensor. Wire one to a Zooz ZEN16 input port (Sw1 / Sw2 / Sw3): the ZEN16 driver exposes each input as a child Contact Sensor in Hubitat. Pick that child here. Any other Contact Sensor device (door/window, leaf wetness sensor with contact output, etc.) works too."
+            input name: "rainSensorContactDevices", type: "capability.contactSensor",
+                  title: "Rain contact sensors",
+                  multiple: true, required: false, submitOnChange: true
+            input name: "rainSensorContactWetState", type: "enum",
+                  title: "Contact state when raining",
+                  options: ["closed": "closed (most rain sensors — contacts close when wet)",
+                            "open":   "open   (normally-closed sensors)"],
+                  defaultValue: "closed"
+            paragraph "ZEN16 wiring tip: the rain sensor's two leads go to a Sw input (e.g. Sw1) and its paired GND/COM terminal. Set parameter P2 (Sw1 input type) = 1 (toggle switch) so the ZEN16 reports the contact state as an event, then either let the built-in driver auto-create the Sw1 Contact child OR add it manually. Pick the resulting child device above."
+        }
+
+        section("Behavior") {
             input name: "rainSensorStopRunning", type: "bool",
-                  title: "Stop a running schedule if a rain sensor goes wet mid-run",
+                  title: "Stop a running schedule when a rain sensor activates mid-run",
                   defaultValue: true
             input name: "rainSensorClearMinutes", type: "number",
                   title: "After sensors go dry, wait N minutes before unblocking",
                   range: "0..720", defaultValue: 60
         }
-        if (settings.rainSensorWaterDevices) {
-            section("<b>Current state</b>") {
-                settings.rainSensorWaterDevices.each { dev ->
-                    paragraph "• ${dev.displayName} — <b>${dev.currentValue('water') ?: 'unknown'}</b>"
+
+        if (settings.rainSensorWaterDevices || settings.rainSensorContactDevices) {
+            section("Current state") {
+                (settings.rainSensorWaterDevices ?: []).each { dev ->
+                    String cur = dev.currentValue('water') ?: 'unknown'
+                    paragraph "• [water] ${dev.displayName} — ${cur}${cur == 'wet' ? '  ⛈ WET' : ''}"
                 }
+                String wetState = settings.rainSensorContactWetState ?: "closed"
+                (settings.rainSensorContactDevices ?: []).each { dev ->
+                    String cur = dev.currentValue('contact') ?: 'unknown'
+                    boolean wet = (cur == wetState)
+                    paragraph "• [contact] ${dev.displayName} — ${cur}${wet ? '  ⛈ WET' : ''}"
+                }
+                paragraph "Aggregate: ${rainSensorWet() ? '⛈ WET — schedule blocked' : '✓ dry — schedule allowed'}"
             }
         }
     }
@@ -612,7 +641,7 @@ def pauseSensorPage() {
         section {
             paragraph "External devices that pause the schedule when active. Useful for: contact sensors on a back door (pause when door open so the kids don't get sprayed), a manual override switch, a garage door, a presence sensor, etc."
         }
-        section("<b>Contact sensors</b>") {
+        section("Contact sensors") {
             input name: "pauseContacts", type: "capability.contactSensor",
                   title: "Pause when ANY of these contacts are in the trigger state",
                   multiple: true, required: false, submitOnChange: true
@@ -621,7 +650,7 @@ def pauseSensorPage() {
                   options: ["open":"open", "closed":"closed"],
                   defaultValue: "open"
         }
-        section("<b>Switches</b>") {
+        section("Switches") {
             input name: "pauseSwitches", type: "capability.switch",
                   title: "Pause when ANY of these switches are in the trigger state",
                   description: "e.g. a virtual switch tied to Alexa, a wall override, a tablet button",
@@ -631,7 +660,7 @@ def pauseSensorPage() {
                   options: ["on":"on", "off":"off"],
                   defaultValue: "on"
         }
-        section("<b>Behaviour</b>") {
+        section("Behaviour") {
             input name: "pauseMode", type: "enum",
                   title: "What happens mid-run when a pause sensor activates",
                   options: ["pause":  "Pause the current zone immediately, resume from the exact moment when all sensors clear (recommended)",
@@ -643,14 +672,14 @@ def pauseSensorPage() {
                   range: "0..600", defaultValue: 30
         }
         if (settings.pauseContacts || settings.pauseSwitches) {
-            section("<b>Current state</b>") {
+            section("Current state") {
                 (settings.pauseContacts ?: []).each { dev ->
-                    paragraph "• ${dev.displayName} (contact) — <b>${dev.currentValue('contact') ?: 'unknown'}</b>"
+                    paragraph "• ${dev.displayName} (contact) — ${dev.currentValue('contact') ?: 'unknown'}"
                 }
                 (settings.pauseSwitches ?: []).each { dev ->
-                    paragraph "• ${dev.displayName} (switch) — <b>${dev.currentValue('switch') ?: 'unknown'}</b>"
+                    paragraph "• ${dev.displayName} (switch) — ${dev.currentValue('switch') ?: 'unknown'}"
                 }
-                paragraph "<i>Aggregate pause-active right now: <b>${externalPauseActive() ? 'YES — schedule blocked' : 'no — schedule allowed'}</b></i>"
+                paragraph "Aggregate pause-active right now: ${externalPauseActive() ? 'YES — schedule blocked' : 'no — schedule allowed'}"
             }
         }
     }
@@ -667,14 +696,14 @@ def pumpPage() {
             if (p) {
                 input name: "pumpPortLabel", type: "text",
                       title: "Physical port label (free text)",
-                      description: "e.g. \"ZEN16 #2 Port 1 (20A)\"</i>", required: false
+                      description: "e.g. \"ZEN16 #2 Port 1 (20A)\"", required: false
                 input name: "pumpPreSec",  type: "number",
                       title: "Pre-delay (seconds) — pump on, wait, then first zone",
                       range: "0..120", defaultValue: 5
                 input name: "pumpPostSec", type: "number",
                       title: "Post-delay (seconds) — last zone off, wait, then pump off",
                       range: "0..120", defaultValue: 5
-                paragraph "<i>Current state of ${p.displayName}: <b>${p.currentValue('switch') ?: 'unknown'}</b></i>"
+                paragraph "Current state of ${p.displayName}: ${p.currentValue('switch') ?: 'unknown'}"
             }
         }
     }
@@ -685,22 +714,22 @@ def hardwarePage() {
     Integer targetMin = Math.max(1, maxRun + 5)   // app max + 5min buffer
     dynamicPage(name: "hardwarePage", title: "Hardware safety — ZEN16 watchdog") {
         section {
-            paragraph "<b>Why this matters.</b> If the hub crashes mid-cycle, dies, " +
+            paragraph "Why this matters. If the hub crashes mid-cycle, dies, " +
                       "loses Z-Wave, or the app errors out, the relay stays ON until " +
                       "someone notices. That's how a stuck sprinkler floods a yard. " +
-                      "Zooz ZEN16 has per-relay <b>hardware auto-off timers</b> " +
-                      "(parameters 6 / 8 / 10) that fire <i>inside the relay itself</i> — " +
+                      "Zooz ZEN16 has per-relay hardware auto-off timers " +
+                      "(parameters 6 / 8 / 10) that fire inside the relay itself — " +
                       "no hub required. We push them once and forget."
-            paragraph "<b>Recommended target for this schedule:</b> <code>${targetMin} minutes</code> " +
+            paragraph "Recommended target for this schedule: ${targetMin} minutes " +
                       "(the schedule's max-zone-run-minutes plus a 5-minute safety buffer)."
         }
-        section("<b>Pick the ZEN16 parent controller(s)</b>") {
-            paragraph "<i>Pick the parent ZEN16 device (the one with name containing \"ZEN16\" — not its child relays). Hub will push parameters 6/8/10 (auto-off timer for R1/R2/R3), 15/17/19 (timer unit = minutes), 1 (power-fail state = OFF), and verify 24 (DC motor mode) is OFF.</i>"
+        section("Pick the ZEN16 parent controller(s)") {
+            paragraph "Pick the parent ZEN16 device (the one with name containing \"ZEN16\" — not its child relays). Hub will push parameters 6/8/10 (auto-off timer for R1/R2/R3), 15/17/19 (timer unit = minutes), 1 (power-fail state = OFF), and verify 24 (DC motor mode) is OFF."
             input name: "hwZen16Parents", type: "capability.actuator",
                   title: "ZEN16 parent device(s)",
                   multiple: true, required: false, submitOnChange: true
         }
-        section("<b>Recommended values</b>") {
+        section("Recommended values") {
             input name: "hwAutoOffMinutes", type: "number",
                   title: "Auto-off timer (minutes) to push to P6/P8/P10",
                   description: "Default = schedule max-run + 5min. 0 disables (not recommended).",
@@ -715,20 +744,20 @@ def hardwarePage() {
                   defaultValue: true
         }
         if (settings.hwZen16Parents) {
-            section("<b>Push now</b>") {
+            section("Push now") {
                 input name: "btnPushHardwareSafety", type: "button",
                       title: "Push recommended Z-Wave parameters to selected ZEN16(s)"
-                paragraph "<i>${state.hwLastPushSummary ?: 'No push performed yet.'}</i>"
+                paragraph "${state.hwLastPushSummary ?: 'No push performed yet.'}"
             }
-            section("<b>Selected controllers</b>") {
+            section("Selected controllers") {
                 settings.hwZen16Parents.each { dev ->
-                    paragraph "• <b>${dev.displayName}</b> (id ${dev.id}) — supports setParameter: " +
-                              "<b>${dev.hasCommand('setParameter') ? 'yes' : 'NO — push will fail; install krlaframboise driver or use the built-in ZEN16 driver that exposes setParameter'}</b>"
+                    paragraph "• ${dev.displayName} (id ${dev.id}) — supports setParameter: " +
+                              "${dev.hasCommand('setParameter') ? 'yes' : 'NO — push will fail; install krlaframboise driver or use the built-in ZEN16 driver that exposes setParameter'}"
                 }
             }
         }
         section {
-            paragraph "<i>References:</i> " +
+            paragraph "References: " +
                       "<a href='https://www.support.getzooz.com/kb/article/371'>Zooz KB #371 — Sprinkler use on Hubitat</a> · " +
                       "<a href='https://www.support.getzooz.com/kb/article/376'>KB #376 — Advanced settings</a>"
         }
@@ -741,7 +770,7 @@ def historyPage() {
         section {
             paragraph "Last ${runs.size()} run${runs.size() == 1 ? '' : 's'} (newest first). Capped at 50."
             if (!runs) {
-                paragraph "<i>No runs recorded yet.</i>"
+                paragraph "No runs recorded yet."
             } else {
                 StringBuilder sb = new StringBuilder("<table style='width:100%;font-family:monospace;font-size:0.9em'>")
                 sb << "<tr><th align='left'>When</th><th align='left'>Zones</th><th align='left'>Outcome</th></tr>"
@@ -762,7 +791,7 @@ def historyPage() {
 def dashboardPage() {
     dynamicPage(name: "dashboardPage", title: "Dashboard tile") {
         section {
-            paragraph "Optionally create a child <b>Virtual Switch</b> that reflects this schedule's state. " +
+            paragraph "Optionally create a child Virtual Switch that reflects this schedule's state. " +
                       "Put it on a Hubitat dashboard tile to see the schedule's status at a glance. The " +
                       "switch turns ON while watering is active. Custom attributes (currentZone, " +
                       "nextRun, lastFinish, seasonalMult, paused) are also published for advanced tiles."
@@ -774,14 +803,14 @@ def dashboardPage() {
                       title: "Child device label (default: \"<schedule name> Tile\")",
                       required: false
                 def existing = getDashboardChild()
-                paragraph "<i>Child device: <b>${existing ? existing.displayName : 'will be created on save'}</b></i>"
+                paragraph "Child device: ${existing ? existing.displayName : 'will be created on save'}"
                 if (existing) {
                     input name: "btnRefreshDashboard", type: "button", title: "Refresh tile state now"
                 }
             } else {
                 def existing = getDashboardChild()
                 if (existing) {
-                    paragraph "<i>Existing child device <b>${existing.displayName}</b> will be removed on save.</i>"
+                    paragraph "Existing child device ${existing.displayName} will be removed on save."
                 }
             }
         }
@@ -790,11 +819,11 @@ def dashboardPage() {
 
 def diagnosticsPage() {
     dynamicPage(name: "diagnosticsPage", title: "Diagnostics & test runs") {
-        section("<b>Health check</b>") {
+        section("Health check") {
             paragraph healthCheckReport()
             input name: "btnRunHealthCheck", type: "button", title: "Re-run health check"
         }
-        section("<b>Per-zone test runs</b>") {
+        section("Per-zone test runs") {
             paragraph "Quickly pulse each relay so you can verify wiring and observe a visible valve open. Each test runs the relay for the seconds below, regardless of weather / pause / schedule state. Pump (if configured) is NOT automatically engaged."
             input name: "testRunSeconds", type: "number",
                   title: "Test duration per zone (seconds)",
@@ -807,7 +836,7 @@ def diagnosticsPage() {
             }
             input name: "btnTestAllZones", type: "button", title: "▶ Test ALL zones sequentially"
         }
-        section("<b>Force rain delay</b>") {
+        section("Force rain delay") {
             paragraph "Skip the next scheduled run, or block runs for a fixed number of hours."
             input name: "btnSkipNext",       type: "button", title: "Skip next scheduled run"
             input name: "btnRainDelay6h",    type: "button", title: "Force rain delay: 6 hours"
@@ -815,9 +844,9 @@ def diagnosticsPage() {
             input name: "btnRainDelay48h",   type: "button", title: "Force rain delay: 48 hours"
             input name: "btnRainDelay72h",   type: "button", title: "Force rain delay: 72 hours"
             input name: "btnClearRainDelay", type: "button", title: "Clear all forced delays"
-            paragraph "<i>Currently: ${forcedDelayDisplayString()}</i>"
+            paragraph "Currently: ${forcedDelayDisplayString()}"
         }
-        section("<b>Live state dump</b>") {
+        section("Live state dump") {
             paragraph stateDumpString()
         }
     }
@@ -825,7 +854,7 @@ def diagnosticsPage() {
 
 def restrictionsPage() {
     dynamicPage(name: "restrictionsPage", title: "Restrictions") {
-        section("<b>Quiet hours blackout</b>") {
+        section("Quiet hours blackout") {
             paragraph "Block runs between these times. If a scheduled trigger falls in the quiet window, it's skipped. Optionally, an in-progress run is stopped when quiet hours begin (the rest of the plan is skipped — pick up next scheduled window)."
             input name: "quietHoursEnabled", type: "bool",
                   title: "Enable quiet hours", defaultValue: false, submitOnChange: true
@@ -842,13 +871,13 @@ def restrictionsPage() {
             }
         }
 
-        section("<b>Hubitat mode pause</b>") {
+        section("Hubitat mode pause") {
             paragraph "Pause/skip the schedule when the Hubitat location is in any of these modes."
             input name: "pauseModes", type: "mode",
                   title: "Pause when mode is", multiple: true, required: false
         }
 
-        section("<b>HSM (Hubitat Safety Monitor) pause</b>") {
+        section("HSM (Hubitat Safety Monitor) pause") {
             paragraph "Pause if HSM enters an alarmed state (intrusion / water / smoke). Re-enables when HSM clears."
             input name: "hsmPauseEnabled", type: "bool",
                   title: "Pause schedule when HSM is in any alarmed state",
@@ -858,7 +887,7 @@ def restrictionsPage() {
                   defaultValue: false
         }
 
-        section("<b>Pre-run lead notification</b>") {
+        section("Pre-run lead notification") {
             paragraph "Send a notification N minutes BEFORE each scheduled window starts. Lets people clear the yard. Uses the notification devices selected on the Notifications page."
             input name: "preRunLeadMinutes", type: "number",
                   title: "Minutes before scheduled start (0 = disabled)",
@@ -866,11 +895,11 @@ def restrictionsPage() {
         }
 
         if (settings.quietHoursEnabled || settings.pauseModes || settings.hsmPauseEnabled) {
-            section("<b>Current state</b>") {
+            section("Current state") {
                 paragraph quietHoursActive() ? "🌙 In quiet hours right now — runs blocked" : "✓ Outside quiet hours"
-                if (settings.pauseModes) paragraph "Current mode: <b>${location?.mode ?: '?'}</b> — " +
+                if (settings.pauseModes) paragraph "Current mode: ${location?.mode ?: '?'} — " +
                                                     "${modeShouldPause() ? '⏸ in pause list' : '✓ not in pause list'}"
-                if (settings.hsmPauseEnabled) paragraph "HSM state: <b>${location?.hsmStatus ?: 'unknown'}</b> — " +
+                if (settings.hsmPauseEnabled) paragraph "HSM state: ${location?.hsmStatus ?: 'unknown'} — " +
                                                        "${hsmShouldPause() ? '⏸ alarmed' : '✓ disarmed/clear'}"
             }
         }
@@ -882,7 +911,7 @@ def previewPage() {
         section {
             paragraph "Calendar view of the next 7 days. Shows when each window would run, after accounting for skip-next, forced rain delay, day-of-week filters, and quiet hours. (Weather rain-skip is dynamic and can't be predicted ahead of time.)"
         }
-        section("<b>Schedule</b>") {
+        section("Schedule") {
             paragraph previewNextSevenDaysHtml()
         }
     }
@@ -890,19 +919,19 @@ def previewPage() {
 
 def backupPage() {
     dynamicPage(name: "backupPage", title: "Backup / restore configuration") {
-        section("<b>Export</b>") {
-            paragraph "<i>Copy the JSON below to back up this schedule. Device references (switches, sensors, controllers) are stored as labels — you'll have to re-pick the actual devices after restore on a different hub.</i>"
+        section("Export") {
+            paragraph "Copy the JSON below to back up this schedule. Device references (switches, sensors, controllers) are stored as labels — you'll have to re-pick the actual devices after restore on a different hub."
             input name: "btnRefreshExport", type: "button", title: "Refresh export"
             paragraph "<textarea readonly style='width:100%;height:240px;font-family:monospace;font-size:0.85em'>${exportConfigJson()}</textarea>"
         }
-        section("<b>Import</b>") {
-            paragraph "<i>Paste a previously exported JSON and tap Apply. Non-device settings (run times, weather thresholds, days, etc.) are restored. Existing zones are preserved unless overwritten by the import.</i>"
+        section("Import") {
+            paragraph "Paste a previously exported JSON and tap Apply. Non-device settings (run times, weather thresholds, days, etc.) are restored. Existing zones are preserved unless overwritten by the import."
             input name: "importJson", type: "text",
                   title: "Paste JSON here",
                   required: false
             input name: "btnImportConfig", type: "button", title: "Apply import"
             if (state.lastImportSummary) {
-                paragraph "<i>${state.lastImportSummary}</i>"
+                paragraph "${state.lastImportSummary}"
             }
         }
     }
@@ -913,27 +942,27 @@ def apiPage() {
     String localUri = ""
     try { localUri = getFullLocalApiServerUrl() } catch (ignored) {}
     dynamicPage(name: "apiPage", title: "External JSON API") {
-        section("<b>What this is</b>") {
+        section("What this is") {
             paragraph "Read-only status JSON plus a small set of POST endpoints (run / stop / skip / delay). Token-protected. Use it for a phone widget, a Grafana panel, a script that triggers watering after sunset, etc."
         }
-        section("<b>Endpoints</b>") {
+        section("Endpoints") {
             if (!token) {
-                paragraph "<i>Token not yet generated. Tap below to generate one (Hubitat will create an OAuth access token for this app).</i>"
+                paragraph "Token not yet generated. Tap below to generate one (Hubitat will create an OAuth access token for this app)."
                 input name: "btnGenerateApiToken", type: "button", title: "Generate access token"
             } else {
-                paragraph "<b>Token:</b> <code>${token}</code><br>" +
-                          "<b>Local base URL:</b> <code>${localUri}</code><br><br>" +
-                          "<b>GET</b>  <code>${localUri}/status?access_token=${token}</code> — JSON status<br>" +
-                          "<b>GET</b>  <code>${localUri}/dashboard?access_token=${token}</code> — HTML auto-refreshing dashboard<br>" +
-                          "<b>GET</b>  <code>${localUri}/calendar.ics?access_token=${token}</code> — iCalendar feed (next 30 days)<br>" +
-                          "<b>POST</b> <code>${localUri}/run?access_token=${token}</code><br>" +
-                          "<b>POST</b> <code>${localUri}/stop?access_token=${token}</code><br>" +
-                          "<b>POST</b> <code>${localUri}/skip?access_token=${token}</code><br>" +
-                          "<b>POST</b> <code>${localUri}/delay?access_token=${token}&hours=24</code>"
+                paragraph "Token: ${token}<br>" +
+                          "Local base URL: ${localUri}<br><br>" +
+                          "GET  ${localUri}/status?access_token=${token} — JSON status<br>" +
+                          "GET  ${localUri}/dashboard?access_token=${token} — HTML auto-refreshing dashboard<br>" +
+                          "GET  ${localUri}/calendar.ics?access_token=${token} — iCalendar feed (next 30 days)<br>" +
+                          "POST ${localUri}/run?access_token=${token}<br>" +
+                          "POST ${localUri}/stop?access_token=${token}<br>" +
+                          "POST ${localUri}/skip?access_token=${token}<br>" +
+                          "POST ${localUri}/delay?access_token=${token}&hours=24"
                 input name: "btnRevokeApiToken", type: "button", title: "Revoke / regenerate token"
             }
         }
-        section("<b>Example</b>") {
+        section("Example") {
             paragraph "<pre style='font-size:0.85em;background:#f4f4f4;padding:6px'>" +
                       "curl -s '${localUri}/status?access_token=${token ?: 'TOKEN'}'\n" +
                       "curl -X POST '${localUri}/run?access_token=${token ?: 'TOKEN'}'\n" +
@@ -947,30 +976,30 @@ def aboutPage() {
     dynamicPage(name: "aboutPage", title: "About") {
         section {
             paragraph "<h2>Zooz Sprinkler Scheduler</h2>" +
-                      "<b>Version:</b> ${getAppVersion()}<br>" +
-                      "<b>Author:</b> RamSet<br>" +
-                      "<b>License:</b> Apache License, Version 2.0<br>" +
-                      "<b>Source:</b> <a href='https://github.com/RamSet/hubitat'>github.com/RamSet/hubitat</a><br>" +
-                      "<b>Import URL:</b> <code>https://raw.githubusercontent.com/RamSet/hubitat/main/zooz-sprinkler-scheduler.groovy</code>"
+                      "Version: ${getAppVersion()}<br>" +
+                      "Author: RamSet<br>" +
+                      "License: Apache License, Version 2.0<br>" +
+                      "Source: <a href='https://github.com/RamSet/hubitat'>github.com/RamSet/hubitat</a><br>" +
+                      "Import URL: https://raw.githubusercontent.com/RamSet/hubitat/main/zooz-sprinkler-scheduler.groovy"
         }
-        section("<b>What this is</b>") {
+        section("What this is") {
             paragraph "A Hubitat app for running sprinkler zones via Zooz ZEN16 800LR multi-relay controllers — or any Hubitat device exposing the Switch capability. Hardware-agnostic, multi-instance, with Spruce-style weather adaptation, per-zone moisture-aware watering, restrictions (quiet hours / mode / HSM), pause-and-resume from external sensors, hub-independent hardware watchdog via Z-Wave parameters, full external JSON/HTML/iCal API, and granular templated notifications with Pushover support."
         }
-        section("<b>Changelog</b>") {
-            paragraph "<b>v0.5</b> — Smart skips (frost/cold/wind via Open-Meteo), per-zone fertilizer mode (one-shot short-burst-with-soak), auto-stagger across instances via shared coordination switch, HTML dashboard endpoint, iCalendar export endpoint, About page."
-            paragraph "<b>v0.4</b> — Per-zone moisture modes (off / skip / earlyStop / adapt / learn), pre/post moisture capture with rolling rate, learned-rate prediction, Moisture page with per-zone history table."
-            paragraph "<b>v0.3</b> — Per-event notification system with 25 named events + templates + Pushover. Spruce-style weekly-minutes runtime. Per-zone weekly budget cap. Today's forecast preview on weather page."
-            paragraph "<b>v0.2</b> — Quiet hours, mode/HSM pause, pre-run lead notification, 7-day schedule preview, OAuth JSON API, backup/restore JSON, ZEN16 reachability watchdog."
-            paragraph "<b>v0.1</b> — Initial release: zones, schedule, weather (Open-Meteo), rain sensors, pause sensors with true pause-and-resume, pump/master, hardware safety push, history, test runs, diagnostics, dashboard child device."
+        section("Changelog") {
+            paragraph "v0.5 — Smart skips (frost/cold/wind via Open-Meteo), per-zone fertilizer mode (one-shot short-burst-with-soak), auto-stagger across instances via shared coordination switch, HTML dashboard endpoint, iCalendar export endpoint, About page."
+            paragraph "v0.4 — Per-zone moisture modes (off / skip / earlyStop / adapt / learn), pre/post moisture capture with rolling rate, learned-rate prediction, Moisture page with per-zone history table."
+            paragraph "v0.3 — Per-event notification system with 25 named events + templates + Pushover. Spruce-style weekly-minutes runtime. Per-zone weekly budget cap. Today's forecast preview on weather page."
+            paragraph "v0.2 — Quiet hours, mode/HSM pause, pre-run lead notification, 7-day schedule preview, OAuth JSON API, backup/restore JSON, ZEN16 reachability watchdog."
+            paragraph "v0.1 — Initial release: zones, schedule, weather (Open-Meteo), rain sensors, pause sensors with true pause-and-resume, pump/master, hardware safety push, history, test runs, diagnostics, dashboard child device."
         }
-        section("<b>Acknowledgements</b>") {
-            paragraph "Inspired by the Plaid Systems <b>Spruce Scheduler</b> — same overall approach (per-zone plant/sprinkler/soil typing, weather-aware seasonal adjust, rain delay, optional pump/master, moisture sensors)."
+        section("Acknowledgements") {
+            paragraph "Inspired by the Plaid Systems Spruce Scheduler — same overall approach (per-zone plant/sprinkler/soil typing, weather-aware seasonal adjust, rain delay, optional pump/master, moisture sensors)."
             paragraph "• <a href='https://www.support.getzooz.com/kb/article/371'>Zooz KB #371 — sprinkler use on Hubitat</a><br>" +
                       "• <a href='https://www.support.getzooz.com/kb/article/376'>Zooz KB #376 — advanced settings</a><br>" +
                       "• Weather by <a href='https://open-meteo.com'>Open-Meteo</a> (no API key required)<br>" +
                       "• Icons by <a href='https://openmoji.org'>OpenMoji</a> (CC-BY-SA 4.0)"
         }
-        section("<b>License (Apache 2.0)</b>") {
+        section("License (Apache 2.0)") {
             paragraph "<pre style='font-size:0.8em'>Licensed under the Apache License, Version 2.0 (the \"License\"); you may not use this file except in compliance with the License. You may obtain a copy of the License at\n\n  http://www.apache.org/licenses/LICENSE-2.0\n\nUnless required by applicable law or agreed to in writing, software distributed under the License is distributed on an \"AS IS\" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the specific language governing permissions and limitations under the License.</pre>"
         }
     }
@@ -979,7 +1008,7 @@ def aboutPage() {
 def moisturePage() {
     dynamicPage(name: "moisturePage", title: "Moisture learning") {
         section {
-            paragraph "Per-zone moisture status. The scheduler captures a pre-moisture reading at zone start and a post-moisture reading at zone end. From the pre/post delta and the actual run minutes, it derives a soil-response rate (% per minute). In <b>learn</b> mode, future runs use this rate to predict the runtime needed to lift moisture from current level up to target."
+            paragraph "Per-zone moisture status. The scheduler captures a pre-moisture reading at zone start and a post-moisture reading at zone end. From the pre/post delta and the actual run minutes, it derives a soil-response rate (% per minute). In learn mode, future runs use this rate to predict the runtime needed to lift moisture from current level up to target."
         }
         Integer n = zoneCount()
         boolean any = false
@@ -993,11 +1022,11 @@ def moisturePage() {
             Integer minPct = (settings."zone${i}MoistureMin" ?: 20) as int
             Float rate   = learnedRate(i)
             String status = zoneAdaptiveStatusString(i)
-            section("<b>${i}. ${label}</b>") {
-                paragraph "<i>Mode:</i> <b>${mode}</b> · " +
-                          "<i>Current:</i> <b>${cur != null ? "${cur}%" : 'n/a'}</b> · " +
-                          "<i>Target:</i> ${target}% · <i>Min:</i> ${minPct}% · " +
-                          "<i>Status:</i> ${status}"
+            section("${i}. ${label}") {
+                paragraph "Mode: ${mode} · " +
+                          "Current: ${cur != null ? "${cur}%" : 'n/a'} · " +
+                          "Target: ${target}% · Min: ${minPct}% · " +
+                          "Status: ${status}"
                 List recs = ((state.moistureLearning ?: [:])[i.toString()] ?: []) as List
                 if (recs) {
                     StringBuilder sb = new StringBuilder("<table style='width:100%;font-family:monospace;font-size:0.85em'>")
@@ -1009,16 +1038,16 @@ def moisturePage() {
                     }
                     sb << "</table>"
                     paragraph sb.toString()
-                    paragraph "<i>Weighted-average rate (recent runs weigh more): <b>${rate ?: 'insufficient data'}</b></i>"
+                    paragraph "Weighted-average rate (recent runs weigh more): ${rate ?: 'insufficient data'}"
                     input name: "btnClearMoisture_${i}", type: "button", title: "Clear learning history for this zone"
                 } else {
-                    paragraph "<i>No learning records yet. Run the zone at least once with a moisture sensor in any mode to start collecting data.</i>"
+                    paragraph "No learning records yet. Run the zone at least once with a moisture sensor in any mode to start collecting data."
                 }
             }
         }
         if (!any) {
             section {
-                paragraph "<i>No zones have a moisture sensor assigned. Pick one on each zone's detail page to enable moisture-aware watering.</i>"
+                paragraph "No zones have a moisture sensor assigned. Pick one on each zone's detail page to enable moisture-aware watering."
             }
         }
     }
@@ -1041,12 +1070,12 @@ private String moistureSummaryString() {
 
 def notificationPage() {
     dynamicPage(name: "notificationPage", title: "Notifications") {
-        section("<b>Where to send notifications</b>") {
+        section("Where to send notifications") {
             input name: "notifyDevices", type: "capability.notification",
                   title: "Notification devices (any Hubitat capability.notification)",
                   multiple: true, required: false
         }
-        section("<b>Pushover (optional)</b>") {
+        section("Pushover (optional)") {
             paragraph "Install the community <a href='https://community.hubitat.com/t/release-pushover-notifications/29795'>Pushover Notifications</a> driver, pair your account, then pick the resulting device here. Pushover messages mirror everything sent to the regular notification devices above, with optional per-event priority/sound overrides on the next page."
             input name: "pushoverDevice", type: "capability.notification",
                   title: "Pushover device(s)",
@@ -1061,15 +1090,15 @@ def notificationPage() {
                 input name: "pushoverEmergencyOnError", type: "bool",
                       title: "Force emergency priority for `error` events",
                       defaultValue: false
-                paragraph "<i>If your Pushover driver supports the bracketed prefix format <code>[priority|sound|message]</code>, the app will use it; otherwise messages go through as plain deviceNotification.</i>"
+                paragraph "If your Pushover driver supports the bracketed prefix format [priority|sound|message], the app will use it; otherwise messages go through as plain deviceNotification."
             }
         }
-        section("<b>Per-event configuration</b>") {
+        section("Per-event configuration") {
             href name: "notifyEventsPage", title: "Configure per-event toggles and custom messages →",
                  page: "notifyEventsPage",
                  description: notifyEventsSummaryString()
         }
-        section("<b>Test</b>") {
+        section("Test") {
             input name: "btnNotifyTest", type: "button",
                   title: "Send a test notification to every selected channel"
         }
@@ -1080,11 +1109,11 @@ def notifyEventsPage() {
     dynamicPage(name: "notifyEventsPage", title: "Per-event notifications") {
         section {
             paragraph "Every notification the scheduler can emit is listed below, grouped by category. Toggle individual events on/off. To customise the wording, paste your own message in the override field — leave blank to use the default. Custom messages support these template variables (any missing variable renders as empty):"
-            paragraph "<code>\${app}</code> · <code>\${zone}</code> · <code>\${duration}</code> · <code>\${remaining}</code> · " +
-                      "<code>\${reason}</code> · <code>\${sensor}</code> · <code>\${cycle}</code> · <code>\${totalCycles}</code> · " +
-                      "<code>\${count}</code> · <code>\${minutes}</code> · <code>\${hours}</code> · <code>\${detail}</code> · " +
-                      "<code>\${planSize}</code> · <code>\${seasonalMult}</code> · <code>\${until}</code> · " +
-                      "<code>\${mode}</code> · <code>\${hsm}</code> · <code>\${delay}</code>"
+            paragraph "\${app} · \${zone} · \${duration} · \${remaining} · " +
+                      "\${reason} · \${sensor} · \${cycle} · \${totalCycles} · " +
+                      "\${count} · \${minutes} · \${hours} · \${detail} · " +
+                      "\${planSize} · \${seasonalMult} · \${until} · " +
+                      "\${mode} · \${hsm} · \${delay}"
         }
         // Group events by section preserving NOTIFY_EVENTS insertion order
         Map<String, List<Map>> grouped = [:]
@@ -1093,7 +1122,7 @@ def notifyEventsPage() {
             grouped[sec] = (grouped[sec] ?: []) + [[key: key, meta: meta]]
         }
         grouped.each { sec, items ->
-            section("<b>${sec}</b>") {
+            section("${sec}") {
                 items.each { item ->
                     String key = item.key
                     Map meta = item.meta
@@ -1190,9 +1219,13 @@ def initialize() {
     // Lazy check at every wake: if we crossed a week boundary while powered off
     rolloverWeeklyBudgetIfNeeded()
 
-    // Subscribe to rain sensors so a "wet" event during a run can stop it.
+    // Subscribe to rain sensors (water-capability + contact-based) so a
+    // wet event during a run can stop it. Both routes call rainSensorEvent.
     if (settings.rainSensorWaterDevices) {
         subscribe(settings.rainSensorWaterDevices, "water", "rainSensorEvent")
+    }
+    if (settings.rainSensorContactDevices) {
+        subscribe(settings.rainSensorContactDevices, "contact", "rainSensorEvent")
     }
     // Subscribe to pause sensors (contacts + switches) for mid-run safety stop.
     if (settings.pauseContacts) subscribe(settings.pauseContacts, "contact", "pauseSensorEvent")
@@ -1242,11 +1275,23 @@ def preRunNotify() {
 // ---- Mid-run safety event handlers ----
 
 def rainSensorEvent(evt) {
-    if (evt?.value != "wet") return
-    if (descTextEnable) log.info "${app.label}: ${evt.displayName} → wet"
+    // Water-capability device emits attribute "water" with value "wet" or "dry".
+    // Contact device emits attribute "contact" with value "open" or "closed".
+    // The configured "wet state" tells us which contact value means raining.
+    String wetContactState = settings.rainSensorContactWetState ?: "closed"
+    boolean isWet
+    if (evt?.name == "water") {
+        isWet = (evt.value == "wet")
+    } else if (evt?.name == "contact") {
+        isWet = (evt.value == wetContactState)
+    } else {
+        return
+    }
+    if (!isWet) return
+    if (descTextEnable) log.info "${app.label}: ${evt.displayName} → wet (${evt.name}=${evt.value})"
     if (state.running && settings.rainSensorStopRunning != false) {
         log.warn "${app.label}: rain detected mid-run (${evt.displayName}) — stopping all zones"
-        notify("rain.mid.stop", [sensor: evt.displayName, reason: "rain sensor wet"])
+        notify("rain.mid.stop", [sensor: evt.displayName, reason: "rain ${evt.name}=${evt.value}"])
         stopAllZones()
     }
 }
@@ -1963,15 +2008,24 @@ def sendNotificationTest() {
 // =========================================================================
 
 private boolean rainSensorWet() {
-    def devs = settings.rainSensorWaterDevices
-    if (!devs) return false
-    return devs.any { it.currentValue("water") == "wet" }
+    // Wet/dry water sensors
+    if ((settings.rainSensorWaterDevices ?: []).any { it.currentValue("water") == "wet" }) return true
+    // Contact-based rain sensors (incl. ZEN16 inputs as child contact devices)
+    String wetState = settings.rainSensorContactWetState ?: "closed"
+    if ((settings.rainSensorContactDevices ?: []).any { it.currentValue("contact") == wetState }) return true
+    return false
 }
 
 private String rainSensorReason() {
-    def devs = settings.rainSensorWaterDevices ?: []
-    def wet = devs.findAll { it.currentValue("water") == "wet" }
-    return wet*.displayName.join(", ") ?: "unknown"
+    List names = []
+    (settings.rainSensorWaterDevices ?: []).each {
+        if (it.currentValue("water") == "wet") names << it.displayName
+    }
+    String wetState = settings.rainSensorContactWetState ?: "closed"
+    (settings.rainSensorContactDevices ?: []).each {
+        if (it.currentValue("contact") == wetState) names << "${it.displayName} (contact ${wetState})"
+    }
+    return names.join(", ") ?: "unknown"
 }
 
 private boolean externalPauseActive() {
@@ -3017,10 +3071,11 @@ private String pumpSummaryString() {
 }
 
 private String rainSensorSummaryString() {
-    def devs = settings.rainSensorWaterDevices
-    if (!devs) return "No rain sensors configured"
-    int wet = devs.count { it.currentValue("water") == "wet" }
-    return "${devs.size()} sensor(s) — ${wet} currently wet"
+    int w = (settings.rainSensorWaterDevices   ?: []).size()
+    int c = (settings.rainSensorContactDevices ?: []).size()
+    if (w == 0 && c == 0) return "No rain sensors configured"
+    String state = rainSensorWet() ? "⛈ WET now" : "dry"
+    return "${w} water + ${c} contact — ${state}"
 }
 
 private String pauseSensorSummaryString() {
