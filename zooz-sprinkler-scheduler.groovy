@@ -789,16 +789,16 @@ def hardwarePage() {
                     String modelKey = settings."hwModel_${dev.id}" ?: "3"
                     String modelName = (ZOOZ_RELAY_MODELS[modelKey]?.name ?: "?") as String
                     paragraph "• ${dev.displayName} (id ${dev.id}) — model: ${modelName} — setParameter: " +
-                              "${dev.hasCommand('setParameter') ? 'yes' : 'NO — install krlaframboise driver, or use the built-in driver that exposes setParameter'}"
+                              "${dev.hasCommand('setParameter') ? 'yes' : 'NO — the built-in driver does not expose setParameter; install the jtp10181 Advanced driver (vendored below)'}"
                 }
             }
         }
         section("Driver options") {
-            paragraph "Hubitat's built-in Zooz driver works for the basics (zone child switches + setParameter). If it ever doesn't expose setParameter on the parent, or you want richer parameter UI, install jtp10181's Advanced drivers:"
+            paragraph "Hubitat's built-in Zooz driver works for the basics (zone child switches), but it does NOT expose setParameter on the parent — so the Hardware Safety push needs jtp10181's Advanced drivers (vendored in this repo):"
             paragraph "• ZEN16:  https://raw.githubusercontent.com/RamSet/hubitat/main/zooz-zen16-multirelay.groovy\n" +
                       "• ZEN17:  https://raw.githubusercontent.com/RamSet/hubitat/main/zooz-zen17-universal-relay.groovy\n" +
                       "(Vendored from jtp10181/Hubitat — upstream: https://github.com/jtp10181/Hubitat/tree/main/Drivers/zooz)"
-            paragraph "The scheduler auto-detects the setParameter argument order (built-in is paramNumber/size/value; jtp10181 is paramNumber/value/size) so the same Hardware Safety push works with either driver."
+            paragraph "The scheduler auto-detects the setParameter argument order so the same Hardware Safety push works whether the driver uses paramNumber/size/value or jtp10181's paramNumber/value/size order."
         }
         section {
             paragraph "References: " +
@@ -2290,7 +2290,7 @@ def pushHardwareSafety() {
     List<String> log_ = []
     parents.each { dev ->
         if (!dev.hasCommand("setParameter")) {
-            log_ << "${dev.displayName}: setParameter() unsupported — switch to a driver that exposes it (Hubitat built-in or jtp10181's Advanced)"
+            log_ << "${dev.displayName}: setParameter() unsupported — the built-in driver does not expose it; switch the parent to jtp10181's Advanced driver"
             fail++
             return
         }
