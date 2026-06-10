@@ -62,13 +62,24 @@ mappings {
     path("/calendar.ics")  { action: [GET: "apiCalendar"] }
 }
 
-String getAppVersion() { return "v0.8.0 (2026-06)" }
+String getAppVersion() { return "v0.9.0 (2026-06)" }
 
 // Simple vs Advanced interface. Simple shows only zones, schedule, weather and
 // hardware safety; Advanced exposes everything (moisture, learning, sensors,
 // notifications, dashboard, API, diagnostics, etc.). Settings are never deleted
 // when hidden — flipping back to Advanced restores the full UI.
 private boolean isAdvanced() { return (settings.uiMode ?: "simple") == "advanced" }
+
+// Units follow the hub's Settings → Location temperature scale, so every
+// weather threshold, label, forecast value and Open-Meteo request speaks the
+// same units. Metric hub (°C) → mm / km/h; imperial hub (°F) → in / mph.
+private boolean isMetric()  { return (location?.temperatureScale ?: "F") == "C" }
+private String  tUnit()     { return isMetric() ? "°C"      : "°F" }
+private String  tApiUnit()  { return isMetric() ? "celsius" : "fahrenheit" }
+private String  rUnit()     { return isMetric() ? "mm"      : "in" }
+private String  rApiUnit()  { return isMetric() ? "mm"      : "inch" }
+private String  wUnit()     { return isMetric() ? "km/h"    : "mph" }
+private String  wApiUnit()  { return isMetric() ? "kmh"     : "mph" }
 
 // Zooz multi-relay model registry. Per-model lists of the Z-Wave parameter
 // numbers we push for the hardware watchdog:
@@ -90,8 +101,8 @@ private boolean isAdvanced() { return (settings.uiMode ?: "simple") == "advanced
 //   - A Pushover priority override : settings."notifyPriority_${key}"
 // Default messages support ${app}, ${zone}, ${reason}, ${duration}, ${cycle},
 // ${remaining}, ${sensor}, ${count}, ${minutes}, ${hours}, ${detail}, ${planSize},
-// ${seasonalMult}, ${until}, ${mode}, ${hsm}, ${delay}. Missing variables
-// render as the empty string.
+// ${seasonalMult}, ${until}, ${mode}, ${hsm}, ${delay}, ${tempF}, ${windMph},
+// ${threshold}, ${tunit}, ${wunit}. Missing variables render as the empty string.
 @groovy.transform.Field static final Map NOTIFY_EVENTS = [
     // Lifecycle
     "schedule.start"   : [section: "Lifecycle",  default: '${app}: ▶ schedule starting — ${planSize} zone(s), seasonal ×${seasonalMult}'],
@@ -113,9 +124,9 @@ private boolean isAdvanced() { return (settings.uiMode ?: "simple") == "advanced
     "skip.pause"       : [section: "Skips",      default: '${app}: skipped — pause sensor active (${sensor})'],
     "skip.budget"      : [section: "Skips",      default: '${app}: ${zone} skipped — weekly budget exhausted'],
     "skip.moisture"    : [section: "Skips",      default: '${app}: ${zone} skipped — soil already at ${moisture}% (target ${target}%)'],
-    "skip.frost"       : [section: "Skips",      default: '${app}: skipped — overnight low ${tempF}°F (threshold ${threshold}°F)'],
-    "skip.cold"        : [section: "Skips",      default: '${app}: skipped — today\'s high ${tempF}°F (threshold ${threshold}°F)'],
-    "skip.wind"        : [section: "Skips",      default: '${app}: skipped — max wind ${windMph} mph (threshold ${threshold} mph)'],
+    "skip.frost"       : [section: "Skips",      default: '${app}: skipped — overnight low ${tempF}${tunit} (threshold ${threshold}${tunit})'],
+    "skip.cold"        : [section: "Skips",      default: '${app}: skipped — today\'s high ${tempF}${tunit} (threshold ${threshold}${tunit})'],
+    "skip.wind"        : [section: "Skips",      default: '${app}: skipped — max wind ${windMph} ${wunit} (threshold ${threshold} ${wunit})'],
     "skip.coord"       : [section: "Skips",      default: '${app}: skipped — coordination switch held by another schedule (gave up after ${count} retries)'],
 
     // Pause & resume
@@ -593,23 +604,24 @@ def weatherPage() {
                   description: "0 = skip on any chance.",
                   range: "0..100", defaultValue: 60
             input name: "rainAmountThreshold", type: "decimal",
-                  title: "Skip if forecast or past-24h rain exceeds this many inches",
-                  range: "0..5", defaultValue: 0.2
+                  title: "Skip if forecast or past-24h rain exceeds this much (${rUnit()})",
+                  range: isMetric() ? "0..130" : "0..5",
+                  defaultValue: isMetric() ? 5.0 : 0.2
         }
         section("Smart skips (temperature / wind)") {
-            paragraph "Skip runs based on forecast extremes — useful for off-season frost protection and avoiding water loss in high wind."
+            paragraph "Skip runs based on forecast extremes — useful for off-season frost protection and avoiding water loss in high wind. Units follow your hub (currently ${tUnit()} / ${wUnit()})."
             input name: "smartSkipFrostF", type: "number",
-                  title: "Skip if overnight low (today) is below this °F (frost protection)",
-                  description: "Typical: 36 (below freezing risk) or 32 (hard freeze).",
-                  range: "-40..60", required: false
+                  title: "Skip if overnight low (today) is below this ${tUnit()} (frost protection)",
+                  description: isMetric() ? "Typical: 2 (freezing risk) or 0 (hard freeze)." : "Typical: 36 (below freezing risk) or 32 (hard freeze).",
+                  range: isMetric() ? "-40..16" : "-40..60", required: false
             input name: "smartSkipColdHighF", type: "number",
-                  title: "Skip if today's high is below this °F (winter mode)",
-                  description: "Typical: 50 (cool-season grass stops growing) or 40 (no point watering anything).",
-                  range: "-40..120", required: false
+                  title: "Skip if today's high is below this ${tUnit()} (winter mode)",
+                  description: isMetric() ? "Typical: 10 (cool-season grass stops growing) or 4 (no point watering)." : "Typical: 50 (cool-season grass stops growing) or 40 (no point watering anything).",
+                  range: isMetric() ? "-40..49" : "-40..120", required: false
             input name: "smartSkipWindMph", type: "number",
-                  title: "Skip if today's max wind is above this mph (atomized spray loss)",
-                  description: "Typical: 15 mph causes significant drift on spray heads; 25 mph is severe.",
-                  range: "0..100", required: false
+                  title: "Skip if today's max wind is above this ${wUnit()} (atomized spray loss)",
+                  description: isMetric() ? "Typical: 24 km/h causes drift on spray heads; 40 km/h is severe." : "Typical: 15 mph causes significant drift on spray heads; 25 mph is severe.",
+                  range: isMetric() ? "0..160" : "0..100", required: false
         }
 
         section("Seasonal adjust") {
@@ -624,7 +636,7 @@ def weatherPage() {
         }
         section("Optional external rain gauge") {
             input name: "rainSensorDevice", type: "capability.relativeHumidityMeasurement",
-                  title: "Local weather station / rain gauge (must expose a numeric \"rainToday\" attribute, in inches)",
+                  title: "Local weather station / rain gauge (must expose a numeric \"rainToday\" attribute, in ${rUnit()})",
                   required: false
         }
         section("Today's forecast (live from Open-Meteo)") {
@@ -641,7 +653,7 @@ private String forecastPreviewHtml() {
     int idx = (om.daily.time as List).findIndexOf { it == todayISO }
     if (idx < 0) idx = (om.daily.time.size() > 1) ? 1 : 0
     StringBuilder sb = new StringBuilder("<table style='font-family:monospace;font-size:0.9em'>")
-    sb << "<tr><th align='left'>Day</th><th align='left'>High °F</th><th align='left'>POP %</th><th align='left'>Precip in</th><th align='left'>Sunrise</th><th align='left'>Sunset</th></tr>"
+    sb << "<tr><th align='left'>Day</th><th align='left'>High ${tUnit()}</th><th align='left'>POP %</th><th align='left'>Precip ${rUnit()}</th><th align='left'>Sunrise</th><th align='left'>Sunset</th></tr>"
     int n = Math.min(5, om.daily.time.size() - idx)
     for (int j = 0; j < n; j++) {
         int i = idx + j
@@ -655,7 +667,7 @@ private String forecastPreviewHtml() {
         sb << "</tr>"
     }
     sb << "</table>"
-    sb << "<br><i>Past-24h precipitation: ${String.format('%.2f', omPrecipLast24h(om))} in"
+    sb << "<br><i>Past-24h precipitation: ${String.format('%.2f', omPrecipLast24h(om))} ${rUnit()}"
     if (state.__omCacheAt) {
         long ageSec = (now() - (state.__omCacheAt as long)) / 1000
         sb << " · cache age ${ageSec}s"
@@ -1135,6 +1147,7 @@ def aboutPage() {
             paragraph "A Hubitat app for running sprinkler zones via Zooz ZEN16 / ZEN17 800LR multi-relay controllers — or any Hubitat device exposing the Switch capability. Hardware-agnostic, multi-instance, with Spruce-style weather adaptation, per-zone moisture-aware watering, restrictions (quiet hours / mode / HSM), pause-and-resume from external sensors, hub-independent hardware watchdog via Z-Wave parameters (model-aware: pushes the right per-relay timers for ZEN16's 3 relays or ZEN17's 2 relays), full external JSON/HTML/iCal API, and granular templated notifications with Pushover support."
         }
         section("Changelog") {
+            paragraph "v0.9.0 — Weather is now unit-aware: temperature, wind and rainfall follow the hub's Settings → Location measurement scale (°F/in/mph when imperial, °C/mm/km/h when metric). Forecast table, thresholds, defaults, seasonal scaling and skip notifications all switch automatically. Also fixed wind data that was fetched in km/h but labelled mph."
             paragraph "v0.8.0 — Added a global Simple / Advanced interface mode (top of the main page). Simple mode shows just the essentials — zones, schedule (time & frequency), weather and hardware safety — and trims each zone to name, relay and run-minutes. Advanced reveals everything (soil-moisture/learning, sensors, pump, notifications, dashboard, API, restrictions, diagnostics). Hidden settings are kept, not deleted. Also fixed an overflowing soil-moisture sensor hint that ran off-screen on phones."
             paragraph "v0.7.1 — Reachability watchdog no longer cries wolf: an idle-but-reachable relay used to be reported \"unreachable\" just for being quiet, and the alert repeated every hour. It now actively pings a quiet relay and only alerts (once per outage) if the ping goes unanswered."
             paragraph "v0.7.0 — Added \"Every N days\" scheduling alongside the existing day-of-week mode. Pick a start date and an interval (every other day, every third day, etc.); the 7-day preview and iCal feed follow the cycle. Manual \"Run schedule now\" still runs regardless of the cycle."
@@ -1268,7 +1281,8 @@ def notifyEventsPage() {
                       "\${reason} · \${sensor} · \${cycle} · \${totalCycles} · " +
                       "\${count} · \${minutes} · \${hours} · \${detail} · " +
                       "\${planSize} · \${seasonalMult} · \${until} · " +
-                      "\${mode} · \${hsm} · \${delay}"
+                      "\${mode} · \${hsm} · \${delay} · " +
+                      "\${tempF} · \${windMph} · \${threshold} · \${tunit} · \${wunit}"
         }
         // Group events by section preserving NOTIFY_EVENTS insertion order
         Map<String, List<Map>> grouped = [:]
@@ -2043,11 +2057,16 @@ private Map fetchWeather() {
     Map om = state.__omCacheData
     Long cachedAt = state.__omCacheAt as Long
     long nowMs = now()
+    // Invalidate cache if the hub's unit scale changed since the cached fetch —
+    // the cached values would otherwise be in the old units.
+    String scaleNow = isMetric() ? "C" : "F"
+    if (state.__omCacheScale != scaleNow) { om = null; cachedAt = null }
     if (!om || !cachedAt || (nowMs - cachedAt) > (15L * 60L * 1000L)) {
         om = omFetch()
         if (om) {
             state.__omCacheData = om
             state.__omCacheAt = nowMs
+            state.__omCacheScale = scaleNow
         }
     }
     return om
@@ -2069,8 +2088,9 @@ private Map omFetch() {
             hourly: "relative_humidity_2m,precipitation",
             past_days: 1,
             forecast_days: 4,
-            temperature_unit: "fahrenheit",
-            precipitation_unit: "inch",
+            temperature_unit: tApiUnit(),
+            precipitation_unit: rApiUnit(),
+            wind_speed_unit: wApiUnit(),
             timezone: "auto"
         ],
         timeout: 15
@@ -2151,8 +2171,12 @@ private BigDecimal computeSeasonalMultiplier(Map om) {
     }
     if (counted == 0) return 1.0
     float avg = total / counted
-    // Baseline: at 70°F we run baseline. Each 10°F above adds 15%, below subtracts 10%.
-    float pctDelta = (avg - 70.0f) * (avg > 70.0f ? 1.5f : 1.0f)
+    // Baseline at a comfortable growing temp; warmer → longer, cooler → shorter.
+    // °F: 70 baseline, +1.5%/°F above, −1.0%/°F below. Metric mirrors per °C (×1.8).
+    float baseline  = isMetric() ? 21.0f : 70.0f
+    float coefAbove = isMetric() ? 2.7f  : 1.5f
+    float coefBelow = isMetric() ? 1.8f  : 1.0f
+    float pctDelta = (avg - baseline) * (avg > baseline ? coefAbove : coefBelow)
     BigDecimal cap = ((settings.seasonalMaxPct ?: 50) as BigDecimal) / 100.0
     BigDecimal scale = (1.0 + (pctDelta / 100.0)).setScale(2, BigDecimal.ROUND_HALF_UP)
     BigDecimal min = (1.0 - cap).setScale(2, BigDecimal.ROUND_HALF_UP)
@@ -2820,16 +2844,16 @@ private Map smartSkipCheck() {
     Number high = (om.daily.temperature_2m_max ?: [])[idx]
     Number wind = (om.daily.wind_speed_10m_max ?: [])[idx]
     if (wantFrost && low != null && (low as float) < (settings.smartSkipFrostF as float)) {
-        return [skip: true, reason: "frost: low ${low}°F < ${settings.smartSkipFrostF}°F",
-                eventKey: "skip.frost", ctx: [tempF: low, threshold: settings.smartSkipFrostF]]
+        return [skip: true, reason: "frost: low ${low}${tUnit()} < ${settings.smartSkipFrostF}${tUnit()}",
+                eventKey: "skip.frost", ctx: [tempF: low, threshold: settings.smartSkipFrostF, tunit: tUnit()]]
     }
     if (wantCold && high != null && (high as float) < (settings.smartSkipColdHighF as float)) {
-        return [skip: true, reason: "cold: high ${high}°F < ${settings.smartSkipColdHighF}°F",
-                eventKey: "skip.cold", ctx: [tempF: high, threshold: settings.smartSkipColdHighF]]
+        return [skip: true, reason: "cold: high ${high}${tUnit()} < ${settings.smartSkipColdHighF}${tUnit()}",
+                eventKey: "skip.cold", ctx: [tempF: high, threshold: settings.smartSkipColdHighF, tunit: tUnit()]]
     }
     if (wantWind && wind != null && (wind as float) > (settings.smartSkipWindMph as float)) {
-        return [skip: true, reason: "wind: max ${wind} mph > ${settings.smartSkipWindMph} mph",
-                eventKey: "skip.wind", ctx: [windMph: wind, threshold: settings.smartSkipWindMph]]
+        return [skip: true, reason: "wind: max ${wind} ${wUnit()} > ${settings.smartSkipWindMph} ${wUnit()}",
+                eventKey: "skip.wind", ctx: [windMph: wind, threshold: settings.smartSkipWindMph, wunit: wUnit()]]
     }
     return [skip: false]
 }
