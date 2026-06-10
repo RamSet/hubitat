@@ -62,7 +62,7 @@ mappings {
     path("/calendar.ics")  { action: [GET: "apiCalendar"] }
 }
 
-String getAppVersion() { return "v0.7.0 (2026-06)" }
+String getAppVersion() { return "v0.7.1 (2026-06)" }
 
 // Zooz multi-relay model registry. Per-model lists of the Z-Wave parameter
 // numbers we push for the hardware watchdog:
@@ -1105,6 +1105,7 @@ def aboutPage() {
             paragraph "A Hubitat app for running sprinkler zones via Zooz ZEN16 / ZEN17 800LR multi-relay controllers — or any Hubitat device exposing the Switch capability. Hardware-agnostic, multi-instance, with Spruce-style weather adaptation, per-zone moisture-aware watering, restrictions (quiet hours / mode / HSM), pause-and-resume from external sensors, hub-independent hardware watchdog via Z-Wave parameters (model-aware: pushes the right per-relay timers for ZEN16's 3 relays or ZEN17's 2 relays), full external JSON/HTML/iCal API, and granular templated notifications with Pushover support."
         }
         section("Changelog") {
+            paragraph "v0.7.1 — Reachability watchdog no longer cries wolf: an idle-but-reachable relay used to be reported \"unreachable\" just for being quiet, and the alert repeated every hour. It now actively pings a quiet relay and only alerts (once per outage) if the ping goes unanswered."
             paragraph "v0.7.0 — Added \"Every N days\" scheduling alongside the existing day-of-week mode. Pick a start date and an interval (every other day, every third day, etc.); the 7-day preview and iCal feed follow the cycle. Manual \"Run schedule now\" still runs regardless of the cycle."
             paragraph "v0.6.2 — Vendored jtp10181's ZEN16/ZEN17 Advanced drivers into the repo as failsafes. Scheduler auto-detects the setParameter argument order (built-in uses paramNumber/size/value; jtp10181 uses paramNumber/value/size) so the same Hardware Safety push works with either driver."
             paragraph "v0.6.1 — Generalised hardware-safety push: works with ZEN16 (3 relays), ZEN17 (2 relays), and other Zooz multi-relay models. Per-controller model selector on the Hardware Safety page; push iterates only the parameters relevant to each picked controller. Every UI string and notification message broadened to \"Zooz multi-relay\" instead of \"ZEN16\" specifically."
@@ -3383,23 +3384,62 @@ def zen16Watchdog() {
     if (!parents) return
     long now = now()
     long staleMs = ((settings.zen16StaleHours ?: 6) as int) * 3600L * 1000L
+    // After an active ping we wait this long for an answer before declaring the
+    // device unreachable. lastActivity only tracks when the relay last *reported*
+    // — an idle-but-reachable relay can be silent for hours, so silence alone is
+    // not "unreachable". We confirm with a ping first.
+    long probeGraceMs = 15L * 60L * 1000L
+    Map probeAt = (state.watchdogProbeAt ?: [:]) as Map
+    Map alerted = (state.watchdogAlerted ?: [:]) as Map
     parents.each { dev ->
+        String id = dev.id as String
         try {
-            // Hubitat exposes lastActivity as Date for many drivers; fall back to currentValue("switch") time.
             Long last = null
             if (dev.respondsTo("getLastActivity")) {
                 Date la = dev.getLastActivity()
                 if (la) last = la.getTime()
             }
-            if (last && (now - last) > staleMs) {
-                long hrs = (now - last) / 3600000L
-                log.warn "${app.label}: ZEN16 '${dev.displayName}' has been quiet for ${hrs}h"
-                notify("watchdog.stale", [sensor: dev.displayName, hours: hrs])
+            // Recent chatter (or no lastActivity support) → treat as reachable.
+            if (last == null || (now - last) <= staleMs) {
+                probeAt.remove(id); alerted.remove(id)
+                return
             }
+            Long probed = probeAt[id] as Long
+            if (!probed) {
+                // First time we notice the silence: poke the device, don't alert yet.
+                pokeDevice(dev)
+                probeAt[id] = now
+                if (descTextEnable) log.info "${app.label}: '${dev.displayName}' quiet ${(now - last) / 3600000L}h — pinging to confirm reachability"
+                return
+            }
+            if (last >= probed) {           // device answered after our ping → reachable
+                probeAt.remove(id); alerted.remove(id)
+                return
+            }
+            if ((now - probed) < probeGraceMs) return   // still within grace window
+            // Silent well after an active ping → genuinely unreachable. Alert once.
+            if (!alerted[id]) {
+                long hrs = (now - last) / 3600000L
+                log.warn "${app.label}: ZEN16 '${dev.displayName}' did not answer a ping — unreachable (${hrs}h since last report)"
+                notify("watchdog.stale", [sensor: dev.displayName, hours: hrs])
+                alerted[id] = now
+            }
+            pokeDevice(dev)   // keep probing so recovery is detected next cycle
         } catch (e) {
-            // ignore — driver may not expose lastActivity
+            // ignore — driver may not expose lastActivity / ping / refresh
         }
     }
+    state.watchdogProbeAt = probeAt
+    state.watchdogAlerted = alerted
+}
+
+// Actively prod a device so a reachable-but-idle relay reports in (updating
+// lastActivity). Prefer ping (Z-Wave NOP/ack); fall back to refresh.
+private void pokeDevice(dev) {
+    try {
+        if (dev.respondsTo("ping"))         dev.ping()
+        else if (dev.respondsTo("refresh")) dev.refresh()
+    } catch (e) { /* driver may not support either */ }
 }
 
 // =========================================================================
