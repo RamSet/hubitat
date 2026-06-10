@@ -62,7 +62,7 @@ mappings {
     path("/calendar.ics")  { action: [GET: "apiCalendar"] }
 }
 
-String getAppVersion() { return "v0.6.2 (2026-06)" }
+String getAppVersion() { return "v0.7.0 (2026-06)" }
 
 // Zooz multi-relay model registry. Per-model lists of the Z-Wave parameter
 // numbers we push for the hardware watchdog:
@@ -290,8 +290,14 @@ private List<String> quickWarnings() {
     int withSw = 0
     for (int i = 1; i <= n; i++) if (settings."zone${i}Switch") withSw++
     if (n > 0 && withSw == 0) w << "No zones have a Switch device assigned yet."
-    if (settings.scheduleEnabled && (!settings.scheduleStartTime || !settings.scheduleDays)) {
-        w << "Schedule is enabled but a start time or day list is missing."
+    if (settings.scheduleEnabled && !settings.scheduleStartTime) {
+        w << "Schedule is enabled but the Window 1 start time is missing."
+    }
+    if (settings.scheduleEnabled && !isIntervalMode() && !settings.scheduleDays) {
+        w << "Schedule is enabled but no days of week are selected."
+    }
+    if (settings.scheduleEnabled && isIntervalMode() && !(settings.scheduleIntervalDays)) {
+        w << "Schedule is enabled but the every-N-days interval is missing."
     }
     if ((settings.rainDelayEnabled || settings.seasonalEnabled) && (!location?.latitude || !location?.longitude)) {
         w << "Weather is enabled but Hubitat location lat/long is not set (Settings → Location)."
@@ -482,11 +488,25 @@ def schedulePage() {
             input name: "scheduleEnabled", type: "bool",
                   title: "Schedule enabled",
                   defaultValue: true
-            input name: "scheduleDays", type: "enum",
-                  title: "Days of week",
-                  options: ["MON","TUE","WED","THU","FRI","SAT","SUN"],
-                  multiple: true, required: true,
-                  defaultValue: ["MON","WED","FRI"]
+            input name: "scheduleMode", type: "enum",
+                  title: "Schedule by",
+                  options: ["dow": "Days of week", "interval": "Every N days"],
+                  defaultValue: "dow", required: true, submitOnChange: true
+            if ((settings.scheduleMode ?: "dow") == "interval") {
+                input name: "scheduleIntervalDays", type: "number",
+                      title: "Run every N days (1 = daily, 2 = every other day, 3 = every third day …)",
+                      range: "1..30", defaultValue: 2, required: true, submitOnChange: true
+                input name: "scheduleIntervalAnchor", type: "date",
+                      title: "Start date — the cycle counts forward from this day (blank = today)",
+                      required: false, submitOnChange: true
+                paragraph intervalPreviewHint()
+            } else {
+                input name: "scheduleDays", type: "enum",
+                      title: "Days of week",
+                      options: ["MON","TUE","WED","THU","FRI","SAT","SUN"],
+                      multiple: true, required: true,
+                      defaultValue: ["MON","WED","FRI"]
+            }
             paragraph "Watering windows. Each window starts a full sweep through all enabled zones. Skip slots 2 and 3 if you only want one start time."
             input name: "scheduleStartTime",  type: "time",
                   title: "Window 1 start time", required: true
@@ -1085,6 +1105,7 @@ def aboutPage() {
             paragraph "A Hubitat app for running sprinkler zones via Zooz ZEN16 / ZEN17 800LR multi-relay controllers — or any Hubitat device exposing the Switch capability. Hardware-agnostic, multi-instance, with Spruce-style weather adaptation, per-zone moisture-aware watering, restrictions (quiet hours / mode / HSM), pause-and-resume from external sensors, hub-independent hardware watchdog via Z-Wave parameters (model-aware: pushes the right per-relay timers for ZEN16's 3 relays or ZEN17's 2 relays), full external JSON/HTML/iCal API, and granular templated notifications with Pushover support."
         }
         section("Changelog") {
+            paragraph "v0.7.0 — Added \"Every N days\" scheduling alongside the existing day-of-week mode. Pick a start date and an interval (every other day, every third day, etc.); the 7-day preview and iCal feed follow the cycle. Manual \"Run schedule now\" still runs regardless of the cycle."
             paragraph "v0.6.2 — Vendored jtp10181's ZEN16/ZEN17 Advanced drivers into the repo as failsafes. Scheduler auto-detects the setParameter argument order (built-in uses paramNumber/size/value; jtp10181 uses paramNumber/value/size) so the same Hardware Safety push works with either driver."
             paragraph "v0.6.1 — Generalised hardware-safety push: works with ZEN16 (3 relays), ZEN17 (2 relays), and other Zooz multi-relay models. Per-controller model selector on the Hardware Safety page; push iterates only the parameters relevant to each picked controller. Every UI string and notification message broadened to \"Zooz multi-relay\" instead of \"ZEN16\" specifically."
             paragraph "v0.6 — Per-zone child Virtual Switches for HomeKit/Rule-Machine/dashboard control with configurable manual-on auto-off timer (default 10 min, per-zone override). Contact-sensor rain support (incl. Zooz relay input child devices). HTML stripped from input/paragraph text on mobile clients. App icons resized for the iOS Hubitat app."
@@ -1281,17 +1302,23 @@ def initialize() {
     state.currentZoneIdx = 0
     state.zonesPlan = []
 
-    if (settings.scheduleEnabled && settings.scheduleStartTime && settings.scheduleDays) {
+    if (settings.scheduleEnabled && settings.scheduleStartTime && (isIntervalMode() || settings.scheduleDays)) {
+        // Interval mode fires the cron every day; runSchedule() gates on the
+        // N-day cycle. Lock "today" as the anchor if the user didn't pick a date.
+        if (isIntervalMode() && !settings.scheduleIntervalAnchor && !state.intervalAnchorMs) {
+            state.intervalAnchorMs = localMidnightMs(now())
+        }
+        List cronDays = isIntervalMode() ? ["SUN","MON","TUE","WED","THU","FRI","SAT"] : settings.scheduleDays
         ["scheduleStartTime", "scheduleStartTime2", "scheduleStartTime3"].eachWithIndex { key, i ->
             String t = settings[key]
             if (t) {
-                String cron = buildCron(t, settings.scheduleDays)
+                String cron = buildCron(t, cronDays)
                 if (descTextEnable) log.info "${app.label}: window ${i + 1} scheduled at cron='${cron}'"
                 schedule(cron, "runSchedule")
                 // Pre-run lead notification (N minutes before the window)
                 Integer lead = (settings.preRunLeadMinutes ?: 0) as int
                 if (lead > 0) {
-                    String leadCron = buildLeadCron(t, settings.scheduleDays, lead)
+                    String leadCron = buildLeadCron(t, cronDays, lead)
                     if (leadCron) {
                         schedule(leadCron, "preRunNotify")
                     }
@@ -1499,6 +1526,72 @@ def logsOff() {
 // Cron from time + days-of-week enum list
 // =========================================================================
 
+// =========================================================================
+// Every-N-days (interval) scheduling helpers
+// =========================================================================
+
+private boolean isIntervalMode() {
+    return (settings.scheduleMode ?: "dow") == "interval"
+}
+
+// Local-midnight epoch ms for the day containing `ms`.
+private long localMidnightMs(long ms) {
+    TimeZone tz = location?.timeZone ?: TimeZone.getDefault()
+    Calendar c = Calendar.getInstance(tz)
+    c.setTimeInMillis(ms)
+    c.set(Calendar.HOUR_OF_DAY, 0); c.set(Calendar.MINUTE, 0)
+    c.set(Calendar.SECOND, 0);      c.set(Calendar.MILLISECOND, 0)
+    return c.getTimeInMillis()
+}
+
+// Anchor (local midnight ms) the N-day cycle counts forward from.
+// Priority: explicit Start-date setting → locked install-time anchor → today.
+private long intervalAnchorMs() {
+    TimeZone tz = location?.timeZone ?: TimeZone.getDefault()
+    String a = settings.scheduleIntervalAnchor
+    if (a) {
+        try {
+            String datePart = a.contains("T") ? a.tokenize("T")[0] : a.take(10)
+            String[] p = datePart.tokenize("-")
+            Calendar c = Calendar.getInstance(tz)
+            c.set(p[0].toInteger(), p[1].toInteger() - 1, p[2].toInteger(), 0, 0, 0)
+            c.set(Calendar.MILLISECOND, 0)
+            return c.getTimeInMillis()
+        } catch (e) { /* fall through to saved / today */ }
+    }
+    long saved = (state.intervalAnchorMs ?: 0L) as long
+    if (saved > 0) return saved
+    return localMidnightMs(now())
+}
+
+// True if the local day containing `ms` is an "every N days" run day.
+private boolean isIntervalRunDayMs(long ms) {
+    int n = (settings.scheduleIntervalDays ?: 2) as int
+    if (n < 1) n = 1
+    long diffDays = Math.round((localMidnightMs(ms) - localMidnightMs(intervalAnchorMs())) / 86400000.0d)
+    return (((diffDays % n) + n) % n) == 0L
+}
+
+private boolean isIntervalRunToday() {
+    return isIntervalRunDayMs(now())
+}
+
+// Hint paragraph for the schedule page: the next few run dates in the cycle.
+private String intervalPreviewHint() {
+    TimeZone tz = location?.timeZone ?: TimeZone.getDefault()
+    List<String> dates = []
+    Calendar c = Calendar.getInstance(tz)
+    int found = 0
+    for (int d = 0; d < 120 && found < 5; d++) {
+        if (isIntervalRunDayMs(c.getTimeInMillis())) {
+            dates << c.getTime().format("EEE MMM d", tz)
+            found++
+        }
+        c.add(Calendar.DAY_OF_MONTH, 1)
+    }
+    return "Next run days: ${dates.join('  ·  ')}"
+}
+
 private String buildCron(String timeStr, List daysList) {
     Date t = timeToday(timeStr, location?.timeZone)
     Calendar c = Calendar.getInstance(location?.timeZone ?: TimeZone.getDefault())
@@ -1529,6 +1622,12 @@ def runSchedule(Map opts = [:]) {
         state.skipNextRun = false
         recordRunSkip("skip-next requested")
         notify("skip.next")
+        return
+    }
+    // Every-N-days gate: in interval mode the cron fires daily, so skip quietly
+    // on off-cycle days. A manual "Run now" (manual=true) bypasses this.
+    if (!manual && isIntervalMode() && !isIntervalRunToday()) {
+        if (descTextEnable) log.info "${app.label}: off-cycle day (every ${settings.scheduleIntervalDays ?: 2} days) — no run"
         return
     }
     Long rd = (state.forcedRainDelayUntilMs ?: 0L) as long
@@ -2662,11 +2761,12 @@ private String stateDumpString() {
 }
 
 private String nextScheduledRunString() {
-    if (!settings.scheduleEnabled || !settings.scheduleDays || !settings.scheduleStartTime) return "schedule disabled"
+    if (!settings.scheduleEnabled || !settings.scheduleStartTime || (!isIntervalMode() && !settings.scheduleDays)) return "schedule disabled"
     // Hubitat schedule list isn't directly readable from app context; just show
     // configured days + first window. Good enough for the dashboard.
     String t = settings.scheduleStartTime
     if (t?.contains("T")) t = t.tokenize("T")[1].substring(0,5)
+    if (isIntervalMode()) return "every ${settings.scheduleIntervalDays ?: 2} day(s)  @ ${t}"
     return "${(settings.scheduleDays as List).join(',')}  @ ${t}"
 }
 
@@ -2929,12 +3029,12 @@ private String buildDailyCron(String timeStr) {
 // =========================================================================
 
 private String previewNextSevenDaysHtml() {
-    if (!settings.scheduleEnabled || !settings.scheduleStartTime || !settings.scheduleDays) {
+    if (!settings.scheduleEnabled || !settings.scheduleStartTime || (!isIntervalMode() && !settings.scheduleDays)) {
         return "<i>Schedule disabled — nothing to preview.</i>"
     }
     Map<Integer, String> dowName = [1:"Sun",2:"Mon",3:"Tue",4:"Wed",5:"Thu",6:"Fri",7:"Sat"]
     Map<String, Integer> dowNum  = [SUN:1, MON:2, TUE:3, WED:4, THU:5, FRI:6, SAT:7]
-    Set<Integer> wantDow = (settings.scheduleDays as List).collect { dowNum[it] } as Set
+    Set<Integer> wantDow = ((settings.scheduleDays ?: []) as List).collect { dowNum[it] } as Set
     Set<Integer> wantDow0 = wantDow.findAll { it != null } as Set
 
     List<String> windows = ["scheduleStartTime", "scheduleStartTime2", "scheduleStartTime3"]
@@ -2951,10 +3051,10 @@ private String previewNextSevenDaysHtml() {
         Date day = c.getTime()
         int dow = c.get(Calendar.DAY_OF_WEEK)
         String dateStr = day.format("yyyy-MM-dd", location?.timeZone ?: TimeZone.getDefault())
-        boolean runsToday = wantDow0.contains(dow)
+        boolean runsToday = isIntervalMode() ? isIntervalRunDayMs(day.getTime()) : wantDow0.contains(dow)
         String windowsStr = runsToday ? windows.join(", ") : "—"
         List<String> blockers = []
-        if (!runsToday) blockers << "not a watering day"
+        if (!runsToday) blockers << (isIntervalMode() ? "off-cycle day" : "not a watering day")
         if (d == 0 && skipNextArmed) blockers << "next-run will be skipped"
         if (skipUntilMs > day.getTime() && skipUntilMs > now()) {
             String until = new Date(skipUntilMs).format("yyyy-MM-dd HH:mm", location?.timeZone ?: TimeZone.getDefault())
@@ -3134,12 +3234,12 @@ private String renderCalendarIcs() {
     sb << "PRODID:-//Zooz Sprinkler Scheduler//${getAppVersion()}//EN\r\n"
     sb << "CALSCALE:GREGORIAN\r\n"
     sb << "X-WR-CALNAME:${escapeIcs(app.label)}\r\n"
-    if (!settings.scheduleEnabled || !settings.scheduleDays || !settings.scheduleStartTime) {
+    if (!settings.scheduleEnabled || !settings.scheduleStartTime || (!isIntervalMode() && !settings.scheduleDays)) {
         sb << "END:VCALENDAR\r\n"
         return sb.toString()
     }
     Map<String, Integer> dowNum = [SUN:1, MON:2, TUE:3, WED:4, THU:5, FRI:6, SAT:7]
-    Set<Integer> wantDow = (settings.scheduleDays as List).collect { dowNum[it] }.findAll { it != null } as Set
+    Set<Integer> wantDow = ((settings.scheduleDays ?: []) as List).collect { dowNum[it] }.findAll { it != null } as Set
     List<String> windows = ["scheduleStartTime", "scheduleStartTime2", "scheduleStartTime3"]
         .collect { settings[it] }.findAll { it != null }
 
@@ -3155,7 +3255,7 @@ private String renderCalendarIcs() {
 
     Calendar c = Calendar.getInstance(location?.timeZone ?: TimeZone.getDefault())
     for (int d = 0; d < 30; d++) {
-        if (wantDow.contains(c.get(Calendar.DAY_OF_WEEK))) {
+        if (isIntervalMode() ? isIntervalRunDayMs(c.getTimeInMillis()) : wantDow.contains(c.get(Calendar.DAY_OF_WEEK))) {
             String dateStr = c.getTime().format("yyyyMMdd", location?.timeZone ?: TimeZone.getDefault())
             windows.each { String iso ->
                 String hhmm = timeFmt(iso)
@@ -3201,6 +3301,9 @@ private String exportConfigJson() {
         exportedAt: nowString(),
         version:    getAppVersion(),
         scheduleEnabled:        settings.scheduleEnabled,
+        scheduleMode:           settings.scheduleMode,
+        scheduleIntervalDays:   settings.scheduleIntervalDays,
+        scheduleIntervalAnchor: settings.scheduleIntervalAnchor,
         scheduleDays:           settings.scheduleDays,
         scheduleStartTime:      settings.scheduleStartTime,
         scheduleStartTime2:     settings.scheduleStartTime2,
@@ -3341,6 +3444,7 @@ private String zoneTypeIcon(String plant) {
 private String scheduleSummaryString() {
     if (!settings.scheduleEnabled) return "Disabled"
     String t = settings.scheduleStartTime ?: "not set"
+    if (isIntervalMode()) return "${t} every ${settings.scheduleIntervalDays ?: 2} day(s)"
     List d = (settings.scheduleDays ?: []) as List
     return "${t} on ${d.join(', ') ?: 'no days'}"
 }
@@ -3469,7 +3573,7 @@ def appButtonHandler(String btn) {
     switch (btn) {
         case "btnRunNow":
             log.info "${app.label}: manual run requested"
-            runIn(1, "runSchedule")
+            runIn(1, "runSchedule", [data: [manual: true]])
             break
         case "btnStopAll":
             stopAllZones()
