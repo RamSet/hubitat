@@ -62,7 +62,13 @@ mappings {
     path("/calendar.ics")  { action: [GET: "apiCalendar"] }
 }
 
-String getAppVersion() { return "v0.7.1 (2026-06)" }
+String getAppVersion() { return "v0.8.0 (2026-06)" }
+
+// Simple vs Advanced interface. Simple shows only zones, schedule, weather and
+// hardware safety; Advanced exposes everything (moisture, learning, sensors,
+// notifications, dashboard, API, diagnostics, etc.). Settings are never deleted
+// when hidden — flipping back to Advanced restores the full UI.
+private boolean isAdvanced() { return (settings.uiMode ?: "simple") == "advanced" }
 
 // Zooz multi-relay model registry. Per-model lists of the Z-Wave parameter
 // numbers we push for the hardware watchdog:
@@ -203,6 +209,15 @@ def mainPage() {
             label title: "Schedule name (shown in the Apps list)",
                   required: true
         }
+        section("App mode") {
+            input name: "uiMode", type: "enum", title: "Interface",
+                  options: ["simple":   "Simple — zones, schedule & weather only",
+                            "advanced": "Advanced — every feature"],
+                  defaultValue: "simple", required: true, submitOnChange: true
+            if (!isAdvanced()) {
+                paragraph "<small>Simple mode keeps things to the basics: zones, schedule (time & frequency) and weather skipping. The extras — soil-moisture/learning, rain & pause sensors, pump, notifications, dashboard, API, restrictions, diagnostics — stay configured but hidden. Switch to Advanced any time to see them.</small>"
+            }
+        }
         section("Configuration") {
             href name: "zoneListPage", title: "Zones (${zoneCount()})", page: "zoneListPage",
                  image: openmoji("1F33F"),
@@ -213,48 +228,50 @@ def mainPage() {
             href name: "weatherPage", title: "Weather (rain delay & seasonal adjust)", page: "weatherPage",
                  image: openmoji("1F327"),
                  description: weatherSummaryString()
-            href name: "rainSensorPage", title: "Rain sensors (binary wet/dry)", page: "rainSensorPage",
-                 image: openmoji("1F4A7"),
-                 description: rainSensorSummaryString()
-            href name: "pauseSensorPage", title: "Pause sensors (contacts / switches)", page: "pauseSensorPage",
-                 image: openmoji("23F8"),
-                 description: pauseSensorSummaryString()
-            href name: "pumpPage", title: "Pump / Master valve", page: "pumpPage",
-                 image: openmoji("1F527"),
-                 description: pumpSummaryString()
             href name: "hardwarePage", title: "Hardware safety (Zooz relay watchdog)", page: "hardwarePage",
                  image: openmoji("1F6E1"),
                  description: hardwareSafetySummaryString()
-            href name: "notificationPage", title: "Notifications", page: "notificationPage",
-                 image: openmoji("1F4E2"),
-                 description: notificationSummaryString()
-            href name: "historyPage", title: "Run history", page: "historyPage",
-                 image: openmoji("1F4DC"),
-                 description: historySummaryString()
-            href name: "dashboardPage", title: "Dashboard tile", page: "dashboardPage",
-                 image: openmoji("1F4F1"),
-                 description: dashboardSummaryString()
-            href name: "exposurePage", title: "Zone switches (HomeKit / Rules)", page: "exposurePage",
-                 image: openmoji("1F39B"),
-                 description: exposureSummaryString()
-            href name: "restrictionsPage", title: "Restrictions (quiet hours / mode / HSM)", page: "restrictionsPage",
-                 image: openmoji("1F6AB"),
-                 description: restrictionsSummaryString()
-            href name: "previewPage", title: "Next 7 days preview", page: "previewPage",
-                 image: openmoji("1F4C5"),
-                 description: previewSummaryString()
-            href name: "backupPage", title: "Backup / restore configuration", page: "backupPage",
-                 image: openmoji("1F4BE"),
-                 description: backupSummaryString()
-            href name: "apiPage", title: "External JSON API", page: "apiPage",
-                 image: openmoji("1F517"),
-                 description: apiSummaryString()
-            href name: "moisturePage", title: "Moisture learning", page: "moisturePage",
-                 image: openmoji("1F33F"),
-                 description: moistureSummaryString()
-            href name: "diagnosticsPage", title: "Diagnostics & test runs", page: "diagnosticsPage",
-                 image: openmoji("1F50D"),
-                 description: diagnosticsSummaryString()
+            if (isAdvanced()) {
+                href name: "rainSensorPage", title: "Rain sensors (binary wet/dry)", page: "rainSensorPage",
+                     image: openmoji("1F4A7"),
+                     description: rainSensorSummaryString()
+                href name: "pauseSensorPage", title: "Pause sensors (contacts / switches)", page: "pauseSensorPage",
+                     image: openmoji("23F8"),
+                     description: pauseSensorSummaryString()
+                href name: "pumpPage", title: "Pump / Master valve", page: "pumpPage",
+                     image: openmoji("1F527"),
+                     description: pumpSummaryString()
+                href name: "notificationPage", title: "Notifications", page: "notificationPage",
+                     image: openmoji("1F4E2"),
+                     description: notificationSummaryString()
+                href name: "historyPage", title: "Run history", page: "historyPage",
+                     image: openmoji("1F4DC"),
+                     description: historySummaryString()
+                href name: "dashboardPage", title: "Dashboard tile", page: "dashboardPage",
+                     image: openmoji("1F4F1"),
+                     description: dashboardSummaryString()
+                href name: "exposurePage", title: "Zone switches (HomeKit / Rules)", page: "exposurePage",
+                     image: openmoji("1F39B"),
+                     description: exposureSummaryString()
+                href name: "restrictionsPage", title: "Restrictions (quiet hours / mode / HSM)", page: "restrictionsPage",
+                     image: openmoji("1F6AB"),
+                     description: restrictionsSummaryString()
+                href name: "previewPage", title: "Next 7 days preview", page: "previewPage",
+                     image: openmoji("1F4C5"),
+                     description: previewSummaryString()
+                href name: "backupPage", title: "Backup / restore configuration", page: "backupPage",
+                     image: openmoji("1F4BE"),
+                     description: backupSummaryString()
+                href name: "apiPage", title: "External JSON API", page: "apiPage",
+                     image: openmoji("1F517"),
+                     description: apiSummaryString()
+                href name: "moisturePage", title: "Moisture learning", page: "moisturePage",
+                     image: openmoji("1F33F"),
+                     description: moistureSummaryString()
+                href name: "diagnosticsPage", title: "Diagnostics & test runs", page: "diagnosticsPage",
+                     image: openmoji("1F50D"),
+                     description: diagnosticsSummaryString()
+            }
             href name: "aboutPage", title: "About / changelog", page: "aboutPage",
                  image: openmoji("2139"),
                  description: "Version ${getAppVersion()}"
@@ -266,11 +283,13 @@ def mainPage() {
             input name: "pauseHours", type: "number", title: "Pause schedule for N hours (0 = active)",
                   range: "0..72", required: false, defaultValue: 0, submitOnChange: true
         }
-        section("Logging") {
-            input name: "debugOutput", type: "bool", title: "Enable debug logging",
-                  description: "Auto-turns off after 30 minutes", defaultValue: false
-            input name: "descTextEnable", type: "bool", title: "Enable description text logging",
-                  defaultValue: true
+        if (isAdvanced()) {
+            section("Logging") {
+                input name: "debugOutput", type: "bool", title: "Enable debug logging",
+                      description: "Auto-turns off after 30 minutes", defaultValue: false
+                input name: "descTextEnable", type: "bool", title: "Enable description text logging",
+                      defaultValue: true
+            }
         }
         section {
             paragraph "<div style='font-size:0.85em;color:#666'>" +
@@ -346,10 +365,12 @@ def zoneDetailPage(Map params = [:]) {
         section("Identity") {
             input name: "zone${zid}Name",      type: "text",   title: "Zone name (e.g. \"Front Lawn N\")",
                   required: true, submitOnChange: true
-            input name: "zone${zid}PortLabel", type: "text",
-                  title: "Port label",
-                  description: "Free text — e.g. \"ZEN16 #1 R2 (15A)\" or \"ZEN17 #2 R1 (20A)\". Helps you match this zone to a physical relay during wiring audits.",
-                  required: false
+            if (isAdvanced()) {
+                input name: "zone${zid}PortLabel", type: "text",
+                      title: "Port label",
+                      description: "Free text — e.g. \"ZEN16 #1 R2 (15A)\" or \"ZEN17 #2 R1 (20A)\". Helps you match this zone to a physical relay during wiring audits.",
+                      required: false
+            }
             input name: "zone${zid}Enabled",   type: "bool",   title: "Zone enabled in schedule",
                   defaultValue: true
         }
@@ -365,14 +386,16 @@ def zoneDetailPage(Map params = [:]) {
             }
         }
         section("Run time") {
-            input name: "zone${zid}RuntimeMode", type: "enum",
-                  title: "How to compute base runtime",
-                  options: [
-                    "fixed":  "Fixed: N minutes per cycle",
-                    "weekly": "Weekly target: total minutes per week ÷ days per week (Spruce-style)"
-                  ],
-                  defaultValue: "fixed", submitOnChange: true
-            if ((settings."zone${zid}RuntimeMode" ?: "fixed") == "weekly") {
+            if (isAdvanced()) {
+                input name: "zone${zid}RuntimeMode", type: "enum",
+                      title: "How to compute base runtime",
+                      options: [
+                        "fixed":  "Fixed: N minutes per cycle",
+                        "weekly": "Weekly target: total minutes per week ÷ days per week (Spruce-style)"
+                      ],
+                      defaultValue: "fixed", submitOnChange: true
+            }
+            if (isAdvanced() && (settings."zone${zid}RuntimeMode" ?: "fixed") == "weekly") {
                 input name: "zone${zid}WeeklyMinutes", type: "number",
                       title: "Total minutes per week (target)",
                       description: "Distributed across the days-per-week below. Seasonal scaling still applies.",
@@ -384,19 +407,22 @@ def zoneDetailPage(Map params = [:]) {
             } else {
                 input name: "zone${zid}RunMinutes", type: "number",
                       title: "Base run time per cycle (minutes)",
-                      description: "Seasonal weather adjust will scale this if enabled in Weather settings.",
+                      description: isAdvanced() ? "Seasonal weather adjust will scale this if enabled in Weather settings." : "Minutes this zone runs each time.",
                       range: "1..240", defaultValue: 10, required: true
             }
-            input name: "zone${zid}CycleSoak", type: "enum",
-                  title: "Cycle & soak (split run to reduce runoff)",
-                  options: ["1": "No cycle (run all at once)",
-                            "2": "Cycle 2× (run / soak / run)",
-                            "3": "Cycle 3× (run / soak / run / soak / run)"],
-                  defaultValue: "1"
-            input name: "zone${zid}SoakMinutes", type: "number",
-                  title: "Soak time between cycles (minutes)",
-                  range: "1..60", defaultValue: 10
+            if (isAdvanced()) {
+                input name: "zone${zid}CycleSoak", type: "enum",
+                      title: "Cycle & soak (split run to reduce runoff)",
+                      options: ["1": "No cycle (run all at once)",
+                                "2": "Cycle 2× (run / soak / run)",
+                                "3": "Cycle 3× (run / soak / run / soak / run)"],
+                      defaultValue: "1"
+                input name: "zone${zid}SoakMinutes", type: "number",
+                      title: "Soak time between cycles (minutes)",
+                      range: "1..60", defaultValue: 10
+            }
         }
+        if (isAdvanced()) {
         section("Exposed switch override") {
             paragraph "When the global zone-switch feature is on, this zone exposes a child Virtual Switch. Override the manual-on auto-off timer for THIS zone only (blank = use the global default)."
             input name: "zone${zid}ManualTimerMin", type: "number",
@@ -442,9 +468,10 @@ def zoneDetailPage(Map params = [:]) {
                   defaultValue: "Loam"
         }
         section("Moisture-aware watering (optional)") {
+            paragraph "Pick any device with a humidity (or moisture) attribute — most Hubitat soil sensors. Choose the exact attribute below."
             input name: "zone${zid}MoistureSensor", type: "capability.relativeHumidityMeasurement",
                   title: "Soil moisture sensor",
-                  description: "Any device with a humidity attribute (most soil sensors) — or pick the moisture attribute below.",
+                  description: "Optional — humidity/moisture sensor",
                   required: false, multiple: false, submitOnChange: true
             if (settings."zone${zid}MoistureSensor") {
                 input name: "zone${zid}MoistureMode", type: "enum",
@@ -476,6 +503,7 @@ def zoneDetailPage(Map params = [:]) {
                           "${zoneAdaptiveStatusString(zid)}"
             }
         }
+        } // end advanced-only zone sections
         section {
             paragraph "Last run: ${state.lastRunByZone?.get(zid as String) ?: 'never'}"
         }
@@ -515,6 +543,7 @@ def schedulePage() {
             input name: "scheduleStartTime3", type: "time",
                   title: "Window 3 start time (optional)", required: false
         }
+        if (isAdvanced()) {
         section("Behaviour") {
             input name: "scheduleOrder", type: "enum",
                   title: "Zone ordering",
@@ -544,6 +573,7 @@ def schedulePage() {
                   description: "Caps each zone's adjusted runtime. Set Hardware safety auto-off to this +5min for backup.",
                   range: "1..240", defaultValue: 60
         }
+        } // end advanced-only schedule sections
     }
 }
 
@@ -1105,6 +1135,7 @@ def aboutPage() {
             paragraph "A Hubitat app for running sprinkler zones via Zooz ZEN16 / ZEN17 800LR multi-relay controllers — or any Hubitat device exposing the Switch capability. Hardware-agnostic, multi-instance, with Spruce-style weather adaptation, per-zone moisture-aware watering, restrictions (quiet hours / mode / HSM), pause-and-resume from external sensors, hub-independent hardware watchdog via Z-Wave parameters (model-aware: pushes the right per-relay timers for ZEN16's 3 relays or ZEN17's 2 relays), full external JSON/HTML/iCal API, and granular templated notifications with Pushover support."
         }
         section("Changelog") {
+            paragraph "v0.8.0 — Added a global Simple / Advanced interface mode (top of the main page). Simple mode shows just the essentials — zones, schedule (time & frequency), weather and hardware safety — and trims each zone to name, relay and run-minutes. Advanced reveals everything (soil-moisture/learning, sensors, pump, notifications, dashboard, API, restrictions, diagnostics). Hidden settings are kept, not deleted. Also fixed an overflowing soil-moisture sensor hint that ran off-screen on phones."
             paragraph "v0.7.1 — Reachability watchdog no longer cries wolf: an idle-but-reachable relay used to be reported \"unreachable\" just for being quiet, and the alert repeated every hour. It now actively pings a quiet relay and only alerts (once per outage) if the ping goes unanswered."
             paragraph "v0.7.0 — Added \"Every N days\" scheduling alongside the existing day-of-week mode. Pick a start date and an interval (every other day, every third day, etc.); the 7-day preview and iCal feed follow the cycle. Manual \"Run schedule now\" still runs regardless of the cycle."
             paragraph "v0.6.2 — Vendored jtp10181's ZEN16/ZEN17 Advanced drivers into the repo as failsafes. Scheduler auto-detects the setParameter argument order (built-in uses paramNumber/size/value; jtp10181 uses paramNumber/value/size) so the same Hardware Safety push works with either driver."
@@ -3301,6 +3332,7 @@ private String exportConfigJson() {
     Map data = [
         exportedAt: nowString(),
         version:    getAppVersion(),
+        uiMode:                 settings.uiMode,
         scheduleEnabled:        settings.scheduleEnabled,
         scheduleMode:           settings.scheduleMode,
         scheduleIntervalDays:   settings.scheduleIntervalDays,
