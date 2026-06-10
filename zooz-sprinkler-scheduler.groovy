@@ -231,6 +231,9 @@ def mainPage() {
             href name: "hardwarePage", title: "Hardware safety (Zooz relay watchdog)", page: "hardwarePage",
                  image: openmoji("1F6E1"),
                  description: hardwareSafetySummaryString()
+            href name: "exposurePage", title: "Zone switches (HomeKit / Rules)", page: "exposurePage",
+                 image: openmoji("1F39B"),
+                 description: exposureSummaryString()
             if (isAdvanced()) {
                 href name: "rainSensorPage", title: "Rain sensors (binary wet/dry)", page: "rainSensorPage",
                      image: openmoji("1F4A7"),
@@ -250,9 +253,6 @@ def mainPage() {
                 href name: "dashboardPage", title: "Dashboard tile", page: "dashboardPage",
                      image: openmoji("1F4F1"),
                      description: dashboardSummaryString()
-                href name: "exposurePage", title: "Zone switches (HomeKit / Rules)", page: "exposurePage",
-                     image: openmoji("1F39B"),
-                     description: exposureSummaryString()
                 href name: "restrictionsPage", title: "Restrictions (quiet hours / mode / HSM)", page: "restrictionsPage",
                      image: openmoji("1F6AB"),
                      description: restrictionsSummaryString()
