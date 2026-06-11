@@ -62,7 +62,7 @@ mappings {
     path("/calendar.ics")  { action: [GET: "apiCalendar"] }
 }
 
-String getAppVersion() { return "v0.11.3 (2026-06)" }
+String getAppVersion() { return "v0.11.4 (2026-06)" }
 
 // Simple vs Advanced interface. Simple shows only zones, schedule, weather and
 // hardware safety; Advanced exposes everything (moisture, learning, sensors,
@@ -102,11 +102,12 @@ private String  wApiUnit()  { return isMetric() ? "kmh"     : "mph" }
 // Default messages support ${app}, ${zone}, ${reason}, ${duration}, ${cycle},
 // ${remaining}, ${sensor}, ${count}, ${minutes}, ${hours}, ${detail}, ${planSize},
 // ${seasonalMult}, ${until}, ${mode}, ${hsm}, ${delay}, ${tempF}, ${windMph},
-// ${threshold}, ${tunit}, ${wunit}. Missing variables render as the empty string.
+// ${threshold}, ${tunit}, ${wunit}, ${elapsed}, ${watered}, ${scheduled},
+// ${seasonal}, ${paused}, ${zones}. Missing variables render as the empty string.
 @groovy.transform.Field static final Map NOTIFY_EVENTS = [
     // Lifecycle
     "schedule.start"   : [section: "Lifecycle",  default: '${app}: ▶ schedule starting — ${planSize} zone(s), seasonal ×${seasonalMult}'],
-    "schedule.finish"  : [section: "Lifecycle",  default: '${app}: ■ schedule complete'],
+    "schedule.finish"  : [section: "Lifecycle",  default: '${app}: ■ complete — ran ${elapsed} · watered ${watered} of ${scheduled} scheduled across ${zones} zone(s) · seasonal ${seasonal} · paused ${paused}'],
     "zone.start"       : [section: "Lifecycle",  default: '${app}: ▶ ${zone} for ${duration} (cycle ${cycle}/${totalCycles})', defaultOff: true],
     "zone.finish"      : [section: "Lifecycle",  default: '${app}: ■ ${zone} done', defaultOff: true],
     "pre-run"          : [section: "Lifecycle",  default: '${app}: schedule starts in ${minutes} minute(s) — clear the yard'],
@@ -1171,6 +1172,7 @@ def aboutPage() {
             paragraph "A Hubitat app for running sprinkler zones via Zooz ZEN16 / ZEN17 800LR multi-relay controllers — or any Hubitat device exposing the Switch capability. Hardware-agnostic, multi-instance, with Spruce-style weather adaptation, per-zone moisture-aware watering, restrictions (quiet hours / mode / HSM), pause-and-resume from external sensors, hub-independent hardware watchdog via Z-Wave parameters (model-aware: pushes the right per-relay timers for ZEN16's 3 relays or ZEN17's 2 relays), full external JSON/HTML/iCal API, and granular templated notifications with Pushover support."
         }
         section("Changelog") {
+            paragraph "v0.11.4 — The \"schedule complete\" notification now summarises the run: total elapsed time, actual watering vs the scheduled (pre-seasonal) amount, the seasonal adjustment (multiplier and the time it added/removed), and how long the run was paused. New template variables: \${elapsed}, \${watered}, \${scheduled}, \${seasonal}, \${paused}, \${zones}."
             paragraph "v0.11.3 — Notifications now show durations in human form (e.g. \"7m 59s\" instead of \"479s\") for pause/resume, test runs and moisture early-stops."
             paragraph "v0.11.2 — Manual/on-demand runs (Run switch, Run now) now still respect active safety — pause sensors (wind/contacts), a wet rain sensor, and mode/HSM holds — while still bypassing scheduling holds (off-cycle day, quiet hours, weather forecast, forced rain delay). Also fixed notifications showing a stray \"[default]\" prefix when a Pushover event priority was left on \"default\"."
             paragraph "v0.11.1 — Fixed a crash that aborted every run when Seasonal adjust was enabled: the seasonal multiplier did a Double.setScale() that Groovy rejects, so runSchedule threw before watering started (no zones ran, no start notification). Seasonal scaling now computes correctly. This affected both manual and scheduled runs whenever Seasonal adjust was on."
@@ -1570,6 +1572,7 @@ private void pauseRunningSchedule(String reason) {
     state.paused = true
     state.running = false  // schedule is no longer actively running
     state.pausedReason = reason
+    state.pauseStartMs = now()   // for total-paused accounting at finish
 }
 
 def doResumeAfterPause() {
@@ -1580,6 +1583,14 @@ def doResumeAfterPause() {
     }
     Integer zid = (state.currentZoneId ?: 0) as int
     Integer remainingSec = (state.pausedRemainingSec ?: 0) as int
+    // Accumulate how long we were paused into the run record.
+    Long pStart = (state.pauseStartMs ?: 0L) as long
+    if (pStart > 0 && state.currentRunRecord) {
+        def r = state.currentRunRecord
+        r.pausedSec = ((r.pausedSec ?: 0) as int) + (int)((now() - pStart) / 1000L)
+        state.currentRunRecord = r
+    }
+    state.pauseStartMs = 0L
     state.paused = false
     state.running = true
 
@@ -2018,6 +2029,22 @@ def zoneCycleResume() {
 
 def finishRun() {
     if (descTextEnable) log.info "${app.label}: schedule finished"
+    // Build the completion summary from the run record before it's archived.
+    def rec = state.currentRunRecord
+    Map finCtx = [:]
+    if (rec) {
+        Long sMs = (rec.startedMs ?: now()) as long
+        int elapsedSec = (int)((now() - sMs) / 1000L)
+        int baseSec    = (rec.baseSec   ?: 0) as int
+        int waterSec   = (rec.waterSec  ?: 0) as int
+        int pausedSec  = (rec.pausedSec ?: 0) as int
+        String mult    = (rec.seasonal ?: "1.0") as String
+        int seasonalDeltaSec = (int) Math.round(baseSec * (((mult as BigDecimal) - 1.0).doubleValue()))
+        String seasonalStr = "×${mult}" + (seasonalDeltaSec != 0 ? " (${seasonalDeltaSec > 0 ? '+' : '−'}${fmtDuration(Math.abs(seasonalDeltaSec))})" : "")
+        finCtx = [elapsed: fmtDuration(elapsedSec), watered: fmtDuration(waterSec),
+                  scheduled: fmtDuration(baseSec), seasonal: seasonalStr,
+                  paused: fmtDuration(pausedSec), zones: ((rec.plan ?: []) as List).size()]
+    }
     recordRunFinish("completed")
     state.running = false
     syncRunControlSwitch()   // reflect "idle" on the HomeKit control switch
@@ -2029,7 +2056,7 @@ def finishRun() {
         try { settings.coordSwitch.off() }
         catch (e) { log.warn "coordSwitch.off(): ${e.message}" }
     }
-    notify("schedule.finish")
+    notify("schedule.finish", finCtx)
     publishDashboardState()
 }
 
@@ -2379,11 +2406,16 @@ private String externalPauseReason() {
 // =========================================================================
 
 private void recordRunStart(List plan, BigDecimal seasonalMult) {
+    int baseSec = 0
+    plan.each { Integer zid -> baseSec += (resolveZoneBaseMinutes(zid) as int) * 60 }
     state.currentRunRecord = [
         startedAt: nowString(),
         startedMs: now(),
         plan:      plan,
         seasonal:  seasonalMult.toString(),
+        baseSec:   baseSec,   // scheduled watering (pre-seasonal)
+        waterSec:  0,         // actual watering time, accumulated per zone
+        pausedSec: 0,         // total time paused mid-run
         zoneSummaries: [],
         outcome:   "running"
     ]
@@ -2395,6 +2427,7 @@ private void recordZoneRun(Integer zid, Integer durationSec, String status) {
     String label = settings."zone${zid}Name" ?: "Zone ${zid}"
     String mm = String.format("%dm%02ds", (int)(durationSec / 60), (int)(durationSec % 60))
     rec.zoneSummaries << "${label}: ${mm} (${status})"
+    rec.waterSec = ((rec.waterSec ?: 0) as int) + (durationSec ?: 0)
     state.currentRunRecord = rec
 }
 
