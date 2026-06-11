@@ -74,6 +74,7 @@ metadata {
 		capability "Configuration"
 		capability "Refresh"
 
+		command "ping"
 		//command "refreshParams"
 
 		command "setParameter",[[name:"parameterNumber*",type:"NUMBER", description:"Parameter Number"],
@@ -490,6 +491,14 @@ void updated() {
 void refresh() {
 	logDebug "refresh..."
 	executeRefreshCmds()
+}
+
+// Active reachability probe: a single Switch Binary Get elicits a report from
+// the relay, which updates lastActivity. Lets apps confirm the device is online
+// (it only reports when actuated, so it is otherwise silent between uses).
+void ping() {
+	logDebug "ping..."
+	sendCommands(switchBinaryGetCmd())
 }
 
 
