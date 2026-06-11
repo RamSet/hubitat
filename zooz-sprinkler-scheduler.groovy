@@ -62,7 +62,7 @@ mappings {
     path("/calendar.ics")  { action: [GET: "apiCalendar"] }
 }
 
-String getAppVersion() { return "v0.11.2 (2026-06)" }
+String getAppVersion() { return "v0.11.3 (2026-06)" }
 
 // Simple vs Advanced interface. Simple shows only zones, schedule, weather and
 // hardware safety; Advanced exposes everything (moisture, learning, sensors,
@@ -130,9 +130,9 @@ private String  wApiUnit()  { return isMetric() ? "kmh"     : "mph" }
     "skip.coord"       : [section: "Skips",      default: '${app}: skipped — coordination switch held by another schedule (gave up after ${count} retries)'],
 
     // Pause & resume
-    "pause.activate"   : [section: "Pause",      default: '${app}: PAUSED at ${zone} (${remaining}s remaining) — ${reason}'],
-    "pause.clear"      : [section: "Pause",      default: '${app}: pause sensors clear — resuming in ${delay}s'],
-    "pause.resume"     : [section: "Pause",      default: '${app}: resumed ${zone} (${remaining}s left)'],
+    "pause.activate"   : [section: "Pause",      default: '${app}: PAUSED at ${zone} (${remaining} remaining) — ${reason}'],
+    "pause.clear"      : [section: "Pause",      default: '${app}: pause sensors clear — resuming in ${delay}'],
+    "pause.resume"     : [section: "Pause",      default: '${app}: resumed ${zone} (${remaining} left)'],
     "rain.mid.stop"    : [section: "Pause",      default: '${app}: rain detected (${sensor}) — stopped mid-run'],
 
     // Sensors
@@ -1171,6 +1171,7 @@ def aboutPage() {
             paragraph "A Hubitat app for running sprinkler zones via Zooz ZEN16 / ZEN17 800LR multi-relay controllers — or any Hubitat device exposing the Switch capability. Hardware-agnostic, multi-instance, with Spruce-style weather adaptation, per-zone moisture-aware watering, restrictions (quiet hours / mode / HSM), pause-and-resume from external sensors, hub-independent hardware watchdog via Z-Wave parameters (model-aware: pushes the right per-relay timers for ZEN16's 3 relays or ZEN17's 2 relays), full external JSON/HTML/iCal API, and granular templated notifications with Pushover support."
         }
         section("Changelog") {
+            paragraph "v0.11.3 — Notifications now show durations in human form (e.g. \"7m 59s\" instead of \"479s\") for pause/resume, test runs and moisture early-stops."
             paragraph "v0.11.2 — Manual/on-demand runs (Run switch, Run now) now still respect active safety — pause sensors (wind/contacts), a wet rain sensor, and mode/HSM holds — while still bypassing scheduling holds (off-cycle day, quiet hours, weather forecast, forced rain delay). Also fixed notifications showing a stray \"[default]\" prefix when a Pushover event priority was left on \"default\"."
             paragraph "v0.11.1 — Fixed a crash that aborted every run when Seasonal adjust was enabled: the seasonal multiplier did a Double.setScale() that Groovy rejects, so runSchedule threw before watering started (no zones ran, no start notification). Seasonal scaling now computes correctly. This affected both manual and scheduled runs whenever Seasonal adjust was on."
             paragraph "v0.11.0 — The Run switch and \"Run schedule now\" button are now true force-runs: they water immediately, ignoring every hold (rain sensor, pause sensors, mode/HSM, quiet hours, weather). Scheduled (timed) runs keep all safety checks. The log now always prints the run plan and whether each run is manual/force, so a non-start is unambiguous."
@@ -1516,7 +1517,7 @@ def pauseSensorEvent(evt) {
         if (mode == "stop") {
             if (state.running) {
                 log.warn "${app.label}: external pause active mid-run — STOP mode, killing schedule"
-                notify("pause.activate", [zone: "schedule", remaining: 0, reason: "${evt?.displayName} → ${evt?.value} (stop mode)"])
+                notify("pause.activate", [zone: "schedule", remaining: fmtDuration(0), reason: "${evt?.displayName} → ${evt?.value} (stop mode)"])
                 stopAllZones()
             }
         } else {  // pause mode
@@ -1530,7 +1531,7 @@ def pauseSensorEvent(evt) {
         if (state.paused) {
             Integer delaySec = (settings.pauseResumeDelaySec ?: 30) as int
             log.info "${app.label}: all pause sensors clear — resuming in ${delaySec}s"
-            notify("pause.clear", [delay: delaySec])
+            notify("pause.clear", [delay: fmtDuration(delaySec as int)])
             runIn(Math.max(1, delaySec), "doResumeAfterPause")
         }
     }
@@ -1557,7 +1558,7 @@ private void pauseRunningSchedule(String reason) {
         def sw = settings."zone${zid}Switch"
         if (sw) try { sw.off() } catch (e) { log.warn "pause: ${e.message}" }
         log.warn "${app.label}: PAUSED at ${settings."zone${zid}Name" ?: "zone ${zid}"} — ${remainingSec}s remaining in cycle ${((state.currentZoneCycleIdx ?: 0) as int) + 1}/${state.currentZoneCycles}. Reason: ${reason}"
-        notify("pause.activate", [zone: (settings."zone${zid}Name" ?: "Zone ${zid}"), remaining: remainingSec, reason: reason])
+        notify("pause.activate", [zone: (settings."zone${zid}Name" ?: "Zone ${zid}"), remaining: fmtDuration(remainingSec as int), reason: reason])
     }
 
     // Cancel any pending phase / soak / next-zone callbacks.
@@ -1593,7 +1594,7 @@ def doResumeAfterPause() {
     def sw = settings."zone${zid}Switch"
     if (sw) try { sw.on() } catch (e) { log.warn "resume: ${e.message}" }
     log.info "${app.label}: RESUMED ${zname} — ${remainingSec}s left in this cycle"
-    notify("pause.resume", [zone: zname, remaining: remainingSec])
+    notify("pause.resume", [zone: zname, remaining: fmtDuration(remainingSec as int)])
     state.currentPhaseStartMs = now()
     state.currentPhaseDurationSec = remainingSec
     runIn(Math.max(1, remainingSec), "zoneCyclePhaseDone")
@@ -2280,6 +2281,19 @@ private void notify(String key, def ctx = [:]) {
     }
 }
 
+// Human-readable duration: 479 → "7m 59s", 3661 → "1h 1m 1s", 0 → "0s".
+private String fmtDuration(int totalSec) {
+    if (totalSec < 0) totalSec = 0
+    int h = totalSec.intdiv(3600)
+    int m = (totalSec % 3600).intdiv(60)
+    int s = totalSec % 60
+    List<String> parts = []
+    if (h > 0) parts << "${h}h"
+    if (m > 0) parts << "${m}m"
+    if (s > 0 || parts.isEmpty()) parts << "${s}s"
+    return parts.join(" ")
+}
+
 private String applyTemplate(String template, Map context) {
     if (!template) return ""
     String out = template
@@ -2876,7 +2890,7 @@ def testZoneRun(Integer zid) {
     Integer secs = Math.max(5, Math.min(600, (settings.testRunSeconds ?: 30) as int))
     String label = settings."zone${zid}Name" ?: "Zone ${zid}"
     log.info "${app.label}: TEST ▶ ${label} for ${secs}s"
-    notify("test.run", [zone: label, duration: "${secs}s"])
+    notify("test.run", [zone: label, duration: fmtDuration(secs as int)])
     state.testRunningZid = zid
     try {
         sw.on()
@@ -3070,7 +3084,7 @@ def moistureEvent(evt) {
     String zname = settings."zone${zid}Name" ?: "Zone ${zid}"
     Long startMs = (state.currentPhaseStartMs ?: now()) as long
     Integer elapsedSec = ((now() - startMs) / 1000L) as int
-    String dur = "${(int)(elapsedSec/60)}m${String.format('%02d', (int)(elapsedSec%60))}s"
+    String dur = fmtDuration(elapsedSec)
     log.info "${app.label}: ${zname} early-stop — soil at ${cur}% (target ${target}%) after ${dur}"
     notify("moisture.earlyStop", [zone: zname, moisture: cur, target: target, duration: dur])
     // Mark this cycle as the last cycle so zoneCyclePhaseDone advances out.
