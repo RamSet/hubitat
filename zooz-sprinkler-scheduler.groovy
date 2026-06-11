@@ -62,7 +62,7 @@ mappings {
     path("/calendar.ics")  { action: [GET: "apiCalendar"] }
 }
 
-String getAppVersion() { return "v0.11.4 (2026-06)" }
+String getAppVersion() { return "v0.11.5 (2026-06)" }
 
 // Simple vs Advanced interface. Simple shows only zones, schedule, weather and
 // hardware safety; Advanced exposes everything (moisture, learning, sensors,
@@ -1172,6 +1172,7 @@ def aboutPage() {
             paragraph "A Hubitat app for running sprinkler zones via Zooz ZEN16 / ZEN17 800LR multi-relay controllers — or any Hubitat device exposing the Switch capability. Hardware-agnostic, multi-instance, with Spruce-style weather adaptation, per-zone moisture-aware watering, restrictions (quiet hours / mode / HSM), pause-and-resume from external sensors, hub-independent hardware watchdog via Z-Wave parameters (model-aware: pushes the right per-relay timers for ZEN16's 3 relays or ZEN17's 2 relays), full external JSON/HTML/iCal API, and granular templated notifications with Pushover support."
         }
         section("Changelog") {
+            paragraph "v0.11.5 — Fixed exposed zone tiles (HomeKit/dashboard) desyncing during a run — finished zones could stay \"on\" while the running zone showed \"off\", making it look like several zones ran at once (only one valve was ever open). Tile mirroring now uses per-zone tracking and reconciles every tile to its relay on each zone change and at completion."
             paragraph "v0.11.4 — The \"schedule complete\" notification now summarises the run: total elapsed time, actual watering vs the scheduled (pre-seasonal) amount, the seasonal adjustment (multiplier and the time it added/removed), and how long the run was paused. New template variables: \${elapsed}, \${watered}, \${scheduled}, \${seasonal}, \${paused}, \${zones}."
             paragraph "v0.11.3 — Notifications now show durations in human form (e.g. \"7m 59s\" instead of \"479s\") for pause/resume, test runs and moisture early-stops."
             paragraph "v0.11.2 — Manual/on-demand runs (Run switch, Run now) now still respect active safety — pause sensors (wind/contacts), a wet rain sensor, and mode/HSM holds — while still bypassing scheduling holds (off-cycle day, quiet hours, weather forecast, forced rain delay). Also fixed notifications showing a stray \"[default]\" prefix when a Pushover event priority was left on \"default\"."
@@ -1956,8 +1957,10 @@ def startNextZone() {
     }
     state.lastRunByZone[zid.toString()] = new Date().format("yyyy-MM-dd HH:mm", location?.timeZone ?: TimeZone.getDefault())
     sw.on()
-    // Mirror onto the exposed child Virtual Switch (HomeKit/dashboard view).
+    // Mirror onto the exposed child Virtual Switch (HomeKit/dashboard view),
+    // then reconcile all tiles so any prior zone's tile is cleared.
     setZoneChildSwitch(zid, "on")
+    runIn(3, "syncAllZoneChildren")
     // Early-stop subscription on the moisture sensor for the duration of this zone
     if (moistureMode in ["earlyStop", "adapt", "learn"]) {
         def msens = settings."zone${zid}MoistureSensor"
@@ -1980,6 +1983,7 @@ def zoneCyclePhaseDone() {
     String zname = settings."zone${zid}Name" ?: "Zone ${zid}"
     if (sw) sw.off()
     setZoneChildSwitch(zid, "off")
+    runIn(3, "syncAllZoneChildren")
 
     Integer cycles    = state.currentZoneCycles as int
     Integer cycleIdx  = (state.currentZoneCycleIdx ?: 0) as int
@@ -2057,6 +2061,7 @@ def finishRun() {
         catch (e) { log.warn "coordSwitch.off(): ${e.message}" }
     }
     notify("schedule.finish", finCtx)
+    runIn(3, "syncAllZoneChildren")   // clear every zone tile after the run
     publishDashboardState()
 }
 
@@ -2644,20 +2649,19 @@ def zoneChildSwitchEvent(evt) {
     String prefix = "${app.id}-zone-"
     if (!dni.startsWith(prefix)) return
     Integer zid = dni.substring(prefix.length()).toInteger()
-    String guard = "${zid}:${evt.value}"
-    if (state.suppressZoneChildEvent == guard) {
-        state.suppressZoneChildEvent = null
+    // Per-zone suppression: a single shared flag gets clobbered when the
+    // scheduler flips several tiles in quick succession, which desyncs them.
+    Map sup = (state.suppressZoneChild ?: [:]) as Map
+    if (sup[zid.toString()] == evt.value) {
+        sup.remove(zid.toString())
+        state.suppressZoneChild = sup
         return
     }
-    // During an active scheduled run the scheduler owns the relays. Ignore
-    // external HomeKit/dashboard toggles and bounce the tile back to the relay's
-    // real state so it keeps reflecting the schedule instead of fighting it.
-    if (state.running) {
-        def sw = settings."zone${zid}Switch"
-        setZoneChildSwitch(zid, (sw?.currentValue("switch") == "on") ? "on" : "off")
-        return
-    }
-    // External trigger
+    // During an active run the scheduler owns the relays. Don't fight per-event
+    // (that race is what desynced the tiles) — just reconcile every tile to its
+    // relay's real state shortly after.
+    if (state.running) { runIn(2, "syncAllZoneChildren"); return }
+    // External trigger while idle
     if (evt.value == "on") manualZoneStart(zid)
     else                   manualZoneStop(zid)
 }
@@ -2666,9 +2670,26 @@ private void setZoneChildSwitch(int zid, String value) {
     def ch = getZoneChildVs(zid)
     if (!ch) return
     if (ch.currentValue("switch") == value) return  // no change needed
-    state.suppressZoneChildEvent = "${zid}:${value}"
+    Map sup = (state.suppressZoneChild ?: [:]) as Map
+    sup[zid.toString()] = value
+    state.suppressZoneChild = sup
     try { if (value == "on") ch.on() else ch.off() }
     catch (e) { log.warn "setZoneChildSwitch(${zid}, ${value}): ${e.message}" }
+}
+
+// Reconcile every exposed zone tile to its relay's real on/off state.
+// Idempotent and race-free — the reliable way to keep tiles correct across a
+// sequential multi-zone run (and to clear finished-zone tiles at the end).
+def syncAllZoneChildren() {
+    if (!settings.zoneSwitchesEnabled) return
+    Integer n = zoneCount()
+    for (int i = 1; i <= n; i++) {
+        def ch = getZoneChildVs(i)
+        if (!ch) continue
+        def sw = settings."zone${i}Switch"
+        String desired = (sw?.currentValue("switch") == "on") ? "on" : "off"
+        if (ch.currentValue("switch") != desired) setZoneChildSwitch(i, desired)
+    }
 }
 
 // External "on" arrived on a zone child VS. Start the underlying relay
