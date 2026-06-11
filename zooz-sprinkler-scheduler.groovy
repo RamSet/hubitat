@@ -62,7 +62,7 @@ mappings {
     path("/calendar.ics")  { action: [GET: "apiCalendar"] }
 }
 
-String getAppVersion() { return "v0.11.7 (2026-06)" }
+String getAppVersion() { return "v0.11.8 (2026-06)" }
 
 // Simple vs Advanced interface. Simple shows only zones, schedule, weather and
 // hardware safety; Advanced exposes everything (moisture, learning, sensors,
@@ -841,6 +841,10 @@ def hardwarePage() {
                   title: "Force P24 DC-motor mode = OFF",
                   description: "Prevents accidental R1/R2 interlock.",
                   defaultValue: true
+            input name: "zen16StaleHours", type: "number",
+                  title: "Warn if a relay is unreachable for this many hours",
+                  description: "These relays only report when actuated, so they're silent between waterings. Blank = auto (your watering gap + a buffer, currently ~${expectedQuietHours()}h) so you only get warned if a run is actually missed.",
+                  range: "1..2000", required: false
         }
         if (settings.hwZen16Parents) {
             section("Push now") {
@@ -1173,6 +1177,7 @@ def aboutPage() {
             paragraph "A Hubitat app for running sprinkler zones via Zooz ZEN16 / ZEN17 800LR multi-relay controllers — or any Hubitat device exposing the Switch capability. Hardware-agnostic, multi-instance, with Spruce-style weather adaptation, per-zone moisture-aware watering, restrictions (quiet hours / mode / HSM), pause-and-resume from external sensors, hub-independent hardware watchdog via Z-Wave parameters (model-aware: pushes the right per-relay timers for ZEN16's 3 relays or ZEN17's 2 relays), full external JSON/HTML/iCal API, and granular templated notifications with Pushover support."
         }
         section("Changelog") {
+            paragraph "v0.11.8 — Fixed false \"relay unreachable\" warnings. These relays only report when actuated, so they sit silent between waterings; the old 6-hour threshold cried wolf a few hours after every run. The watchdog now defaults the threshold to your watering gap plus a buffer (e.g. ~96h for every-3-days), so you're only warned if a run is actually missed. Tunable on the Hardware safety page."
             paragraph "v0.11.7 — The \"schedule starting\" notification now includes an estimated total run time — watering + soak + between-zone delays — e.g. \"~1h 38m total (water 1h 14m + soak 20m)\". New template variables: \${estTotal}, \${estWater}, \${estSoak}."
             paragraph "v0.11.6 — Zone list now shows the cycle & soak breakdown and total clock time per zone (e.g. \"12m water (2× 6m) + 10m soak = 22m total\"). Soak time is tracked separately from watering: the complete notification reports soak on its own, and \"watered\" stays valves-on time only. New \${soak} template variable."
             paragraph "v0.11.5 — Fixed exposed zone tiles (HomeKit/dashboard) desyncing during a run — finished zones could stay \"on\" while the running zone showed \"off\", making it look like several zones ran at once (only one valve was ever open). Tile mirroring now uses per-zone tracking and reconciles every tile to its relay on each zone change and at completion."
@@ -3719,11 +3724,34 @@ private void importConfig(String json) {
 // ZEN16 reachability watchdog
 // =========================================================================
 
+// How long these relays are *expected* to sit silent between waterings. A
+// mains relay only reports when it's actuated, so the watchdog must not flag it
+// as unreachable just for being idle between runs — only if it stays silent
+// longer than a full watering cycle (i.e. it likely missed a scheduled run).
+private int expectedQuietHours() {
+    if (!settings.scheduleEnabled) return 8 * 24
+    if (isIntervalMode()) {
+        int n = (settings.scheduleIntervalDays ?: 2) as int
+        return (n + 1) * 24
+    }
+    Map<String,Integer> dow = [SUN:1, MON:2, TUE:3, WED:4, THU:5, FRI:6, SAT:7]
+    List<Integer> days = ((settings.scheduleDays ?: []) as List).collect { dow[it] }.findAll { it != null }.sort()
+    if (!days) return 8 * 24
+    int maxGap = 0
+    for (int i = 0; i < days.size(); i++) {
+        int next = (i + 1 < days.size()) ? days[i + 1] : days[0] + 7
+        maxGap = Math.max(maxGap, next - days[i])
+    }
+    return (maxGap + 1) * 24   // longest gap between watering days + a buffer
+}
+
 def zen16Watchdog() {
     def parents = settings.hwZen16Parents
     if (!parents) return
     long now = now()
-    long staleMs = ((settings.zen16StaleHours ?: 6) as int) * 3600L * 1000L
+    // Default the stale threshold to the schedule's longest quiet stretch so an
+    // idle-but-reachable relay isn't false-flagged between waterings.
+    long staleMs = ((settings.zen16StaleHours ?: expectedQuietHours()) as int) * 3600L * 1000L
     // After an active ping we wait this long for an answer before declaring the
     // device unreachable. lastActivity only tracks when the relay last *reported*
     // — an idle-but-reachable relay can be silent for hours, so silence alone is
