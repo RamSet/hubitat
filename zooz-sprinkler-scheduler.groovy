@@ -62,7 +62,7 @@ mappings {
     path("/calendar.ics")  { action: [GET: "apiCalendar"] }
 }
 
-String getAppVersion() { return "v0.9.1 (2026-06)" }
+String getAppVersion() { return "v0.9.2 (2026-06)" }
 
 // Simple vs Advanced interface. Simple shows only zones, schedule, weather and
 // hardware safety; Advanced exposes everything (moisture, learning, sensors,
@@ -1147,6 +1147,7 @@ def aboutPage() {
             paragraph "A Hubitat app for running sprinkler zones via Zooz ZEN16 / ZEN17 800LR multi-relay controllers — or any Hubitat device exposing the Switch capability. Hardware-agnostic, multi-instance, with Spruce-style weather adaptation, per-zone moisture-aware watering, restrictions (quiet hours / mode / HSM), pause-and-resume from external sensors, hub-independent hardware watchdog via Z-Wave parameters (model-aware: pushes the right per-relay timers for ZEN16's 3 relays or ZEN17's 2 relays), full external JSON/HTML/iCal API, and granular templated notifications with Pushover support."
         }
         section("Changelog") {
+            paragraph "v0.9.2 — Turning a zone off from HomeKit now cancels its auto-off timer immediately, so you no longer get a stray \"timer expired\" notification ~10 minutes later. Per-zone manual timers are tracked independently. Left on, a zone still auto-stops after its timer. During a scheduled run, the HomeKit tile reflects the schedule and ignores stray toggles (use Stop-all to interrupt a run)."
             paragraph "v0.9.1 — Fixed HomeKit/dashboard zone switches not driving the relay: toggling an exposed zone switch had no effect because the event handler read a device-network-id field that is always empty on Hubitat events. It now resolves the zone from the event's device, so manual on/off (and the auto-off timer) work again."
             paragraph "v0.9.0 — Weather is now unit-aware: temperature, wind and rainfall follow the hub's Settings → Location measurement scale (°F/in/mph when imperial, °C/mm/km/h when metric). Forecast table, thresholds, defaults, seasonal scaling and skip notifications all switch automatically. Also fixed wind data that was fetched in km/h but labelled mph."
             paragraph "v0.8.0 — Added a global Simple / Advanced interface mode (top of the main page). Simple mode shows just the essentials — zones, schedule (time & frequency), weather and hardware safety — and trims each zone to name, relay and run-minutes. Advanced reveals everything (soil-moisture/learning, sensors, pump, notifications, dashboard, API, restrictions, diagnostics). Hidden settings are kept, not deleted. Also fixed an overflowing soil-moisture sensor hint that ran off-screen on phones."
@@ -2556,6 +2557,14 @@ def zoneChildSwitchEvent(evt) {
         state.suppressZoneChildEvent = null
         return
     }
+    // During an active scheduled run the scheduler owns the relays. Ignore
+    // external HomeKit/dashboard toggles and bounce the tile back to the relay's
+    // real state so it keeps reflecting the schedule instead of fighting it.
+    if (state.running) {
+        def sw = settings."zone${zid}Switch"
+        setZoneChildSwitch(zid, (sw?.currentValue("switch") == "on") ? "on" : "off")
+        return
+    }
     // External trigger
     if (evt.value == "on") manualZoneStart(zid)
     else                   manualZoneStop(zid)
@@ -2596,8 +2605,26 @@ def manualZoneStart(int zid) {
     log.info "${app.label}: MANUAL ▶ ${zname} for ${mins}m (via ${sw.displayName})"
     notify("zone.manualStart", [zone: zname, duration: "${mins}m", switch: sw.displayName])
     try { sw.on() } catch (e) { log.warn "manualZoneStart relay on: ${e.message}" }
+    setZoneChildSwitch(zid, "on")   // reflect on the HomeKit/dashboard tile
 
-    runIn(mins * 60, "manualZoneTimeout", [data: [zid: zid], overwrite: false])
+    rescheduleManualTimers()
+}
+
+// Rebuild the per-zone auto-off timers from state.manualActive. Hubitat can't
+// cancel a single runIn by data, so we clear them all and recreate one per
+// still-active zone — this cancels a zone's timer the moment it's turned off
+// (no stray "expired" notification) while preserving every other zone's timer.
+private void rescheduleManualTimers() {
+    unschedule("manualZoneTimeout")
+    Map active = (state.manualActive ?: [:]) as Map
+    long nowMs = now()
+    active.each { k, v ->
+        Long exp = v as Long
+        if (exp == null) return
+        Integer zid = k.toString().toInteger()
+        int secs = (int) Math.max(1L, (long) ((exp - nowMs) / 1000L))
+        runIn(secs, "manualZoneTimeout", [data: [zid: zid, exp: exp], overwrite: false])
+    }
 }
 
 // User explicitly turned the child VS off, or scheduler stop-all hit us.
@@ -2608,6 +2635,9 @@ def manualZoneStop(int zid, boolean fromTimeout = false) {
     }
     active.remove(zid.toString())
     state.manualActive = active
+    // Cancel this zone's pending auto-off timer (kills the stray "expired"
+    // notification when the user turns it off early) while keeping others.
+    rescheduleManualTimers()
     def sw = settings."zone${zid}Switch"
     String zname = settings."zone${zid}Name" ?: "Zone ${zid}"
     if (sw) try { sw.off() } catch (e) { log.warn "manualZoneStop relay off: ${e.message}" }
@@ -2624,6 +2654,13 @@ def manualZoneStop(int zid, boolean fromTimeout = false) {
 def manualZoneTimeout(data) {
     Integer zid = (data?.zid ?: 0) as int
     if (zid <= 0) return
+    Map active = (state.manualActive ?: [:]) as Map
+    Long curExp = active[zid.toString()] as Long
+    // Already turned off manually → stale timer, ignore (no false "expired").
+    if (curExp == null) return
+    // A newer manual start replaced this timer → let the newer one fire instead.
+    Long myExp = (data?.exp ?: 0L) as Long
+    if (myExp && curExp != myExp) return
     manualZoneStop(zid, true)
 }
 
