@@ -62,7 +62,7 @@ mappings {
     path("/calendar.ics")  { action: [GET: "apiCalendar"] }
 }
 
-String getAppVersion() { return "v0.11.1 (2026-06)" }
+String getAppVersion() { return "v0.11.2 (2026-06)" }
 
 // Simple vs Advanced interface. Simple shows only zones, schedule, weather and
 // hardware safety; Advanced exposes everything (moisture, learning, sensors,
@@ -1171,6 +1171,7 @@ def aboutPage() {
             paragraph "A Hubitat app for running sprinkler zones via Zooz ZEN16 / ZEN17 800LR multi-relay controllers — or any Hubitat device exposing the Switch capability. Hardware-agnostic, multi-instance, with Spruce-style weather adaptation, per-zone moisture-aware watering, restrictions (quiet hours / mode / HSM), pause-and-resume from external sensors, hub-independent hardware watchdog via Z-Wave parameters (model-aware: pushes the right per-relay timers for ZEN16's 3 relays or ZEN17's 2 relays), full external JSON/HTML/iCal API, and granular templated notifications with Pushover support."
         }
         section("Changelog") {
+            paragraph "v0.11.2 — Manual/on-demand runs (Run switch, Run now) now still respect active safety — pause sensors (wind/contacts), a wet rain sensor, and mode/HSM holds — while still bypassing scheduling holds (off-cycle day, quiet hours, weather forecast, forced rain delay). Also fixed notifications showing a stray \"[default]\" prefix when a Pushover event priority was left on \"default\"."
             paragraph "v0.11.1 — Fixed a crash that aborted every run when Seasonal adjust was enabled: the seasonal multiplier did a Double.setScale() that Groovy rejects, so runSchedule threw before watering started (no zones ran, no start notification). Seasonal scaling now computes correctly. This affected both manual and scheduled runs whenever Seasonal adjust was on."
             paragraph "v0.11.0 — The Run switch and \"Run schedule now\" button are now true force-runs: they water immediately, ignoring every hold (rain sensor, pause sensors, mode/HSM, quiet hours, weather). Scheduled (timed) runs keep all safety checks. The log now always prints the run plan and whether each run is manual/force, so a non-start is unambiguous."
             paragraph "v0.10.5 — When an on-demand run (Run switch / Run now) doesn't start, the app log now states exactly why — a pause sensor, a wet rain sensor, a mode/HSM hold, or no enabled zones with a relay — instead of silently flicking the switch back off."
@@ -1692,15 +1693,17 @@ private String buildCron(String timeStr, List daysList) {
 
 def runSchedule(Map opts = [:]) {
     boolean manual = (opts?.manual == true)
-    boolean force  = (opts?.force == true)   // human-pressed run: ignore every hold
-    log.info "${app.label}: runSchedule — manual=${manual}, force=${force}"
-    if (!force && isPaused()) {
+    // Manual/on-demand runs bypass SCHEDULING holds (off-cycle day, quiet hours,
+    // weather forecast, forced rain delay, pause-for-hours) but ALWAYS respect
+    // ACTIVE SAFETY: pause sensors (wind/contacts), a wet rain sensor, mode/HSM.
+    log.info "${app.label}: runSchedule — manual=${manual}"
+    if (!manual && isPaused()) {
         if (descTextEnable) log.info "${app.label}: manually paused — skipping run"
         notify("skip.manual")
         recordRunSkip("manual pause")
         return
     }
-    if (!force && state.skipNextRun) {
+    if (!manual && state.skipNextRun) {
         log.info "${app.label}: skip-next-run flag consumed"
         state.skipNextRun = false
         recordRunSkip("skip-next requested")
@@ -1727,26 +1730,26 @@ def runSchedule(Map opts = [:]) {
         notify("skip.quiet")
         return
     }
-    if (!force && modeShouldPause()) {
+    if (modeShouldPause()) {
         log.info "${app.label}: skipped — Hubitat mode is ${location?.mode}"
         recordRunSkip("mode=${location?.mode}")
         notify("skip.mode", [mode: location?.mode])
         return
     }
-    if (!force && hsmShouldPause()) {
+    if (hsmShouldPause()) {
         log.info "${app.label}: skipped — HSM is ${location?.hsmStatus}"
         recordRunSkip("HSM=${location?.hsmStatus}")
         notify("skip.hsm", [hsm: location?.hsmStatus])
         return
     }
-    if (!force && externalPauseActive()) {
+    if (externalPauseActive()) {
         String who = externalPauseReason()
         log.info "${app.label}: skipped by pause sensor (${who})"
         notify("skip.pause", [sensor: who])
         recordRunSkip("pause sensor active (${who})")
         return
     }
-    if (!force && rainSensorWet()) {
+    if (rainSensorWet()) {
         String who = rainSensorReason()
         log.info "${app.label}: skipped by binary rain sensor (${who})"
         notify("skip.rain.sensor", [sensor: who])
@@ -1767,7 +1770,7 @@ def runSchedule(Map opts = [:]) {
         return
     }
     // Auto-stagger: if another instance holds the coordination switch, defer.
-    if (!force && settings.coordSwitch && settings.coordSwitch.currentValue("switch") == "on") {
+    if (!manual && settings.coordSwitch && settings.coordSwitch.currentValue("switch") == "on") {
         Integer retried = (state.coordRetries ?: 0) as int
         Integer maxRetries = (settings.coordMaxRetries ?: 10) as int
         Integer defer = (settings.coordDeferSec ?: 60) as int
@@ -2268,7 +2271,9 @@ private void notify(String key, def ctx = [:]) {
 
     // Pushover (if any)
     if (settings.pushoverDevice) {
-        String prio = settings."notifyPriority_${safeKey}" ?: settings.pushoverDefaultPriority ?: "0 normal"
+        String evtPrio = settings."notifyPriority_${safeKey}"
+        // "default" means "use the device default priority" — don't treat it as an override.
+        String prio = (evtPrio && evtPrio != "default") ? evtPrio : (settings.pushoverDefaultPriority ?: "0 normal")
         if (key == "error" && settings.pushoverEmergencyOnError) prio = "2 emergency"
         String sound = settings.pushoverDefaultSound
         sendPushover(msg, prio, sound)
@@ -2289,6 +2294,7 @@ private void sendPushover(String msg, String priority, String sound) {
     // Many community Pushover drivers accept a "[priority|sound|message]" prefix.
     // Pushover priority code is the leading number on the option string.
     String pCode = (priority ?: "0").toString().tokenize(" ")[0]
+    if (!(pCode ==~ /-?\d+/)) pCode = "0"   // non-numeric (e.g. "default") → normal, no prefix
     String prefix
     if (sound) prefix = "[${pCode}|${sound}|"
     else if (pCode && pCode != "0") prefix = "[${pCode}|"
@@ -2817,7 +2823,7 @@ def runControlSwitchEvent(evt) {
     if (evt.value == "on") {
         if (state.running) return   // already running — nothing to do
         log.info "${app.label}: Run switch ON — starting schedule on demand"
-        runIn(1, "runSchedule", [data: [manual: true, force: true]])
+        runIn(1, "runSchedule", [data: [manual: true]])
         // Reconcile the switch shortly after: if the run was skipped bounce it
         // back off so it stays honest, and log why so it's visible.
         runIn(8, "runSwitchReconcile")
@@ -3845,7 +3851,7 @@ def appButtonHandler(String btn) {
     switch (btn) {
         case "btnRunNow":
             log.info "${app.label}: manual run requested"
-            runIn(1, "runSchedule", [data: [manual: true, force: true]])
+            runIn(1, "runSchedule", [data: [manual: true]])
             break
         case "btnStopAll":
             stopAllZones()
