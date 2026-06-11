@@ -13,6 +13,10 @@
 
 Changelog:
 
+## [1.3.2-rs2] - 2026-06-11 (RamSet fork)
+  - Removed upstream telemetry (the periodic version check-in to
+    jtp10181.gateway.scarf.sh); the driver no longer phones home
+
 ## [1.3.2-rs1] - 2026-06-11 (RamSet fork)
   - Now hosted in RamSet/hubitat; importUrl points to this repo
   - Added ping(): sends a Switch Binary Get so apps can actively confirm the
@@ -61,7 +65,7 @@ Changelog:
 
 import groovy.transform.Field
 
-@Field static final String VERSION = "1.3.2-rs1"
+@Field static final String VERSION = "1.3.2-rs2"
 @Field static final String DRIVER = "Zooz-ZEN17"
 @Field static final String COMM_LINK = "https://community.hubitat.com/t/zooz-relays-advanced/98194"
 @Field static final Map deviceModelNames = ["7000:A00A":"ZEN17"]
@@ -1482,20 +1486,11 @@ void updateLastCheckIn() {
 }
 
 void scheduleCheckIn() {
-	unschedule("doCheckIn")
-	runIn(86340, doCheckIn)
+	unschedule("doCheckIn")   // telemetry removed in RamSet fork — nothing to schedule
 }
 
 void doCheckIn() {
-	scheduleCheckIn()
-	String pkg = PACKAGE ?: DRIVER
-	String devModel = (state.deviceModel ?: (PACKAGE ? DRIVER : "NA")) + (state.subModel ? ".${state.subModel}" : "")
-	String checkUri = "http://jtp10181.gateway.scarf.sh/${pkg}/chk-${devModel}-v${VERSION}"
-
-	try {
-		httpGet(uri:checkUri, timeout:4) { logDebug "Driver ${pkg} ${devModel} v${VERSION}" }
-		state.lastCheckInTime = now()
-	} catch (Exception e) { }
+	// Telemetry removed in RamSet fork — no external check-in / version ping.
 }
 
 Integer getPendingChanges() {
