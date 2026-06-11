@@ -62,7 +62,7 @@ mappings {
     path("/calendar.ics")  { action: [GET: "apiCalendar"] }
 }
 
-String getAppVersion() { return "v0.11.6 (2026-06)" }
+String getAppVersion() { return "v0.11.7 (2026-06)" }
 
 // Simple vs Advanced interface. Simple shows only zones, schedule, weather and
 // hardware safety; Advanced exposes everything (moisture, learning, sensors,
@@ -103,10 +103,11 @@ private String  wApiUnit()  { return isMetric() ? "kmh"     : "mph" }
 // ${remaining}, ${sensor}, ${count}, ${minutes}, ${hours}, ${detail}, ${planSize},
 // ${seasonalMult}, ${until}, ${mode}, ${hsm}, ${delay}, ${tempF}, ${windMph},
 // ${threshold}, ${tunit}, ${wunit}, ${elapsed}, ${watered}, ${scheduled},
-// ${seasonal}, ${paused}, ${zones}, ${soak}. Missing variables render as empty.
+// ${seasonal}, ${paused}, ${zones}, ${soak}, ${estTotal}, ${estWater},
+// ${estSoak}. Missing variables render as the empty string.
 @groovy.transform.Field static final Map NOTIFY_EVENTS = [
     // Lifecycle
-    "schedule.start"   : [section: "Lifecycle",  default: '${app}: ▶ schedule starting — ${planSize} zone(s), seasonal ×${seasonalMult}'],
+    "schedule.start"   : [section: "Lifecycle",  default: '${app}: ▶ starting — ${planSize} zone(s), seasonal ×${seasonalMult} · ~${estTotal} total (water ${estWater} + soak ${estSoak})'],
     "schedule.finish"  : [section: "Lifecycle",  default: '${app}: ■ complete — ran ${elapsed} · watered ${watered} of ${scheduled} scheduled across ${zones} zone(s) · soak ${soak} · seasonal ${seasonal} · paused ${paused}'],
     "zone.start"       : [section: "Lifecycle",  default: '${app}: ▶ ${zone} for ${duration} (cycle ${cycle}/${totalCycles})', defaultOff: true],
     "zone.finish"      : [section: "Lifecycle",  default: '${app}: ■ ${zone} done', defaultOff: true],
@@ -1172,6 +1173,7 @@ def aboutPage() {
             paragraph "A Hubitat app for running sprinkler zones via Zooz ZEN16 / ZEN17 800LR multi-relay controllers — or any Hubitat device exposing the Switch capability. Hardware-agnostic, multi-instance, with Spruce-style weather adaptation, per-zone moisture-aware watering, restrictions (quiet hours / mode / HSM), pause-and-resume from external sensors, hub-independent hardware watchdog via Z-Wave parameters (model-aware: pushes the right per-relay timers for ZEN16's 3 relays or ZEN17's 2 relays), full external JSON/HTML/iCal API, and granular templated notifications with Pushover support."
         }
         section("Changelog") {
+            paragraph "v0.11.7 — The \"schedule starting\" notification now includes an estimated total run time — watering + soak + between-zone delays — e.g. \"~1h 38m total (water 1h 14m + soak 20m)\". New template variables: \${estTotal}, \${estWater}, \${estSoak}."
             paragraph "v0.11.6 — Zone list now shows the cycle & soak breakdown and total clock time per zone (e.g. \"12m water (2× 6m) + 10m soak = 22m total\"). Soak time is tracked separately from watering: the complete notification reports soak on its own, and \"watered\" stays valves-on time only. New \${soak} template variable."
             paragraph "v0.11.5 — Fixed exposed zone tiles (HomeKit/dashboard) desyncing during a run — finished zones could stay \"on\" while the running zone showed \"off\", making it look like several zones ran at once (only one valve was ever open). Tile mirroring now uses per-zone tracking and reconciles every tile to its relay on each zone change and at completion."
             paragraph "v0.11.4 — The \"schedule complete\" notification now summarises the run: total elapsed time, actual watering vs the scheduled (pre-seasonal) amount, the seasonal adjustment (multiplier and the time it added/removed), and how long the run was paused. New template variables: \${elapsed}, \${watered}, \${scheduled}, \${seasonal}, \${paused}, \${zones}."
@@ -1849,7 +1851,10 @@ def runSchedule(Map opts = [:]) {
     if (descTextEnable) {
         log.info "${app.label}: starting run — plan=${plan}, seasonal=×${seasonalMult}"
     }
-    notify("schedule.start", [planSize: plan.size(), seasonalMult: seasonalMult])
+    Map est = estimateRunSeconds(plan, seasonalMult)
+    notify("schedule.start", [planSize: plan.size(), seasonalMult: seasonalMult,
+                              estTotal: fmtDuration(est.total), estWater: fmtDuration(est.water),
+                              estSoak: fmtDuration(est.soak)])
 
     state.zonesPlan = plan
     state.currentZoneIdx = 0
@@ -2418,6 +2423,25 @@ private String externalPauseReason() {
 // =========================================================================
 // Run history (last 50)
 // =========================================================================
+
+// Estimate the run's wall-clock time up front: seasonal-adjusted watering +
+// cycle soak + between-zone delays + pump pre/post. Returns seconds. It's an
+// estimate — moisture skips, early-stops, weekly clips and pauses can change it.
+private Map estimateRunSeconds(List plan, BigDecimal mult) {
+    int waterSec = 0, soakSec = 0
+    int maxRun = (settings.scheduleMaxRunMinutes ?: 60) as int
+    plan.each { Integer zid ->
+        int baseMin = resolveZoneBaseMinutes(zid)
+        int adjMin  = Math.max(1, Math.min(maxRun, (int) Math.round((baseMin * mult).doubleValue())))
+        int cycles  = ((settings."zone${zid}CycleSoak" ?: "1") as int)
+        int soakMin = (settings."zone${zid}SoakMinutes" ?: 10) as int
+        waterSec += adjMin * 60
+        soakSec  += Math.max(0, cycles - 1) * soakMin * 60
+    }
+    int betweenSec = Math.max(0, plan.size() - 1) * ((settings.scheduleBetweenZoneSec ?: 10) as int)
+    int pumpSec = settings.pumpSwitch ? (((settings.pumpPreSec ?: 0) as int) + ((settings.pumpPostSec ?: 0) as int)) : 0
+    return [water: waterSec, soak: soakSec, total: waterSec + soakSec + betweenSec + pumpSec]
+}
 
 private void recordRunStart(List plan, BigDecimal seasonalMult) {
     int baseSec = 0
