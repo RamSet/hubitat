@@ -62,7 +62,7 @@ mappings {
     path("/calendar.ics")  { action: [GET: "apiCalendar"] }
 }
 
-String getAppVersion() { return "v0.9.2 (2026-06)" }
+String getAppVersion() { return "v0.10.0 (2026-06)" }
 
 // Simple vs Advanced interface. Simple shows only zones, schedule, weather and
 // hardware safety; Advanced exposes everything (moisture, learning, sensors,
@@ -1121,6 +1121,20 @@ def exposurePage() {
                 paragraph "Disabling will remove the child switches on save."
             }
         }
+        section("Run-schedule control switch") {
+            paragraph "Expose a single switch that starts the whole schedule on demand (turn ON) and stops it (turn OFF). Put it in HomeKit, on a dashboard, or in a routine. It also reflects status — it shows ON whenever the schedule is running (manual or timed) and OFF when idle."
+            input name: "runSwitchEnabled", type: "bool",
+                  title: "Create a \"Run schedule\" switch",
+                  defaultValue: false, submitOnChange: true
+            if (settings.runSwitchEnabled) {
+                input name: "runSwitchLabel", type: "text",
+                      title: "Switch label (default: \"${app.label} Run\")",
+                      required: false
+                def rc = getRunCtlChild()
+                paragraph rc ? "Current: ${rc.displayName} — ${rc.currentValue('switch') ?: '?'}"
+                              : "Will be created when you tap Done."
+            }
+        }
     }
 }
 
@@ -1147,6 +1161,7 @@ def aboutPage() {
             paragraph "A Hubitat app for running sprinkler zones via Zooz ZEN16 / ZEN17 800LR multi-relay controllers — or any Hubitat device exposing the Switch capability. Hardware-agnostic, multi-instance, with Spruce-style weather adaptation, per-zone moisture-aware watering, restrictions (quiet hours / mode / HSM), pause-and-resume from external sensors, hub-independent hardware watchdog via Z-Wave parameters (model-aware: pushes the right per-relay timers for ZEN16's 3 relays or ZEN17's 2 relays), full external JSON/HTML/iCal API, and granular templated notifications with Pushover support."
         }
         section("Changelog") {
+            paragraph "v0.10.0 — Added an optional \"Run schedule\" control switch (Zone switches page). Expose it to HomeKit/dashboards/routines: turn it ON to start the whole schedule on demand, OFF to stop it. It also reflects status — ON while the schedule is running (manual or timed), OFF when idle — and bounces back off if an on-demand start is skipped by rain/quiet-hours/pause."
             paragraph "v0.9.2 — Turning a zone off from HomeKit now cancels its auto-off timer immediately, so you no longer get a stray \"timer expired\" notification ~10 minutes later. Per-zone manual timers are tracked independently. Left on, a zone still auto-stops after its timer. During a scheduled run, the HomeKit tile reflects the schedule and ignores stray toggles (use Stop-all to interrupt a run)."
             paragraph "v0.9.1 — Fixed HomeKit/dashboard zone switches not driving the relay: toggling an exposed zone switch had no effect because the event handler read a device-network-id field that is always empty on Hubitat events. It now resolves the zone from the event's device, so manual on/off (and the auto-off timer) work again."
             paragraph "v0.9.0 — Weather is now unit-aware: temperature, wind and rainfall follow the hub's Settings → Location measurement scale (°F/in/mph when imperial, °C/mm/km/h when metric). Forecast table, thresholds, defaults, seasonal scaling and skip notifications all switch automatically. Also fixed wind data that was fetched in km/h but labelled mph."
@@ -1390,6 +1405,7 @@ def initialize() {
 
     maintainDashboardChild()
     maintainZoneSwitches()
+    maintainRunSwitch()
     runEvery1Hour("publishDashboardState")
     runEvery1Hour("zen16Watchdog")
     // Weekly-budget rollover every Monday 00:01 local
@@ -1801,6 +1817,7 @@ def runSchedule(Map opts = [:]) {
     state.zonesPlan = plan
     state.currentZoneIdx = 0
     state.running = true
+    syncRunControlSwitch()   // reflect "running" on the HomeKit control switch
     recordRunStart(plan, seasonalMult)
     // Acquire the shared coordination lock for the duration of this run
     if (settings.coordSwitch) {
@@ -1979,6 +1996,7 @@ def finishRun() {
     if (descTextEnable) log.info "${app.label}: schedule finished"
     recordRunFinish("completed")
     state.running = false
+    syncRunControlSwitch()   // reflect "idle" on the HomeKit control switch
     state.currentZoneIdx = 0
     Integer postSec = (settings.pumpSwitch && settings.pumpPostSec) ? (settings.pumpPostSec as int) : 0
     runIn(postSec, "stopPumpIfNeeded")
@@ -2011,6 +2029,7 @@ def stopAllZones() {
     state.pausedRemainingSec = 0
     state.currentZoneIdx = 0
     stopPumpIfNeeded()
+    syncRunControlSwitch()   // reflect "idle" on the HomeKit control switch
     if (settings.coordSwitch) {
         try { settings.coordSwitch.off() }
         catch (e) { log.warn "coordSwitch.off(): ${e.message}" }
@@ -2720,6 +2739,72 @@ def publishDashboardState() {
             ch.sendEvent(name: k, value: v as String, displayed: false)
         } catch (ignored) {}
     }
+}
+
+// =========================================================================
+// "Run schedule" control switch — on-demand start/stop from HomeKit etc.
+// =========================================================================
+
+private String runCtlDni() { return "${app.id}-runctl" }
+private getRunCtlChild()   { return getChildDevice(runCtlDni()) }
+
+// Create / rename / remove the control switch and subscribe to its events.
+private void maintainRunSwitch() {
+    def existing = getRunCtlChild()
+    if (settings.runSwitchEnabled) {
+        String label = settings.runSwitchLabel ?: "${app.label} Run"
+        if (!existing) {
+            try {
+                addChildDevice("hubitat", "Virtual Switch", runCtlDni(),
+                               [name: label, label: label, isComponent: false])
+                log.info "${app.label}: created run-schedule control switch '${label}'"
+            } catch (e) {
+                log.warn "${app.label}: cannot create run-schedule switch — ${e.message}"
+            }
+        } else if (existing.label != label) {
+            try { existing.setLabel(label) } catch (e) { log.warn "rename run switch: ${e.message}" }
+        }
+        def ch = getRunCtlChild()
+        if (ch) {
+            try { subscribe(ch, "switch", "runControlSwitchEvent") }
+            catch (e) { log.warn "subscribe run switch: ${e.message}" }
+        }
+        syncRunControlSwitch()
+    } else if (existing) {
+        try { deleteChildDevice(runCtlDni()); log.info "${app.label}: removed run-schedule control switch" }
+        catch (e) { log.warn "remove run switch: ${e.message}" }
+    }
+}
+
+// External on/off on the control switch → start (manual) / stop the schedule.
+def runControlSwitchEvent(evt) {
+    String dni = evt?.device?.deviceNetworkId ?: evt?.deviceNetworkId
+    if (dni != runCtlDni()) return
+    String guard = "run:${evt.value}"
+    if (state.suppressRunCtlEvent == guard) { state.suppressRunCtlEvent = null; return }
+    if (evt.value == "on") {
+        if (state.running) return   // already running — nothing to do
+        log.info "${app.label}: Run switch ON — starting schedule on demand"
+        runIn(1, "runSchedule", [data: [manual: true]])
+        // Reconcile the switch shortly after: if the run was skipped (rain,
+        // quiet hours, pause, etc.) bounce it back off so it stays honest.
+        runIn(8, "syncRunControlSwitch")
+    } else {
+        log.info "${app.label}: Run switch OFF — stopping schedule on demand"
+        stopAllZones()
+        syncRunControlSwitch()
+    }
+}
+
+// Reflect the schedule's running state on the control switch (no event echo).
+def syncRunControlSwitch() {
+    def ch = getRunCtlChild()
+    if (!ch) return
+    String value = state.running ? "on" : "off"
+    if (ch.currentValue("switch") == value) return
+    state.suppressRunCtlEvent = "run:${value}"
+    try { if (value == "on") ch.on() else ch.off() }
+    catch (e) { log.warn "syncRunControlSwitch: ${e.message}" }
 }
 
 // =========================================================================
