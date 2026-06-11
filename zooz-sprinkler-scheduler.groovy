@@ -62,7 +62,7 @@ mappings {
     path("/calendar.ics")  { action: [GET: "apiCalendar"] }
 }
 
-String getAppVersion() { return "v0.10.3 (2026-06)" }
+String getAppVersion() { return "v0.10.4 (2026-06)" }
 
 // Simple vs Advanced interface. Simple shows only zones, schedule, weather and
 // hardware safety; Advanced exposes everything (moisture, learning, sensors,
@@ -1171,6 +1171,7 @@ def aboutPage() {
             paragraph "A Hubitat app for running sprinkler zones via Zooz ZEN16 / ZEN17 800LR multi-relay controllers — or any Hubitat device exposing the Switch capability. Hardware-agnostic, multi-instance, with Spruce-style weather adaptation, per-zone moisture-aware watering, restrictions (quiet hours / mode / HSM), pause-and-resume from external sensors, hub-independent hardware watchdog via Z-Wave parameters (model-aware: pushes the right per-relay timers for ZEN16's 3 relays or ZEN17's 2 relays), full external JSON/HTML/iCal API, and granular templated notifications with Pushover support."
         }
         section("Changelog") {
+            paragraph "v0.10.4 — A manual/on-demand run (the Run-schedule switch and \"Run schedule now\" button) now overrides the advisory holds — forecast rain-delay, smart-skip, forced rain delay and quiet hours — so pressing it actually waters. Active safety still applies: a wet rain sensor, pause sensors, mode/HSM and an already-running schedule. This is why the switch flicked on then back off before: the run was being skipped by the weather rain-delay."
             paragraph "v0.10.3 — The Run-schedule switch now starts listening for on/off the moment it's created, not only after Done — so toggling it actually starts/stops the schedule right away. (Previously the event subscription was only wired up on Done, so a freshly-created switch did nothing.)"
             paragraph "v0.10.2 — The Run-schedule switch is now created the moment you enable it on the Zone-switches page, instead of only on Done — so it appears right away. Tap Done afterwards to activate its control of the schedule."
             paragraph "v0.10.1 — The Zone-switches summary now also shows the Run-schedule switch status (it previously only counted zone switches, so an enabled Run switch looked missing). The Run switch is created when you tap Done."
@@ -1708,14 +1709,14 @@ def runSchedule(Map opts = [:]) {
         return
     }
     Long rd = (state.forcedRainDelayUntilMs ?: 0L) as long
-    if (rd > now()) {
+    if (!manual && rd > now()) {
         String until = new Date(rd).format("yyyy-MM-dd HH:mm", location?.timeZone ?: TimeZone.getDefault())
         log.info "${app.label}: forced rain delay active until ${until}"
         recordRunSkip("forced rain delay until ${until}")
         notify("skip.forced", [until: until])
         return
     }
-    if (quietHoursActive()) {
+    if (!manual && quietHoursActive()) {
         log.info "${app.label}: skipped — in quiet hours"
         recordRunSkip("quiet hours")
         notify("skip.quiet")
@@ -1747,8 +1748,8 @@ def runSchedule(Map opts = [:]) {
         recordRunSkip("rain sensor wet (${who})")
         return
     }
-    // Smart-skip: frost / cold / wind from forecast
-    Map smartSkipResult = smartSkipCheck()
+    // Smart-skip: frost / cold / wind from forecast (advisory — manual overrides)
+    Map smartSkipResult = manual ? [skip: false] : smartSkipCheck()
     if (smartSkipResult?.skip) {
         String reason = smartSkipResult.reason as String
         log.info "${app.label}: smart-skip — ${reason}"
@@ -1784,9 +1785,9 @@ def runSchedule(Map opts = [:]) {
         return
     }
 
-    // Weather gate
+    // Weather gate (rain-delay is forecast-based and advisory — manual overrides)
     Map weather = settings.rainDelayEnabled || settings.seasonalEnabled ? fetchWeather() : null
-    if (settings.rainDelayEnabled && weather && shouldSkipForRain(weather)) {
+    if (!manual && settings.rainDelayEnabled && weather && shouldSkipForRain(weather)) {
         String reason = rainSkipReason(weather)
         log.info "${app.label}: skipping schedule — ${reason}"
         notify("skip.rain.weather", [reason: reason])
