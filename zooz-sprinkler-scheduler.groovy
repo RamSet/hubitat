@@ -62,7 +62,7 @@ mappings {
     path("/calendar.ics")  { action: [GET: "apiCalendar"] }
 }
 
-String getAppVersion() { return "v0.10.4 (2026-06)" }
+String getAppVersion() { return "v0.10.5 (2026-06)" }
 
 // Simple vs Advanced interface. Simple shows only zones, schedule, weather and
 // hardware safety; Advanced exposes everything (moisture, learning, sensors,
@@ -1171,6 +1171,7 @@ def aboutPage() {
             paragraph "A Hubitat app for running sprinkler zones via Zooz ZEN16 / ZEN17 800LR multi-relay controllers — or any Hubitat device exposing the Switch capability. Hardware-agnostic, multi-instance, with Spruce-style weather adaptation, per-zone moisture-aware watering, restrictions (quiet hours / mode / HSM), pause-and-resume from external sensors, hub-independent hardware watchdog via Z-Wave parameters (model-aware: pushes the right per-relay timers for ZEN16's 3 relays or ZEN17's 2 relays), full external JSON/HTML/iCal API, and granular templated notifications with Pushover support."
         }
         section("Changelog") {
+            paragraph "v0.10.5 — When an on-demand run (Run switch / Run now) doesn't start, the app log now states exactly why — a pause sensor, a wet rain sensor, a mode/HSM hold, or no enabled zones with a relay — instead of silently flicking the switch back off."
             paragraph "v0.10.4 — A manual/on-demand run (the Run-schedule switch and \"Run schedule now\" button) now overrides the advisory holds — forecast rain-delay, smart-skip, forced rain delay and quiet hours — so pressing it actually waters. Active safety still applies: a wet rain sensor, pause sensors, mode/HSM and an already-running schedule. This is why the switch flicked on then back off before: the run was being skipped by the weather rain-delay."
             paragraph "v0.10.3 — The Run-schedule switch now starts listening for on/off the moment it's created, not only after Done — so toggling it actually starts/stops the schedule right away. (Previously the event subscription was only wired up on Done, so a freshly-created switch did nothing.)"
             paragraph "v0.10.2 — The Run-schedule switch is now created the moment you enable it on the Zone-switches page, instead of only on Done — so it appears right away. Tap Done afterwards to activate its control of the schedule."
@@ -2812,14 +2813,32 @@ def runControlSwitchEvent(evt) {
         if (state.running) return   // already running — nothing to do
         log.info "${app.label}: Run switch ON — starting schedule on demand"
         runIn(1, "runSchedule", [data: [manual: true]])
-        // Reconcile the switch shortly after: if the run was skipped (rain,
-        // quiet hours, pause, etc.) bounce it back off so it stays honest.
-        runIn(8, "syncRunControlSwitch")
+        // Reconcile the switch shortly after: if the run was skipped bounce it
+        // back off so it stays honest, and log why so it's visible.
+        runIn(8, "runSwitchReconcile")
     } else {
         log.info "${app.label}: Run switch OFF — stopping schedule on demand"
         stopAllZones()
         syncRunControlSwitch()
     }
+}
+
+// Run a few seconds after an on-demand start: keep the switch honest, and if no
+// run began, say why in the app log so it's diagnosable at a glance.
+def runSwitchReconcile() {
+    syncRunControlSwitch()
+    if (state.running) return
+    List<String> blockers = []
+    if (externalPauseActive()) blockers << "a pause sensor is active (${externalPauseReason()})"
+    if (rainSensorWet())       blockers << "a rain sensor reads wet (${rainSensorReason()})"
+    if (modeShouldPause())     blockers << "Hubitat mode is ${location?.mode}"
+    if (hsmShouldPause())      blockers << "HSM is ${location?.hsmStatus}"
+    int n = (settings.zoneCountPref ?: 0) as int
+    int withSw = 0
+    for (int i = 1; i <= n; i++) if ((settings."zone${i}Enabled" != false) && settings."zone${i}Switch") withSw++
+    if (withSw == 0) blockers << "no enabled zones have a relay assigned"
+    String why = blockers ? blockers.join("; ") : "unknown — see the run log above"
+    log.warn "${app.label}: on-demand run did not start — ${why}"
 }
 
 // Reflect the schedule's running state on the control switch (no event echo).
