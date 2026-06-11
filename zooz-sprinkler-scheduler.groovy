@@ -62,7 +62,7 @@ mappings {
     path("/calendar.ics")  { action: [GET: "apiCalendar"] }
 }
 
-String getAppVersion() { return "v0.11.0 (2026-06)" }
+String getAppVersion() { return "v0.11.1 (2026-06)" }
 
 // Simple vs Advanced interface. Simple shows only zones, schedule, weather and
 // hardware safety; Advanced exposes everything (moisture, learning, sensors,
@@ -1171,6 +1171,7 @@ def aboutPage() {
             paragraph "A Hubitat app for running sprinkler zones via Zooz ZEN16 / ZEN17 800LR multi-relay controllers — or any Hubitat device exposing the Switch capability. Hardware-agnostic, multi-instance, with Spruce-style weather adaptation, per-zone moisture-aware watering, restrictions (quiet hours / mode / HSM), pause-and-resume from external sensors, hub-independent hardware watchdog via Z-Wave parameters (model-aware: pushes the right per-relay timers for ZEN16's 3 relays or ZEN17's 2 relays), full external JSON/HTML/iCal API, and granular templated notifications with Pushover support."
         }
         section("Changelog") {
+            paragraph "v0.11.1 — Fixed a crash that aborted every run when Seasonal adjust was enabled: the seasonal multiplier did a Double.setScale() that Groovy rejects, so runSchedule threw before watering started (no zones ran, no start notification). Seasonal scaling now computes correctly. This affected both manual and scheduled runs whenever Seasonal adjust was on."
             paragraph "v0.11.0 — The Run switch and \"Run schedule now\" button are now true force-runs: they water immediately, ignoring every hold (rain sensor, pause sensors, mode/HSM, quiet hours, weather). Scheduled (timed) runs keep all safety checks. The log now always prints the run plan and whether each run is manual/force, so a non-start is unambiguous."
             paragraph "v0.10.5 — When an on-demand run (Run switch / Run now) doesn't start, the app log now states exactly why — a pause sensor, a wet rain sensor, a mode/HSM hold, or no enabled zones with a relay — instead of silently flicking the switch back off."
             paragraph "v0.10.4 — A manual/on-demand run (the Run-schedule switch and \"Run schedule now\" button) now overrides the advisory holds — forecast rain-delay, smart-skip, forced rain delay and quiet hours — so pressing it actually waters. Active safety still applies: a wet rain sensor, pause sensors, mode/HSM and an already-running schedule. This is why the switch flicked on then back off before: the run was being skipped by the weather rain-delay."
@@ -2218,7 +2219,7 @@ private BigDecimal computeSeasonalMultiplier(Map om) {
     float coefBelow = isMetric() ? 1.8f  : 1.0f
     float pctDelta = (avg - baseline) * (avg > baseline ? coefAbove : coefBelow)
     BigDecimal cap = ((settings.seasonalMaxPct ?: 50) as BigDecimal) / 100.0
-    BigDecimal scale = (1.0 + (pctDelta / 100.0)).setScale(2, BigDecimal.ROUND_HALF_UP)
+    BigDecimal scale = ((1.0 + (pctDelta / 100.0)) as BigDecimal).setScale(2, BigDecimal.ROUND_HALF_UP)
     BigDecimal min = (1.0 - cap).setScale(2, BigDecimal.ROUND_HALF_UP)
     BigDecimal max = (1.0 + cap).setScale(2, BigDecimal.ROUND_HALF_UP)
     if (scale < min) scale = min
