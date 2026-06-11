@@ -62,7 +62,7 @@ mappings {
     path("/calendar.ics")  { action: [GET: "apiCalendar"] }
 }
 
-String getAppVersion() { return "v0.10.2 (2026-06)" }
+String getAppVersion() { return "v0.10.3 (2026-06)" }
 
 // Simple vs Advanced interface. Simple shows only zones, schedule, weather and
 // hardware safety; Advanced exposes everything (moisture, learning, sensors,
@@ -1171,6 +1171,7 @@ def aboutPage() {
             paragraph "A Hubitat app for running sprinkler zones via Zooz ZEN16 / ZEN17 800LR multi-relay controllers — or any Hubitat device exposing the Switch capability. Hardware-agnostic, multi-instance, with Spruce-style weather adaptation, per-zone moisture-aware watering, restrictions (quiet hours / mode / HSM), pause-and-resume from external sensors, hub-independent hardware watchdog via Z-Wave parameters (model-aware: pushes the right per-relay timers for ZEN16's 3 relays or ZEN17's 2 relays), full external JSON/HTML/iCal API, and granular templated notifications with Pushover support."
         }
         section("Changelog") {
+            paragraph "v0.10.3 — The Run-schedule switch now starts listening for on/off the moment it's created, not only after Done — so toggling it actually starts/stops the schedule right away. (Previously the event subscription was only wired up on Done, so a freshly-created switch did nothing.)"
             paragraph "v0.10.2 — The Run-schedule switch is now created the moment you enable it on the Zone-switches page, instead of only on Done — so it appears right away. Tap Done afterwards to activate its control of the schedule."
             paragraph "v0.10.1 — The Zone-switches summary now also shows the Run-schedule switch status (it previously only counted zone switches, so an enabled Run switch looked missing). The Run switch is created when you tap Done."
             paragraph "v0.10.0 — Added an optional \"Run schedule\" control switch (Zone switches page). Expose it to HomeKit/dashboards/routines: turn it ON to start the whole schedule on demand, OFF to stop it. It also reflects status — ON while the schedule is running (manual or timed), OFF when idle — and bounces back off if an on-demand start is skipped by rain/quiet-hours/pause."
@@ -2778,24 +2779,26 @@ private void ensureRunSwitchDevice() {
         } else if (existing.label != label) {
             try { existing.setLabel(label) } catch (e) { log.warn "rename run switch: ${e.message}" }
         }
+        // Wire up exactly one event subscription. Unsubscribe-then-subscribe
+        // keeps it to a single handler whether this runs from a page render or
+        // from initialize(), so the switch works even before the next Done.
+        def ch = getRunCtlChild()
+        if (ch) {
+            try { unsubscribe(ch); subscribe(ch, "switch", "runControlSwitchEvent") }
+            catch (e) { log.warn "subscribe run switch: ${e.message}" }
+        }
     } else if (existing) {
+        try { unsubscribe(existing) } catch (ignored) {}
         try { deleteChildDevice(runCtlDni()); log.info "${app.label}: removed run-schedule control switch" }
         catch (e) { log.warn "remove run switch: ${e.message}" }
     }
 }
 
-// Full maintenance for initialize(): ensure the device exists, then subscribe
-// (subscription must only happen here, not on every page render).
+// Full maintenance for initialize(): ensure the device exists + is subscribed,
+// then reflect current running state onto it.
 private void maintainRunSwitch() {
     ensureRunSwitchDevice()
-    if (settings.runSwitchEnabled) {
-        def ch = getRunCtlChild()
-        if (ch) {
-            try { subscribe(ch, "switch", "runControlSwitchEvent") }
-            catch (e) { log.warn "subscribe run switch: ${e.message}" }
-        }
-        syncRunControlSwitch()
-    }
+    if (settings.runSwitchEnabled) syncRunControlSwitch()
 }
 
 // External on/off on the control switch → start (manual) / stop the schedule.
