@@ -62,7 +62,7 @@ mappings {
     path("/calendar.ics")  { action: [GET: "apiCalendar"] }
 }
 
-String getAppVersion() { return "v0.11.5 (2026-06)" }
+String getAppVersion() { return "v0.11.6 (2026-06)" }
 
 // Simple vs Advanced interface. Simple shows only zones, schedule, weather and
 // hardware safety; Advanced exposes everything (moisture, learning, sensors,
@@ -103,11 +103,11 @@ private String  wApiUnit()  { return isMetric() ? "kmh"     : "mph" }
 // ${remaining}, ${sensor}, ${count}, ${minutes}, ${hours}, ${detail}, ${planSize},
 // ${seasonalMult}, ${until}, ${mode}, ${hsm}, ${delay}, ${tempF}, ${windMph},
 // ${threshold}, ${tunit}, ${wunit}, ${elapsed}, ${watered}, ${scheduled},
-// ${seasonal}, ${paused}, ${zones}. Missing variables render as the empty string.
+// ${seasonal}, ${paused}, ${zones}, ${soak}. Missing variables render as empty.
 @groovy.transform.Field static final Map NOTIFY_EVENTS = [
     // Lifecycle
     "schedule.start"   : [section: "Lifecycle",  default: '${app}: ▶ schedule starting — ${planSize} zone(s), seasonal ×${seasonalMult}'],
-    "schedule.finish"  : [section: "Lifecycle",  default: '${app}: ■ complete — ran ${elapsed} · watered ${watered} of ${scheduled} scheduled across ${zones} zone(s) · seasonal ${seasonal} · paused ${paused}'],
+    "schedule.finish"  : [section: "Lifecycle",  default: '${app}: ■ complete — ran ${elapsed} · watered ${watered} of ${scheduled} scheduled across ${zones} zone(s) · soak ${soak} · seasonal ${seasonal} · paused ${paused}'],
     "zone.start"       : [section: "Lifecycle",  default: '${app}: ▶ ${zone} for ${duration} (cycle ${cycle}/${totalCycles})', defaultOff: true],
     "zone.finish"      : [section: "Lifecycle",  default: '${app}: ■ ${zone} done', defaultOff: true],
     "pre-run"          : [section: "Lifecycle",  default: '${app}: schedule starts in ${minutes} minute(s) — clear the yard'],
@@ -1172,6 +1172,7 @@ def aboutPage() {
             paragraph "A Hubitat app for running sprinkler zones via Zooz ZEN16 / ZEN17 800LR multi-relay controllers — or any Hubitat device exposing the Switch capability. Hardware-agnostic, multi-instance, with Spruce-style weather adaptation, per-zone moisture-aware watering, restrictions (quiet hours / mode / HSM), pause-and-resume from external sensors, hub-independent hardware watchdog via Z-Wave parameters (model-aware: pushes the right per-relay timers for ZEN16's 3 relays or ZEN17's 2 relays), full external JSON/HTML/iCal API, and granular templated notifications with Pushover support."
         }
         section("Changelog") {
+            paragraph "v0.11.6 — Zone list now shows the cycle & soak breakdown and total clock time per zone (e.g. \"12m water (2× 6m) + 10m soak = 22m total\"). Soak time is tracked separately from watering: the complete notification reports soak on its own, and \"watered\" stays valves-on time only. New \${soak} template variable."
             paragraph "v0.11.5 — Fixed exposed zone tiles (HomeKit/dashboard) desyncing during a run — finished zones could stay \"on\" while the running zone showed \"off\", making it look like several zones ran at once (only one valve was ever open). Tile mirroring now uses per-zone tracking and reconciles every tile to its relay on each zone change and at completion."
             paragraph "v0.11.4 — The \"schedule complete\" notification now summarises the run: total elapsed time, actual watering vs the scheduled (pre-seasonal) amount, the seasonal adjustment (multiplier and the time it added/removed), and how long the run was paused. New template variables: \${elapsed}, \${watered}, \${scheduled}, \${seasonal}, \${paused}, \${zones}."
             paragraph "v0.11.3 — Notifications now show durations in human form (e.g. \"7m 59s\" instead of \"479s\") for pause/resume, test runs and moisture early-stops."
@@ -2012,6 +2013,12 @@ def zoneCyclePhaseDone() {
         // Soak then resume same zone
         if (descTextEnable) log.info "${app.label}: ${zname} — soak ${state.currentZoneSoakMin}m (cycle ${cycleIdx + 1}/${cycles})"
         Integer soakMin = state.currentZoneSoakMin as int
+        // Account soak time separately (valves are off — not watering).
+        if (state.currentRunRecord) {
+            def r = state.currentRunRecord
+            r.soakSec = ((r.soakSec ?: 0) as int) + soakMin * 60
+            state.currentRunRecord = r
+        }
         runIn(soakMin * 60, "zoneCycleResume")
     }
 }
@@ -2041,13 +2048,15 @@ def finishRun() {
         int elapsedSec = (int)((now() - sMs) / 1000L)
         int baseSec    = (rec.baseSec   ?: 0) as int
         int waterSec   = (rec.waterSec  ?: 0) as int
+        int soakSec    = (rec.soakSec   ?: 0) as int
         int pausedSec  = (rec.pausedSec ?: 0) as int
         String mult    = (rec.seasonal ?: "1.0") as String
         int seasonalDeltaSec = (int) Math.round(baseSec * (((mult as BigDecimal) - 1.0).doubleValue()))
         String seasonalStr = "×${mult}" + (seasonalDeltaSec != 0 ? " (${seasonalDeltaSec > 0 ? '+' : '−'}${fmtDuration(Math.abs(seasonalDeltaSec))})" : "")
         finCtx = [elapsed: fmtDuration(elapsedSec), watered: fmtDuration(waterSec),
                   scheduled: fmtDuration(baseSec), seasonal: seasonalStr,
-                  paused: fmtDuration(pausedSec), zones: ((rec.plan ?: []) as List).size()]
+                  soak: fmtDuration(soakSec), paused: fmtDuration(pausedSec),
+                  zones: ((rec.plan ?: []) as List).size()]
     }
     recordRunFinish("completed")
     state.running = false
@@ -2419,7 +2428,8 @@ private void recordRunStart(List plan, BigDecimal seasonalMult) {
         plan:      plan,
         seasonal:  seasonalMult.toString(),
         baseSec:   baseSec,   // scheduled watering (pre-seasonal)
-        waterSec:  0,         // actual watering time, accumulated per zone
+        waterSec:  0,         // actual watering time, accumulated per zone (excludes soak)
+        soakSec:   0,         // total cycle-soak time (valves off, not watering)
         pausedSec: 0,         // total time paused mid-run
         zoneSummaries: [],
         outcome:   "running"
@@ -3766,10 +3776,21 @@ private String zoneOneLineSummary(int i) {
     def sw = settings."zone${i}Switch"
     String dev   = sw ? sw.displayName : "(no switch)"
     String port  = settings."zone${i}PortLabel" ?: ""
-    Integer mins = (settings."zone${i}RunMinutes" ?: 10) as int
+    Integer mins = resolveZoneBaseMinutes(i)
+    Integer cycles = ((settings."zone${i}CycleSoak" ?: "1") as int)
     String plant = settings."zone${i}Plant" ?: ""
     String enabled = (settings."zone${i}Enabled" == false) ? " — DISABLED" : ""
-    String parts = "${mins}m · ${plant} · ${dev}"
+    String runStr
+    if (cycles > 1) {
+        Integer soakMin   = (settings."zone${i}SoakMinutes" ?: 10) as int
+        Integer perCycle  = Math.max(1, (mins / cycles) as int)
+        Integer soakTotal = (cycles - 1) * soakMin
+        Integer total     = mins + soakTotal
+        runStr = "${mins}m water (${cycles}× ${perCycle}m) + ${soakTotal}m soak = ${total}m total"
+    } else {
+        runStr = "${mins}m"
+    }
+    String parts = "${runStr} · ${plant} · ${dev}"
     if (port) parts += " (${port})"
     return parts + enabled
 }
