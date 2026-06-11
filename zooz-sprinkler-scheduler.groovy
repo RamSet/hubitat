@@ -62,7 +62,7 @@ mappings {
     path("/calendar.ics")  { action: [GET: "apiCalendar"] }
 }
 
-String getAppVersion() { return "v0.9.0 (2026-06)" }
+String getAppVersion() { return "v0.9.1 (2026-06)" }
 
 // Simple vs Advanced interface. Simple shows only zones, schedule, weather and
 // hardware safety; Advanced exposes everything (moisture, learning, sensors,
@@ -1147,6 +1147,7 @@ def aboutPage() {
             paragraph "A Hubitat app for running sprinkler zones via Zooz ZEN16 / ZEN17 800LR multi-relay controllers — or any Hubitat device exposing the Switch capability. Hardware-agnostic, multi-instance, with Spruce-style weather adaptation, per-zone moisture-aware watering, restrictions (quiet hours / mode / HSM), pause-and-resume from external sensors, hub-independent hardware watchdog via Z-Wave parameters (model-aware: pushes the right per-relay timers for ZEN16's 3 relays or ZEN17's 2 relays), full external JSON/HTML/iCal API, and granular templated notifications with Pushover support."
         }
         section("Changelog") {
+            paragraph "v0.9.1 — Fixed HomeKit/dashboard zone switches not driving the relay: toggling an exposed zone switch had no effect because the event handler read a device-network-id field that is always empty on Hubitat events. It now resolves the zone from the event's device, so manual on/off (and the auto-off timer) work again."
             paragraph "v0.9.0 — Weather is now unit-aware: temperature, wind and rainfall follow the hub's Settings → Location measurement scale (°F/in/mph when imperial, °C/mm/km/h when metric). Forecast table, thresholds, defaults, seasonal scaling and skip notifications all switch automatically. Also fixed wind data that was fetched in km/h but labelled mph."
             paragraph "v0.8.0 — Added a global Simple / Advanced interface mode (top of the main page). Simple mode shows just the essentials — zones, schedule (time & frequency), weather and hardware safety — and trims each zone to name, relay and run-minutes. Advanced reveals everything (soil-moisture/learning, sensors, pump, notifications, dashboard, API, restrictions, diagnostics). Hidden settings are kept, not deleted. Also fixed an overflowing soil-moisture sensor hint that ran off-screen on phones."
             paragraph "v0.7.1 — Reachability watchdog no longer cries wolf: an idle-but-reachable relay used to be reported \"unreachable\" just for being quiet, and the alert repeated every hour. It now actively pings a quiet relay and only alerts (once per outage) if the ping goes unanswered."
@@ -2543,10 +2544,13 @@ private void maintainZoneSwitches() {
 // Called when ANY zone child VS changes state. Distinguish app-initiated
 // (scheduler turned it on/off) from external (HomeKit / dashboard).
 def zoneChildSwitchEvent(evt) {
-    if (!evt?.deviceNetworkId) return
+    // Hubitat events carry the device, not its network id — read the DNI off
+    // the device wrapper (evt.deviceNetworkId is always null here).
+    String dni = evt?.device?.deviceNetworkId ?: evt?.deviceNetworkId
+    if (!dni) return
     String prefix = "${app.id}-zone-"
-    if (!evt.deviceNetworkId.startsWith(prefix)) return
-    Integer zid = evt.deviceNetworkId.substring(prefix.length()).toInteger()
+    if (!dni.startsWith(prefix)) return
+    Integer zid = dni.substring(prefix.length()).toInteger()
     String guard = "${zid}:${evt.value}"
     if (state.suppressZoneChildEvent == guard) {
         state.suppressZoneChildEvent = null
