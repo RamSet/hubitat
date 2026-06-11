@@ -62,7 +62,7 @@ mappings {
     path("/calendar.ics")  { action: [GET: "apiCalendar"] }
 }
 
-String getAppVersion() { return "v0.10.5 (2026-06)" }
+String getAppVersion() { return "v0.11.0 (2026-06)" }
 
 // Simple vs Advanced interface. Simple shows only zones, schedule, weather and
 // hardware safety; Advanced exposes everything (moisture, learning, sensors,
@@ -1171,6 +1171,7 @@ def aboutPage() {
             paragraph "A Hubitat app for running sprinkler zones via Zooz ZEN16 / ZEN17 800LR multi-relay controllers — or any Hubitat device exposing the Switch capability. Hardware-agnostic, multi-instance, with Spruce-style weather adaptation, per-zone moisture-aware watering, restrictions (quiet hours / mode / HSM), pause-and-resume from external sensors, hub-independent hardware watchdog via Z-Wave parameters (model-aware: pushes the right per-relay timers for ZEN16's 3 relays or ZEN17's 2 relays), full external JSON/HTML/iCal API, and granular templated notifications with Pushover support."
         }
         section("Changelog") {
+            paragraph "v0.11.0 — The Run switch and \"Run schedule now\" button are now true force-runs: they water immediately, ignoring every hold (rain sensor, pause sensors, mode/HSM, quiet hours, weather). Scheduled (timed) runs keep all safety checks. The log now always prints the run plan and whether each run is manual/force, so a non-start is unambiguous."
             paragraph "v0.10.5 — When an on-demand run (Run switch / Run now) doesn't start, the app log now states exactly why — a pause sensor, a wet rain sensor, a mode/HSM hold, or no enabled zones with a relay — instead of silently flicking the switch back off."
             paragraph "v0.10.4 — A manual/on-demand run (the Run-schedule switch and \"Run schedule now\" button) now overrides the advisory holds — forecast rain-delay, smart-skip, forced rain delay and quiet hours — so pressing it actually waters. Active safety still applies: a wet rain sensor, pause sensors, mode/HSM and an already-running schedule. This is why the switch flicked on then back off before: the run was being skipped by the weather rain-delay."
             paragraph "v0.10.3 — The Run-schedule switch now starts listening for on/off the moment it's created, not only after Done — so toggling it actually starts/stops the schedule right away. (Previously the event subscription was only wired up on Done, so a freshly-created switch did nothing.)"
@@ -1690,13 +1691,15 @@ private String buildCron(String timeStr, List daysList) {
 
 def runSchedule(Map opts = [:]) {
     boolean manual = (opts?.manual == true)
-    if (isPaused()) {
+    boolean force  = (opts?.force == true)   // human-pressed run: ignore every hold
+    log.info "${app.label}: runSchedule — manual=${manual}, force=${force}"
+    if (!force && isPaused()) {
         if (descTextEnable) log.info "${app.label}: manually paused — skipping run"
         notify("skip.manual")
         recordRunSkip("manual pause")
         return
     }
-    if (state.skipNextRun) {
+    if (!force && state.skipNextRun) {
         log.info "${app.label}: skip-next-run flag consumed"
         state.skipNextRun = false
         recordRunSkip("skip-next requested")
@@ -1723,26 +1726,26 @@ def runSchedule(Map opts = [:]) {
         notify("skip.quiet")
         return
     }
-    if (modeShouldPause()) {
+    if (!force && modeShouldPause()) {
         log.info "${app.label}: skipped — Hubitat mode is ${location?.mode}"
         recordRunSkip("mode=${location?.mode}")
         notify("skip.mode", [mode: location?.mode])
         return
     }
-    if (hsmShouldPause()) {
+    if (!force && hsmShouldPause()) {
         log.info "${app.label}: skipped — HSM is ${location?.hsmStatus}"
         recordRunSkip("HSM=${location?.hsmStatus}")
         notify("skip.hsm", [hsm: location?.hsmStatus])
         return
     }
-    if (externalPauseActive()) {
+    if (!force && externalPauseActive()) {
         String who = externalPauseReason()
         log.info "${app.label}: skipped by pause sensor (${who})"
         notify("skip.pause", [sensor: who])
         recordRunSkip("pause sensor active (${who})")
         return
     }
-    if (rainSensorWet()) {
+    if (!force && rainSensorWet()) {
         String who = rainSensorReason()
         log.info "${app.label}: skipped by binary rain sensor (${who})"
         notify("skip.rain.sensor", [sensor: who])
@@ -1763,7 +1766,7 @@ def runSchedule(Map opts = [:]) {
         return
     }
     // Auto-stagger: if another instance holds the coordination switch, defer.
-    if (settings.coordSwitch && settings.coordSwitch.currentValue("switch") == "on") {
+    if (!force && settings.coordSwitch && settings.coordSwitch.currentValue("switch") == "on") {
         Integer retried = (state.coordRetries ?: 0) as int
         Integer maxRetries = (settings.coordMaxRetries ?: 10) as int
         Integer defer = (settings.coordDeferSec ?: 60) as int
@@ -1815,8 +1818,9 @@ def runSchedule(Map opts = [:]) {
         }
     }
     if (settings.scheduleOrder == "random") Collections.shuffle(plan)
+    log.info "${app.label}: run plan = ${plan} (zoneCountPref=${n})"
     if (plan.isEmpty()) {
-        log.info "${app.label}: no zones to run after filtering"
+        log.warn "${app.label}: no zones to run — check that zones are enabled and each has a Switch device assigned (zoneCountPref=${n})"
         return
     }
 
@@ -2812,7 +2816,7 @@ def runControlSwitchEvent(evt) {
     if (evt.value == "on") {
         if (state.running) return   // already running — nothing to do
         log.info "${app.label}: Run switch ON — starting schedule on demand"
-        runIn(1, "runSchedule", [data: [manual: true]])
+        runIn(1, "runSchedule", [data: [manual: true, force: true]])
         // Reconcile the switch shortly after: if the run was skipped bounce it
         // back off so it stays honest, and log why so it's visible.
         runIn(8, "runSwitchReconcile")
@@ -3840,7 +3844,7 @@ def appButtonHandler(String btn) {
     switch (btn) {
         case "btnRunNow":
             log.info "${app.label}: manual run requested"
-            runIn(1, "runSchedule", [data: [manual: true]])
+            runIn(1, "runSchedule", [data: [manual: true, force: true]])
             break
         case "btnStopAll":
             stopAllZones()
