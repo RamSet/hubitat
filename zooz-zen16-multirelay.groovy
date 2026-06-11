@@ -7,8 +7,19 @@
  *  https://community.hubitat.com/t/zooz-relays-advanced/98194
  *  https://github.com/jtp10181/Hubitat/tree/main/Drivers/zooz
  *
+ *  Fork maintained by RamSet — https://github.com/RamSet/hubitat
+ *  (original driver by Jeff Page / @jtp10181; modifications noted in the
+ *   changelog below. Original copyright and Apache-2.0 license retained.)
+ *
 
 Changelog:
+
+## [1.3.2-rs1] - 2026-06-11 (RamSet fork)
+  - Now hosted in RamSet/hubitat; importUrl points to this repo
+  - Added ping(): sends a Switch Binary Get so apps can actively confirm the
+    relay is online (the relay is otherwise silent between uses); the response
+    updates lastActivity. Used by the Zooz Sprinkler Scheduler watchdog
+  - Exposed "ping" as a command on the device page for manual testing
 
 ## [1.3.2] - 2025-02-14 (@jtp10181)
   - Fixed issue when child not detected entire device could be switched on/off (thanks @jbondc)
@@ -56,7 +67,7 @@ Changelog:
 
 import groovy.transform.Field
 
-@Field static final String VERSION = "1.3.2"
+@Field static final String VERSION = "1.3.2-rs1"
 @Field static final String DRIVER = "Zooz-ZEN16"
 @Field static final String COMM_LINK = "https://community.hubitat.com/t/zooz-relays-advanced/98194"
 @Field static final Map deviceModelNames = ["A000:A00A":"ZEN16"]
@@ -67,7 +78,7 @@ metadata {
 		namespace: "jtp10181",
 		author: "Jeff Page (@jtp10181)",
 		singleThreaded: true,
-		importUrl: "https://raw.githubusercontent.com/jtp10181/Hubitat/main/Drivers/zooz/zooz-zen16-multirelay.groovy"
+		importUrl: "https://raw.githubusercontent.com/RamSet/hubitat/main/zooz-zen16-multirelay.groovy"
 	) {
 		capability "Actuator"
 		capability "Switch"
