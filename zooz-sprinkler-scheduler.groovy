@@ -62,7 +62,7 @@ mappings {
     path("/calendar.ics")  { action: [GET: "apiCalendar"] }
 }
 
-String getAppVersion() { return "v0.10.0 (2026-06)" }
+String getAppVersion() { return "v0.10.1 (2026-06)" }
 
 // Simple vs Advanced interface. Simple shows only zones, schedule, weather and
 // hardware safety; Advanced exposes everything (moisture, learning, sensors,
@@ -1139,12 +1139,18 @@ def exposurePage() {
 }
 
 private String exposureSummaryString() {
-    if (!settings.zoneSwitchesEnabled) return "Disabled — no child switches"
-    Integer mins = (settings.defaultManualTimerMin ?: 10) as int
-    int n = 0
-    Integer zc = zoneCount()
-    for (int i = 1; i <= zc; i++) { if (getZoneChildVs(i)) n++ }
-    return "${n} child switch(es) · default timer ${mins}min"
+    List<String> parts = []
+    if (settings.zoneSwitchesEnabled) {
+        Integer mins = (settings.defaultManualTimerMin ?: 10) as int
+        int n = 0
+        Integer zc = zoneCount()
+        for (int i = 1; i <= zc; i++) { if (getZoneChildVs(i)) n++ }
+        parts << "${n} zone switch(es) · ${mins}min"
+    }
+    if (settings.runSwitchEnabled) {
+        parts << (getRunCtlChild() ? "Run switch ✓" : "Run switch — tap Done to create")
+    }
+    return parts ? parts.join(" · ") : "Disabled — no child switches"
 }
 
 def aboutPage() {
@@ -1161,6 +1167,7 @@ def aboutPage() {
             paragraph "A Hubitat app for running sprinkler zones via Zooz ZEN16 / ZEN17 800LR multi-relay controllers — or any Hubitat device exposing the Switch capability. Hardware-agnostic, multi-instance, with Spruce-style weather adaptation, per-zone moisture-aware watering, restrictions (quiet hours / mode / HSM), pause-and-resume from external sensors, hub-independent hardware watchdog via Z-Wave parameters (model-aware: pushes the right per-relay timers for ZEN16's 3 relays or ZEN17's 2 relays), full external JSON/HTML/iCal API, and granular templated notifications with Pushover support."
         }
         section("Changelog") {
+            paragraph "v0.10.1 — The Zone-switches summary now also shows the Run-schedule switch status (it previously only counted zone switches, so an enabled Run switch looked missing). The Run switch is created when you tap Done."
             paragraph "v0.10.0 — Added an optional \"Run schedule\" control switch (Zone switches page). Expose it to HomeKit/dashboards/routines: turn it ON to start the whole schedule on demand, OFF to stop it. It also reflects status — ON while the schedule is running (manual or timed), OFF when idle — and bounces back off if an on-demand start is skipped by rain/quiet-hours/pause."
             paragraph "v0.9.2 — Turning a zone off from HomeKit now cancels its auto-off timer immediately, so you no longer get a stray \"timer expired\" notification ~10 minutes later. Per-zone manual timers are tracked independently. Left on, a zone still auto-stops after its timer. During a scheduled run, the HomeKit tile reflects the schedule and ignores stray toggles (use Stop-all to interrupt a run)."
             paragraph "v0.9.1 — Fixed HomeKit/dashboard zone switches not driving the relay: toggling an exposed zone switch had no effect because the event handler read a device-network-id field that is always empty on Hubitat events. It now resolves the zone from the event's device, so manual on/off (and the auto-off timer) work again."
