@@ -62,7 +62,7 @@ mappings {
     path("/calendar.ics")  { action: [GET: "apiCalendar"] }
 }
 
-String getAppVersion() { return "v0.11.8 (2026-06)" }
+String getAppVersion() { return "v0.11.9 (2026-06)" }
 
 // Simple vs Advanced interface. Simple shows only zones, schedule, weather and
 // hardware safety; Advanced exposes everything (moisture, learning, sensors,
@@ -1177,6 +1177,7 @@ def aboutPage() {
             paragraph "A Hubitat app for running sprinkler zones via Zooz ZEN16 / ZEN17 800LR multi-relay controllers — or any Hubitat device exposing the Switch capability. Hardware-agnostic, multi-instance, with Spruce-style weather adaptation, per-zone moisture-aware watering, restrictions (quiet hours / mode / HSM), pause-and-resume from external sensors, hub-independent hardware watchdog via Z-Wave parameters (model-aware: pushes the right per-relay timers for ZEN16's 3 relays or ZEN17's 2 relays), full external JSON/HTML/iCal API, and granular templated notifications with Pushover support."
         }
         section("Changelog") {
+            paragraph "v0.11.9 — Fixed a HomeKit zone switch sometimes refusing to turn off (the relay stayed on). A leftover tile-suppression flag could make the app mistake your real toggle for one of its own and ignore it. Suppression is now time-bounded — only the app's own command within the last few seconds is ignored — and stale flags are pruned, so manual on/off is always honored."
             paragraph "v0.11.8 — Fixed false \"relay unreachable\" warnings. These relays only report when actuated, so they sit silent between waterings; the old 6-hour threshold cried wolf a few hours after every run. The watchdog now defaults the threshold to your watering gap plus a buffer (e.g. ~96h for every-3-days), so you're only warned if a run is actually missed. Tunable on the Hardware safety page."
             paragraph "v0.11.7 — The \"schedule starting\" notification now includes an estimated total run time — watering + soak + between-zone delays — e.g. \"~1h 38m total (water 1h 14m + soak 20m)\". New template variables: \${estTotal}, \${estWater}, \${estSoak}."
             paragraph "v0.11.6 — Zone list now shows the cycle & soak breakdown and total clock time per zone (e.g. \"12m water (2× 6m) + 10m soak = 22m total\"). Soak time is tracked separately from watering: the complete notification reports soak on its own, and \"watered\" stays valves-on time only. New \${soak} template variable."
@@ -2688,17 +2689,21 @@ def zoneChildSwitchEvent(evt) {
     String prefix = "${app.id}-zone-"
     if (!dni.startsWith(prefix)) return
     Integer zid = dni.substring(prefix.length()).toInteger()
-    // Per-zone suppression: a single shared flag gets clobbered when the
-    // scheduler flips several tiles in quick succession, which desyncs them.
+    // Per-zone, time-bounded suppression. Each entry is [value, setAtMs]: we only
+    // ignore an event that matches a command WE issued in the last few seconds.
+    // A stale flag (e.g. left over from a previous run) can never swallow a real
+    // user toggle, which is what made an off press get silently ignored before.
     Map sup = (state.suppressZoneChild ?: [:]) as Map
-    if (sup[zid.toString()] == evt.value) {
-        sup.remove(zid.toString())
-        state.suppressZoneChild = sup
-        return
-    }
-    // During an active run the scheduler owns the relays. Don't fight per-event
-    // (that race is what desynced the tiles) — just reconcile every tile to its
-    // relay's real state shortly after.
+    long t = now()
+    def entry = sup[zid.toString()]
+    boolean suppressed = (entry instanceof List && entry[0] == evt.value && (t - (entry[1] as long)) < 4000)
+    // Drop this zone's entry and prune any other expired ones so the map can't
+    // accumulate stale flags.
+    sup = sup.findAll { k, v -> k != zid.toString() && (v instanceof List) && (t - (v[1] as long)) < 4000 }
+    state.suppressZoneChild = sup
+    if (suppressed) return
+    // During an active run the scheduler owns the relays. Don't fight per-event;
+    // just reconcile every tile to its relay's real state shortly after.
     if (state.running) { runIn(2, "syncAllZoneChildren"); return }
     // External trigger while idle
     if (evt.value == "on") manualZoneStart(zid)
@@ -2710,7 +2715,7 @@ private void setZoneChildSwitch(int zid, String value) {
     if (!ch) return
     if (ch.currentValue("switch") == value) return  // no change needed
     Map sup = (state.suppressZoneChild ?: [:]) as Map
-    sup[zid.toString()] = value
+    sup[zid.toString()] = [value, now()]   // value + timestamp, honored only while fresh
     state.suppressZoneChild = sup
     try { if (value == "on") ch.on() else ch.off() }
     catch (e) { log.warn "setZoneChildSwitch(${zid}, ${value}): ${e.message}" }
