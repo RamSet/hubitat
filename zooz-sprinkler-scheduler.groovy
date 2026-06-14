@@ -62,7 +62,7 @@ mappings {
     path("/calendar.ics")  { action: [GET: "apiCalendar"] }
 }
 
-String getAppVersion() { return "v0.11.11 (2026-06)" }
+String getAppVersion() { return "v0.12.0 (2026-06)" }
 
 // Simple vs Advanced interface. Simple shows only zones, schedule, weather and
 // hardware safety; Advanced exposes everything (moisture, learning, sensors,
@@ -867,7 +867,14 @@ def hardwarePage() {
             paragraph "• ZEN16:  https://raw.githubusercontent.com/RamSet/hubitat/main/zooz-zen16-multirelay.groovy\n" +
                       "• ZEN17:  https://raw.githubusercontent.com/RamSet/hubitat/main/zooz-zen17-universal-relay.groovy\n" +
                       "(Vendored from jtp10181/Hubitat — upstream: https://github.com/jtp10181/Hubitat/tree/main/Drivers/zooz)"
-            paragraph "The scheduler auto-detects the setParameter argument order so the same Hardware Safety push works whether the driver uses paramNumber/size/value or jtp10181's paramNumber/value/size order."
+            input name: "hwSetParamStyle", type: "enum",
+                  title: "setParameter argument order",
+                  description: "Hubitat hides argument names from apps, so this can't be reliably auto-detected. Leave on Auto (assumes the jtp10181/vendored driver order, value-then-size) unless the push reports success but the device's Auto-Off timers stay 0 — then try Built-in.",
+                  options: ["auto": "Auto (jtp10181 order — recommended)",
+                            "jtp10181": "Force jtp10181 (paramNumber, value, size)",
+                            "builtin":  "Force built-in (paramNumber, size, value)"],
+                  defaultValue: "auto"
+            paragraph "If a push reports success but the relay's Auto Turn-Off (P6/P8/P10) stays 0 on the device, the argument order is wrong — flip this setting and push again."
         }
         section {
             paragraph "References: " +
@@ -1178,6 +1185,7 @@ def aboutPage() {
             paragraph "A Hubitat app for running sprinkler zones via Zooz ZEN16 / ZEN17 800LR multi-relay controllers — or any Hubitat device exposing the Switch capability. Hardware-agnostic, multi-instance, with Spruce-style weather adaptation, per-zone moisture-aware watering, restrictions (quiet hours / mode / HSM), pause-and-resume from external sensors, hub-independent hardware watchdog via Z-Wave parameters (model-aware: pushes the right per-relay timers for ZEN16's 3 relays or ZEN17's 2 relays), full external JSON/HTML/iCal API, and granular templated notifications with Pushover support."
         }
         section("Changelog") {
+            paragraph "v0.12.0 — IMPORTANT safety fix: the Hardware-Safety push was sending the relay Auto-Off timers in the wrong setParameter argument order, so they silently never took (the device's P6/P8/P10 stayed 0 — no hardware failsafe) even though the push reported success. The app can't read argument names from Hubitat, so it now defaults to the correct jtp10181/vendored-driver order (paramNumber, value, size), with a manual override on the Hardware-safety page. Re-push after updating, and confirm the Auto Turn-Off timers are non-zero on each relay."
             paragraph "v0.11.11 — Documented a confirmed ZEN16/ZEN17 gotcha on the Rain sensors page: an Sw input set to a sensor/water type won't actually report (stays stuck dry) until the relay is EXCLUDED + RE-INCLUDED — the sensor-report association is only set up during Z-Wave inclusion, not by Save/Configure/power-cycle. Verified on ZEN16 FW 3.10."
             paragraph "v0.11.10 — The \"zone turned off\" notification is now ON by default (was off), so a manual off is announced just like a manual on. If you'd previously saved Notifications, enable \"zone turned off\" there to get it."
             paragraph "v0.11.9 — Fixed a HomeKit zone switch sometimes refusing to turn off (the relay stayed on). A leftover tile-suppression flag could make the app mistake your real toggle for one of its own and ignore it. Suppression is now time-bounded — only the app's own command within the last few seconds is ignored — and stale flags are pruned, so manual on/off is always honored."
@@ -2549,22 +2557,28 @@ private String forcedDelayDisplayString() {
 // Zooz driver uses (paramNumber, size, value); jtp10181's Advanced driver
 // uses (paramNumber, value, size). We peek at the command's argument names.
 private String detectSetParameterStyle(dev) {
+    // Manual override wins. Auto-detection from the app side is unreliable:
+    // getSupportedCommands() exposes argument TYPES (["NUMBER",...]), not names,
+    // so the old name-sniff never matched and always fell back to "builtin" —
+    // which pushed the WRONG arg order to the jtp10181/vendored drivers, so the
+    // auto-off timers silently never took.
+    String pref = settings.hwSetParamStyle
+    if (pref == "jtp10181" || pref == "builtin") return pref
     try {
         def cmd = dev.getSupportedCommands()?.find { it.name == "setParameter" }
-        if (!cmd) return "builtin"
-        // Walk the argument list and find which index holds "size" vs "value"
         int sizeIdx = -1, valueIdx = -1
-        cmd.arguments?.eachWithIndex { arg, int i ->
+        cmd?.arguments?.eachWithIndex { arg, int i ->
             String n = (arg instanceof Map ? (arg.name ?: "") : arg as String)
                        .toLowerCase().replace("*", "").trim()
             if (n == "size")  sizeIdx = i
             if (n == "value") valueIdx = i
         }
         if (valueIdx == 1 && sizeIdx == 2) return "jtp10181"  // (num, value, size)
-        return "builtin"                                       // (num, size, value)
-    } catch (e) {
-        return "builtin"
-    }
+        if (sizeIdx == 1 && valueIdx == 2) return "builtin"   // (num, size, value)
+    } catch (e) { }
+    // Default: the vendored/recommended jtp10181 ZEN16/ZEN17 drivers — and in
+    // fact every Zooz relay driver that exposes setParameter — use (num, value, size).
+    return "jtp10181"
 }
 
 private void callSetParameter(dev, String style, int paramNum, int size, int value) {
