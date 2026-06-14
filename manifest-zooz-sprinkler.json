@@ -1,0 +1,42 @@
+{
+  "packageName": "Zooz Sprinkler Scheduler",
+  "author": "RamSet",
+  "version": "0.12.1",
+  "releaseNotes": "Fully-local irrigation controller for Zooz ZEN16/ZEN17 relays (or any Switch device): day-of-week or every-N-days scheduling, cycle & soak, Open-Meteo weather (rain delay, seasonal scaling, smart skips; unit-aware), rain/moisture/pause sensors with true pause-and-resume, pump/master valve, HomeKit/dashboard exposure, notifications, and a verified hardware auto-off failsafe. Includes a RamSet fork of @jtp10181's ZEN16/ZEN17 Advanced drivers (adds ping(), removes telemetry).",
+  "category": "Irrigation",
+  "tags": "Irrigation, Sprinkler, Zooz, ZEN16, ZEN17, Z-Wave, Weather, Local",
+  "dateReleased": "2026-06-14",
+  "minimumHEVersion": "2.3.0",
+  "apps": [
+    {
+      "id": "f6aadfbc-e1fb-43f4-a19b-713a99acc4ef",
+      "name": "Zooz Sprinkler Scheduler",
+      "namespace": "ramset",
+      "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/zooz-sprinkler-scheduler.groovy",
+      "required": true,
+      "oauth": true,
+      "primary": true,
+      "description": "Sprinkler/irrigation scheduler app — zones, weather, sensors, pause-and-resume, and hardware safety."
+    }
+  ],
+  "drivers": [
+    {
+      "id": "5aee38c9-88cf-4a0e-99e6-d9618b2d8632",
+      "name": "Zooz ZEN16 MultiRelay Advanced",
+      "namespace": "jtp10181",
+      "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/zooz-zen16-multirelay.groovy",
+      "required": false,
+      "oauth": false,
+      "description": "Zooz ZEN16 (3-relay) driver — RamSet fork of @jtp10181's, exposes setParameter for the hardware auto-off push and adds ping(). Optional: only needed if you drive the zones with a ZEN16."
+    },
+    {
+      "id": "5355a3c3-d2fa-4d48-ad9a-0e282caea2a0",
+      "name": "Zooz ZEN17 Universal Relay Advanced",
+      "namespace": "jtp10181",
+      "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/zooz-zen17-universal-relay.groovy",
+      "required": false,
+      "oauth": false,
+      "description": "Zooz ZEN17 (2-relay) driver — RamSet fork of @jtp10181's. Optional: only needed if you drive the zones with a ZEN17."
+    }
+  ]
+}
