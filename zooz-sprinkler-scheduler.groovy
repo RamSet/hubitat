@@ -62,7 +62,7 @@ mappings {
     path("/calendar.ics")  { action: [GET: "apiCalendar"] }
 }
 
-String getAppVersion() { return "v0.12.0 (2026-06)" }
+String getAppVersion() { return "v0.12.1 (2026-06)" }
 
 // Simple vs Advanced interface. Simple shows only zones, schedule, weather and
 // hardware safety; Advanced exposes everything (moisture, learning, sensors,
@@ -1185,6 +1185,7 @@ def aboutPage() {
             paragraph "A Hubitat app for running sprinkler zones via Zooz ZEN16 / ZEN17 800LR multi-relay controllers — or any Hubitat device exposing the Switch capability. Hardware-agnostic, multi-instance, with Spruce-style weather adaptation, per-zone moisture-aware watering, restrictions (quiet hours / mode / HSM), pause-and-resume from external sensors, hub-independent hardware watchdog via Z-Wave parameters (model-aware: pushes the right per-relay timers for ZEN16's 3 relays or ZEN17's 2 relays), full external JSON/HTML/iCal API, and granular templated notifications with Pushover support."
         }
         section("Changelog") {
+            paragraph "v0.12.1 — The Hardware-Safety push no longer claims \"successful\" just because the commands were sent. It now reads the Auto-Off timers back off each controller ~15s later and reports the truth — \"✓ armed\" with the real values, or \"⚠ did NOT take\" with a prompt to flip the setParameter-order override and push again (and an error notification if any relay is left unprotected)."
             paragraph "v0.12.0 — IMPORTANT safety fix: the Hardware-Safety push was sending the relay Auto-Off timers in the wrong setParameter argument order, so they silently never took (the device's P6/P8/P10 stayed 0 — no hardware failsafe) even though the push reported success. The app can't read argument names from Hubitat, so it now defaults to the correct jtp10181/vendored-driver order (paramNumber, value, size), with a manual override on the Hardware-safety page. Re-push after updating, and confirm the Auto Turn-Off timers are non-zero on each relay."
             paragraph "v0.11.11 — Documented a confirmed ZEN16/ZEN17 gotcha on the Rain sensors page: an Sw input set to a sensor/water type won't actually report (stays stuck dry) until the relay is EXCLUDED + RE-INCLUDED — the sensor-report association is only set up during Z-Wave inclusion, not by Save/Configure/power-cycle. Verified on ZEN16 FW 3.10."
             paragraph "v0.11.10 — The \"zone turned off\" notification is now ON by default (was off), so a manual off is announced just like a manual on. If you'd previously saved Notifications, enable \"zone turned off\" there to get it."
@@ -2621,18 +2622,63 @@ def pushHardwareSafety() {
             if (settings.hwForceDcMotorOff != false) {
                 try { callSetParameter(dev, style, 24, 1, 0) } catch (ignored) {}
             }
-            String pStr = "P${autoOffParams.join('/P')}=${mins}min, P${unitParams.join('/P')}=min"
-            log_ << "${dev.displayName} (${model.name}, ${style} driver): pushed ${pStr}, P1=off, P24=off"
+            log_ << "${dev.displayName} (${model.name}, ${style} order): sent auto-off ${mins}min to P${autoOffParams.join('/P')}"
             ok++
         } catch (e) {
-            log_ << "${dev.displayName}: FAILED — ${e.message}"
+            log_ << "${dev.displayName}: FAILED to send — ${e.message}"
             fail++
         }
     }
-    String summary = "Pushed to ${ok} controller(s), ${fail} failed @ ${nowString()}\n" + log_.join("\n")
+    state.hwExpectedMins = mins
+    String summary = "Sent to ${ok} controller(s)${fail ? ", ${fail} couldn't (no setParameter)" : ""} @ ${nowString()} — verifying the timers actually took; re-open this page in ~15s.\n" + log_.join("\n")
     state.hwLastPushSummary = summary
-    log.info "${app.label}: hardware safety push — ${ok} ok, ${fail} failed (${mins}min auto-off)"
+    log.info "${app.label}: hardware safety — sent to ${ok}, ${fail} skipped (${mins}min); verifying in 15s"
+    runIn(15, "verifyHardwareSafety")
     notify("hardware.push", [minutes: mins, count: ok])
+}
+
+// Read back the relay Auto-Off timers a few seconds after a push and report
+// what the DEVICE actually holds — "sent OK" from setParameter does not mean
+// the device accepted it (wrong arg order silently no-ops). This is the honest
+// success check for the failsafe.
+def verifyHardwareSafety() {
+    def parents = settings.hwZen16Parents
+    if (!parents) return
+    Integer mins = (state.hwExpectedMins ?: (settings.hwAutoOffMinutes ?: (((settings.scheduleMaxRunMinutes ?: 60) as int) + 5))) as int
+    List<String> lines = []
+    int armed = 0, gaps = 0
+    parents.each { dev ->
+        String modelKey = settings."hwModel_${dev.id}" ?: "3"
+        Map model = (ZOOZ_RELAY_MODELS[modelKey] ?: ZOOZ_RELAY_MODELS["3"]) as Map
+        List<Integer> autoOffParams = (model.autoOff ?: []) as List<Integer>
+        Map actual = parseConfigVals(dev)
+        List<String> vals = []
+        boolean allok = true
+        autoOffParams.each { p ->
+            Integer v = actual[p as int]
+            vals << (v == null ? "?" : "${v}")
+            if (v != mins) allok = false
+        }
+        if (allok) { armed++; lines << "${dev.displayName}: ✓ auto-off ${vals.join('/')} min — armed" }
+        else { gaps++; lines << "${dev.displayName}: ⚠ auto-off ${vals.join('/')} (want ${mins}) — did NOT take; flip the setParameter-order override above and push again" }
+    }
+    state.hwLastPushSummary = "Verified @ ${nowString()} — ${armed} armed, ${gaps} with gaps (expected ${mins}min auto-off)\n" + lines.join("\n")
+    log.info "${app.label}: hardware safety verify — ${armed} armed, ${gaps} gaps"
+    if (gaps > 0) notify("error", [detail: "hardware auto-off NOT set on ${gaps} relay controller(s) — open Hardware safety"])
+}
+
+// Parse the jtp10181 driver's "configVals" device data ("[1:1, 2:4, ...]")
+// into a paramNum -> value map.
+private Map parseConfigVals(dev) {
+    Map out = [:]
+    try {
+        String cv = dev.getDataValue("configVals")
+        if (cv) {
+            java.util.regex.Matcher mm = (cv =~ /(\d+)\s*:\s*(\d+)/)
+            while (mm.find()) { out[mm.group(1) as int] = mm.group(2) as int }
+        }
+    } catch (e) { }
+    return out
 }
 
 // =========================================================================
