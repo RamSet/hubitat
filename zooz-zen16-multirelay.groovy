@@ -14,6 +14,15 @@
 
 Changelog:
 
+## [1.3.2-rs3] - 2026-06-13 (RamSet fork)
+  - Documented a confirmed gotcha: configuring an Sw input as a SENSOR type
+    (Water/Heat/Motion/Contact/etc.) does NOT start reporting until the device
+    is EXCLUDED + RE-INCLUDED. The input-type parameter applies (and will even
+    drive a relay), but the unsolicited sensor-report association is only set up
+    during the Z-Wave inclusion interview — Save/Configure/power-cycle won't do
+    it. Verified on a ZEN16 FW 3.10: water-sensor input was silent until re-pair.
+    Input-type parameter descriptions updated to say so.
+
 ## [1.3.2-rs2] - 2026-06-11 (RamSet fork)
   - Removed upstream telemetry (the periodic version check-in to
     jtp10181.gateway.scarf.sh); the driver no longer phones home
@@ -71,7 +80,7 @@ Changelog:
 
 import groovy.transform.Field
 
-@Field static final String VERSION = "1.3.2-rs2"
+@Field static final String VERSION = "1.3.2-rs3"
 @Field static final String DRIVER = "Zooz-ZEN16"
 @Field static final String COMM_LINK = "https://community.hubitat.com/t/zooz-relays-advanced/98194"
 @Field static final Map deviceModelNames = ["A000:A00A":"ZEN16"]
@@ -206,7 +215,7 @@ void debugShowVars() {
 	],
 	inputSw1: [ num:2,
 		title: "Input Type for Sw1",
-		description: "Power Cycle the device after changing this setting.<br> * New models may require exclude/include to work!",
+		description: "Power Cycle after changing.<br>* A SENSOR type (Water/Heat/Motion/Contact/CO/CO2/Dry-Contact) REQUIRES an EXCLUDE + RE-INCLUDE before the input will send reports — the sensor's report association is only created during Z-Wave inclusion. Save/Configure/power-cycle alone will NOT enable reporting (the input may still drive a relay, but it stays silent as a sensor until re-paired).",
 		size: 1, defaultVal: 2,
 		options: [:]  //inputTypes
 	],
@@ -225,7 +234,7 @@ void debugShowVars() {
 	],
 	inputSw2: [ num:3,
 		title: "Input Type for Sw2",
-		description: "Power Cycle the device after changing this setting.<br> * New models may require exclude/include to work!",
+		description: "Power Cycle after changing.<br>* A SENSOR type (Water/Heat/Motion/Contact/CO/CO2/Dry-Contact) REQUIRES an EXCLUDE + RE-INCLUDE before the input will send reports — the sensor's report association is only created during Z-Wave inclusion. Save/Configure/power-cycle alone will NOT enable reporting (the input may still drive a relay, but it stays silent as a sensor until re-paired).",
 		size: 1, defaultVal: 2,
 		options: [:]  //inputTypes
 	],
@@ -244,7 +253,7 @@ void debugShowVars() {
 	],
 	inputSw3: [ num:4,
 		title: "Input Type for Sw3",
-		description: "Power Cycle the device after changing this setting.<br> * New models may require exclude/include to work!",
+		description: "Power Cycle after changing.<br>* A SENSOR type (Water/Heat/Motion/Contact/CO/CO2/Dry-Contact) REQUIRES an EXCLUDE + RE-INCLUDE before the input will send reports — the sensor's report association is only created during Z-Wave inclusion. Save/Configure/power-cycle alone will NOT enable reporting (the input may still drive a relay, but it stays silent as a sensor until re-paired).",
 		size: 1, defaultVal: 2,
 		options: [:]  //inputTypes
 	],

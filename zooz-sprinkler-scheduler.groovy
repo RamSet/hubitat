@@ -62,7 +62,7 @@ mappings {
     path("/calendar.ics")  { action: [GET: "apiCalendar"] }
 }
 
-String getAppVersion() { return "v0.11.10 (2026-06)" }
+String getAppVersion() { return "v0.11.11 (2026-06)" }
 
 // Simple vs Advanced interface. Simple shows only zones, schedule, weather and
 // hardware safety; Advanced exposes everything (moisture, learning, sensors,
@@ -701,7 +701,8 @@ def rainSensorPage() {
                   options: ["closed": "closed (most rain sensors — contacts close when wet)",
                             "open":   "open   (normally-closed sensors)"],
                   defaultValue: "closed"
-            paragraph "Wiring tip (ZEN16 / ZEN17): the rain sensor's two leads go to a Sw input and its paired GND/COM. Set parameter P2 (Sw1 input type — or P3/P4 for Sw2/Sw3 on ZEN16) = 1 (toggle switch) so the controller reports contact state as an event, then either let the built-in driver auto-create the Sw Contact child OR add it manually. Pick the resulting child device above."
+            paragraph "Wiring tip (ZEN16 / ZEN17): the rain sensor's two leads go to a Sw input and its paired GND/COM. Set parameter P2 (Sw1 input type — or P3/P4 for Sw2/Sw3 on ZEN16) to a sensor/contact type so the controller reports the input, then pick the resulting Sw child device above."
+            paragraph "⚠ Confirmed gotcha: after you change an Sw input to a sensor type, the ZEN16/ZEN17 will NOT actually report it (wet/dry stays stuck) until you EXCLUDE + RE-INCLUDE the relay. The parameter takes effect and the input can even drive a relay, but the sensor-report association is only created during Z-Wave inclusion — Save/Configure/power-cycle won't enable it. If a freshly-set input never changes, re-pair the controller, then re-pick its child here. (Verified on ZEN16 FW 3.10.)"
         }
 
         section("Behavior") {
@@ -1177,6 +1178,7 @@ def aboutPage() {
             paragraph "A Hubitat app for running sprinkler zones via Zooz ZEN16 / ZEN17 800LR multi-relay controllers — or any Hubitat device exposing the Switch capability. Hardware-agnostic, multi-instance, with Spruce-style weather adaptation, per-zone moisture-aware watering, restrictions (quiet hours / mode / HSM), pause-and-resume from external sensors, hub-independent hardware watchdog via Z-Wave parameters (model-aware: pushes the right per-relay timers for ZEN16's 3 relays or ZEN17's 2 relays), full external JSON/HTML/iCal API, and granular templated notifications with Pushover support."
         }
         section("Changelog") {
+            paragraph "v0.11.11 — Documented a confirmed ZEN16/ZEN17 gotcha on the Rain sensors page: an Sw input set to a sensor/water type won't actually report (stays stuck dry) until the relay is EXCLUDED + RE-INCLUDED — the sensor-report association is only set up during Z-Wave inclusion, not by Save/Configure/power-cycle. Verified on ZEN16 FW 3.10."
             paragraph "v0.11.10 — The \"zone turned off\" notification is now ON by default (was off), so a manual off is announced just like a manual on. If you'd previously saved Notifications, enable \"zone turned off\" there to get it."
             paragraph "v0.11.9 — Fixed a HomeKit zone switch sometimes refusing to turn off (the relay stayed on). A leftover tile-suppression flag could make the app mistake your real toggle for one of its own and ignore it. Suppression is now time-bounded — only the app's own command within the last few seconds is ignored — and stale flags are pruned, so manual on/off is always honored."
             paragraph "v0.11.8 — Fixed false \"relay unreachable\" warnings. These relays only report when actuated, so they sit silent between waterings; the old 6-hour threshold cried wolf a few hours after every run. The watchdog now defaults the threshold to your watering gap plus a buffer (e.g. ~96h for every-3-days), so you're only warned if a run is actually missed. Tunable on the Hardware safety page."
