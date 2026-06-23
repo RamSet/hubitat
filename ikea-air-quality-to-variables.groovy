@@ -13,8 +13,9 @@
  *    temperature     -> <Prefix>Temperature       (Decimal)
  *    humidity        -> <Prefix>Humidity          (Number)
  *
- *  Any named variable that does not yet exist is created automatically with
- *  the correct type. Values are only written when they actually change.
+ *  Hub Variables must already exist (apps cannot create them). Any named
+ *  variable that is missing is logged and skipped; create it once under
+ *  Settings > Hub Variables. Values are only written when they actually change.
  */
 
 definition(
@@ -70,10 +71,13 @@ def updated() {
 }
 
 def initialize() {
-    createMissingVars()
+    def existing = (getAllGlobalVars() ?: [:]).keySet()
+    def wanted   = allVarNames()
+    def missing  = wanted.findAll { !existing.contains(it) }
+    def present  = wanted.findAll { existing.contains(it) }
 
-    def names = allVarNames()
-    addInUseGlobalVar(names)
+    if (missing) log.warn "Hub Variable(s) not found, will be skipped — create them under Settings > Hub Variables: ${missing}"
+    if (present) addInUseGlobalVar(present)
 
     ["pm25", "airQualityPlain", "temperature", "humidity"].each { attr ->
         if (indoorSensor)  subscribe(indoorSensor,  attr, indoorHandler)
@@ -130,9 +134,10 @@ private publish(dev, pm25Var, aqVar, transVar, tempVar, humVar, label) {
 /* Write only when the value actually differs from what is already stored. Returns 1 if written. */
 private writeVar(name, val, asString) {
     if (!name || val == null) return 0
+    def gv = getGlobalVar(name)
+    if (gv == null) return 0                       // variable does not exist; skip
     def newVal = asString ? val.toString() : val
-    def cur = getGlobalVar(name)?.value
-    if (cur?.toString() == newVal?.toString()) return 0
+    if (gv.value?.toString() == newVal?.toString()) return 0
     setGlobalVar(name, newVal)
     return 1
 }
@@ -148,23 +153,6 @@ private stripHtml(v) { v == null ? null : v.toString().replaceAll("<[^>]*>", "")
 private num(v) {
     if (v == null) return null
     try { return new BigDecimal(v.toString()) } catch (e) { return null }
-}
-
-/* Create any named variable that does not exist yet, with the right type. */
-private createMissingVars() {
-    def existing = (getAllGlobalVars() ?: [:]).keySet()
-    def numVars = [settings.vInPm25, settings.vInHum, settings.vOutPm25, settings.vOutHum]
-    def decVars = [settings.vInTemp, settings.vOutTemp]
-    def strVars = [settings.vInAQ, settings.vInTrans, settings.vOutAQ, settings.vOutTrans]
-
-    numVars.findAll { it && !existing.contains(it) }.each { make(it, 0,    "Number") }
-    decVars.findAll { it && !existing.contains(it) }.each { make(it, 0.0G, "Decimal") }
-    strVars.findAll { it && !existing.contains(it) }.each { make(it, "",   "String") }
-}
-
-private make(name, init, typeLabel) {
-    if (createGlobalVar(name, init)) log.info "Created ${typeLabel} hub variable: ${name}"
-    else log.warn "Could not create hub variable: ${name}"
 }
 
 private allVarNames() {
