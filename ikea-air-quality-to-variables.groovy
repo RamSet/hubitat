@@ -13,9 +13,13 @@
  *    temperature     -> <Prefix>Temperature       (Decimal)
  *    humidity        -> <Prefix>Humidity          (Number)
  *
- *  Hub Variables must already exist (apps cannot create them). Any named
- *  variable that is missing is logged and skipped; create it once under
- *  Settings > Hub Variables. Values are only written when they actually change.
+ *  Optionally also pushes into existing devices (e.g. the Virtual AQI driver)
+ *  via airQualityIndex(): AQI devices receive the sensor's airQualityIndex,
+ *  TVOC devices receive vocIndex.
+ *
+ *  The app does NOT create Hub Variables or devices (apps cannot). Every
+ *  target must already exist and is selected from a dropdown; a missing Hub
+ *  Variable is logged and skipped. Values are only written when they change.
  */
 
 definition(
@@ -65,6 +69,16 @@ def mainPage() {
             input "vOutTemp",  "enum", title: "Temperature var (Decimal)",      options: vars, required: false
             input "vOutHum",   "enum", title: "Humidity var (Number)",          options: vars, required: false
         }
+        section("Devices (optional)") {
+            paragraph "Same as above, the app does NOT create devices — each must " +
+                      "already exist and is selected from the dropdown. Selected devices " +
+                      "are updated via their airQualityIndex() command: AQI devices get the " +
+                      "sensor's AQI (airQualityIndex), TVOC devices get vocIndex. Leave blank to skip."
+            input "devInAQI",   "capability.airQuality", title: "Indoor AQI device",   required: false
+            input "devOutAQI",  "capability.airQuality", title: "Outdoor AQI device",  required: false
+            input "devInTVOC",  "capability.airQuality", title: "Indoor TVOC device",  required: false
+            input "devOutTVOC", "capability.airQuality", title: "Outdoor TVOC device", required: false
+        }
         section("Options") {
             input "logEnable", "bool", title: "Enable debug logging", defaultValue: true
         }
@@ -87,7 +101,7 @@ def initialize() {
     if (missing) log.warn "Hub Variable(s) not found, will be skipped — create them under Settings > Hub Variables: ${missing}"
     if (present) addInUseGlobalVar(present)
 
-    ["pm25", "airQualityPlain", "temperature", "humidity"].each { attr ->
+    ["pm25", "airQualityPlain", "airQualityIndex", "vocIndex", "temperature", "humidity"].each { attr ->
         if (indoorSensor)  subscribe(indoorSensor,  attr, indoorHandler)
         if (outdoorSensor) subscribe(outdoorSensor, attr, outdoorHandler)
     }
@@ -110,13 +124,31 @@ def outdoorHandler(evt) { syncOutdoor() }
 def syncIndoor() {
     if (!indoorSensor) return
     publish(indoorSensor, settings.vInPm25, settings.vInAQ, settings.vInTrans, settings.vInTemp, settings.vInHum, "Indoor")
+    pushDevice(devInAQI,  indoorSensor, "airQualityIndex", "Indoor AQI")
+    pushDevice(devInTVOC, indoorSensor, "vocIndex",        "Indoor TVOC")
     state.lastIndoor = new Date().format("yyyy-MM-dd HH:mm:ss", location.timeZone)
 }
 
 def syncOutdoor() {
     if (!outdoorSensor) return
     publish(outdoorSensor, settings.vOutPm25, settings.vOutAQ, settings.vOutTrans, settings.vOutTemp, settings.vOutHum, "Outdoor")
+    pushDevice(devOutAQI,  outdoorSensor, "airQualityIndex", "Outdoor AQI")
+    pushDevice(devOutTVOC, outdoorSensor, "vocIndex",        "Outdoor TVOC")
     state.lastOutdoor = new Date().format("yyyy-MM-dd HH:mm:ss", location.timeZone)
+}
+
+/* Push a sensor value into a target device via its airQualityIndex() command, only on change. */
+private pushDevice(targetDev, sensor, srcAttr, label) {
+    if (!targetDev) return
+    def val = num(sensor.currentValue(srcAttr))?.toInteger()
+    if (val == null) return
+    if (!targetDev.hasCommand("airQualityIndex")) {
+        log.warn "${targetDev} has no airQualityIndex() command — skipping ${label}"
+        return
+    }
+    if (targetDev.currentValue("airQualityIndex")?.toString() == val.toString()) return
+    targetDev.airQualityIndex(val)
+    if (logEnable) log.debug "${label}: set ${targetDev} airQualityIndex=${val} (from ${srcAttr})"
 }
 
 /* ------------------------------------------------------------------ */
