@@ -43,19 +43,27 @@ def mainPage() {
             input "indoorSensor",  "capability.airQuality", title: "Indoor IKEA sensor",  required: false, submitOnChange: true
             input "outdoorSensor", "capability.airQuality", title: "Outdoor IKEA sensor", required: false, submitOnChange: true
         }
-        section("Indoor variable names (created automatically if missing)") {
-            input "vInPm25",  "text", title: "PM2.5 value var (Number)",        defaultValue: "IndoorP2.5Value",       required: false
-            input "vInAQ",    "text", title: "Air quality text var (String)",   defaultValue: "IndoorAirQuality",      required: false
-            input "vInTrans", "text", title: "PM2.5 translation var (String)",  defaultValue: "IndoorP2.5Translation", required: false
-            input "vInTemp",  "text", title: "Temperature var (Decimal)",       defaultValue: "IndoorTemperature",     required: false
-            input "vInHum",   "text", title: "Humidity var (Number)",           defaultValue: "IndoorHumidity",        required: false
+        section("Hub Variables") {
+            paragraph "This app does NOT create Hub Variables — Hubitat apps cannot. " +
+                      "Each variable you want to populate must already exist. Create them " +
+                      "first under Settings &gt; Hub Variables (with the type shown below), " +
+                      "then pick them from the dropdowns. The dropdowns only list variables " +
+                      "that currently exist; leave one blank to not publish that value."
         }
-        section("Outdoor variable names (created automatically if missing)") {
-            input "vOutPm25",  "text", title: "PM2.5 value var (Number)",       defaultValue: "OutsideP2.5Value",       required: false
-            input "vOutAQ",    "text", title: "Air quality text var (String)",  defaultValue: "OutsideAirQuality",      required: false
-            input "vOutTrans", "text", title: "PM2.5 translation var (String)", defaultValue: "OutsideP2.5Translation", required: false
-            input "vOutTemp",  "text", title: "Temperature var (Decimal)",      defaultValue: "OutsideTemperature",     required: false
-            input "vOutHum",   "text", title: "Humidity var (Number)",          defaultValue: "OutsideHumidity",        required: false
+        def vars = varOptions()
+        section("Indoor variables") {
+            input "vInPm25",  "enum", title: "PM2.5 value var (Number)",        options: vars, required: false
+            input "vInAQ",    "enum", title: "Air quality text var (String)",   options: vars, required: false
+            input "vInTrans", "enum", title: "PM2.5 translation var (String)",  options: vars, required: false
+            input "vInTemp",  "enum", title: "Temperature var (Decimal)",       options: vars, required: false
+            input "vInHum",   "enum", title: "Humidity var (Number)",           options: vars, required: false
+        }
+        section("Outdoor variables") {
+            input "vOutPm25",  "enum", title: "PM2.5 value var (Number)",       options: vars, required: false
+            input "vOutAQ",    "enum", title: "Air quality text var (String)",  options: vars, required: false
+            input "vOutTrans", "enum", title: "PM2.5 translation var (String)", options: vars, required: false
+            input "vOutTemp",  "enum", title: "Temperature var (Decimal)",      options: vars, required: false
+            input "vOutHum",   "enum", title: "Humidity var (Number)",          options: vars, required: false
         }
         section("Options") {
             input "logEnable", "bool", title: "Enable debug logging", defaultValue: true
@@ -158,6 +166,11 @@ private num(v) {
 private allVarNames() {
     return [settings.vInPm25, settings.vInAQ, settings.vInTrans, settings.vInTemp, settings.vInHum,
             settings.vOutPm25, settings.vOutAQ, settings.vOutTrans, settings.vOutTemp, settings.vOutHum].findAll { it }
+}
+
+/* Existing Hub Variable names, for the dropdown options. */
+private varOptions() {
+    return (getAllGlobalVars() ?: [:]).keySet().sort()
 }
 
 /* Live readings panel shown on the app page. */
