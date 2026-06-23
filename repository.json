@@ -21,6 +21,12 @@
       "description": "Virtual Air Quality Index (AQI) driver for Hubitat."
     },
     {
+      "name": "IKEA Air Quality to Hub Variables",
+      "category": "Air Quality",
+      "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/manifest-ikea-aqi.json",
+      "description": "Publishes IKEA Vindstyrka (E2112) PM2.5, air quality, temperature, and humidity into Hub Variables for indoor and outdoor sensors."
+    },
+    {
       "name": "Zooz Sprinkler Scheduler",
       "category": "Irrigation",
       "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/manifest-zooz-sprinkler.json",
