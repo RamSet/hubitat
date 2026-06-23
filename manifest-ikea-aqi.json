@@ -1,7 +1,7 @@
 {
   "packageName": "IKEA Air Quality to Hub Variables",
   "author": "RamSet",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "releaseNotes": "Publishes IKEA Vindstyrka (E2112) air quality sensor values (PM2.5, air quality text, temperature, humidity) into Hub Variables for use in Rule Machine, dashboards, and notifications. Supports an indoor and an outdoor sensor, only writes on actual change, and shows live readings on the app page. Hub Variables must already exist (Settings > Hub Variables); missing ones are logged and skipped rather than created.",
   "category": "Air Quality",
   "tags": "Air Quality, IKEA, Vindstyrka, PM2.5, Hub Variables, Sensor",

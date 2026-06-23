@@ -14,8 +14,9 @@
  *    humidity        -> <Prefix>Humidity          (Number)
  *
  *  Optionally also pushes into existing devices (e.g. the Virtual AQI driver)
- *  via airQualityIndex(): AQI devices receive the sensor's airQualityIndex,
- *  TVOC devices receive vocIndex.
+ *  via airQualityIndex(): AQI devices receive the sensor's airQualityIndex;
+ *  TVOC devices receive the VOC Index remapped onto the EPA AQI 0-500 scale
+ *  (so dashboard color thresholds line up — see vocToAqi).
  *
  *  The app does NOT create Hub Variables or devices (apps cannot). Every
  *  target must already exist and is selected from a dropdown; a missing Hub
@@ -73,7 +74,10 @@ def mainPage() {
             paragraph "Same as above, the app does NOT create devices — each must " +
                       "already exist and is selected from the dropdown. Selected devices " +
                       "are updated via their airQualityIndex() command: AQI devices get the " +
-                      "sensor's AQI (airQualityIndex), TVOC devices get vocIndex. Leave blank to skip."
+                      "sensor's AQI (airQualityIndex) directly; TVOC devices get the VOC Index " +
+                      "remapped onto the EPA AQI 0-500 scale so dashboard colors match " +
+                      "(strict bands: VOC 100=Good cap, 150=Moderate, 200=USG, 250=Unhealthy, " +
+                      "400=Very Unhealthy, 500=Hazardous). Leave blank to skip."
             input "devInAQI",   "capability.airQuality", title: "Indoor AQI device",   required: false
             input "devOutAQI",  "capability.airQuality", title: "Outdoor AQI device",  required: false
             input "devInTVOC",  "capability.airQuality", title: "Indoor TVOC device",  required: false
@@ -124,31 +128,49 @@ def outdoorHandler(evt) { syncOutdoor() }
 def syncIndoor() {
     if (!indoorSensor) return
     publish(indoorSensor, settings.vInPm25, settings.vInAQ, settings.vInTrans, settings.vInTemp, settings.vInHum, "Indoor")
-    pushDevice(devInAQI,  indoorSensor, "airQualityIndex", "Indoor AQI")
-    pushDevice(devInTVOC, indoorSensor, "vocIndex",        "Indoor TVOC")
+    pushDevice(devInAQI,  indoorSensor, "airQualityIndex", false, "Indoor AQI")
+    pushDevice(devInTVOC, indoorSensor, "vocIndex",        true,  "Indoor TVOC")
     state.lastIndoor = new Date().format("yyyy-MM-dd HH:mm:ss", location.timeZone)
 }
 
 def syncOutdoor() {
     if (!outdoorSensor) return
     publish(outdoorSensor, settings.vOutPm25, settings.vOutAQ, settings.vOutTrans, settings.vOutTemp, settings.vOutHum, "Outdoor")
-    pushDevice(devOutAQI,  outdoorSensor, "airQualityIndex", "Outdoor AQI")
-    pushDevice(devOutTVOC, outdoorSensor, "vocIndex",        "Outdoor TVOC")
+    pushDevice(devOutAQI,  outdoorSensor, "airQualityIndex", false, "Outdoor AQI")
+    pushDevice(devOutTVOC, outdoorSensor, "vocIndex",        true,  "Outdoor TVOC")
     state.lastOutdoor = new Date().format("yyyy-MM-dd HH:mm:ss", location.timeZone)
 }
 
-/* Push a sensor value into a target device via its airQualityIndex() command, only on change. */
-private pushDevice(targetDev, sensor, srcAttr, label) {
+/* Push a sensor value into a target device via its airQualityIndex() command, only on change.
+   When remapVoc is true the raw VOC Index is converted onto the EPA AQI 0-500 scale first. */
+private pushDevice(targetDev, sensor, srcAttr, remapVoc, label) {
     if (!targetDev) return
-    def val = num(sensor.currentValue(srcAttr))?.toInteger()
-    if (val == null) return
+    def raw = num(sensor.currentValue(srcAttr))?.toInteger()
+    if (raw == null) return
+    def val = remapVoc ? vocToAqi(raw) : raw
     if (!targetDev.hasCommand("airQualityIndex")) {
         log.warn "${targetDev} has no airQualityIndex() command — skipping ${label}"
         return
     }
     if (targetDev.currentValue("airQualityIndex")?.toString() == val.toString()) return
     targetDev.airQualityIndex(val)
-    if (logEnable) log.debug "${label}: set ${targetDev} airQualityIndex=${val} (from ${srcAttr})"
+    if (logEnable) log.debug "${label}: set ${targetDev} airQualityIndex=${val}" + (remapVoc ? " (VOC Index ${raw} remapped)" : " (from ${srcAttr})")
+}
+
+/* Sensirion VOC Index (0-500, baseline 100) -> EPA AQI 0-500 scale, "strict" bands,
+   linear within each band so dashboard colors map to Good/Moderate/USG/etc. */
+private int vocToAqi(int v) {
+    def pts = [[0,0], [100,50], [150,100], [200,150], [250,200], [400,300], [500,500]]
+    if (v <= 0)   return 0
+    if (v >= 500) return 500
+    for (int i = 0; i < pts.size() - 1; i++) {
+        def (inLo, outLo) = pts[i]
+        def (inHi, outHi) = pts[i + 1]
+        if (v <= inHi) {
+            return Math.round(outLo + (v - inLo) * (outHi - outLo) / (double)(inHi - inLo)) as int
+        }
+    }
+    return 500
 }
 
 /* ------------------------------------------------------------------ */
