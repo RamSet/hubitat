@@ -1,0 +1,22 @@
+{
+  "packageName": "Blinds Dusk Automation",
+  "author": "RamSet",
+  "version": "1.0.0",
+  "releaseNotes": "Standalone replacement for a Rule Machine room-blinds dawn/dusk rule-set. Once per evening, when an illuminance sensor drops to/below a lux threshold and it is dark (between sunset-offset and sunrise), it lowers the room blind. If the window is open it notifies, waits for the window to close, then lowers the blind; an optional configurable delay can be inserted between the window closing and the blind lowering. If the window is already closed it lowers the blind immediately and turns on the room light only when motion is active. Re-arms each morning at a configurable time. Install one instance per room.",
+  "category": "Convenience",
+  "tags": "Blinds, Shades, Window Shade, Dusk, Illuminance, Motion, Automation",
+  "dateReleased": "2026-06-23",
+  "minimumHEVersion": "2.3.0",
+  "apps": [
+    {
+      "id": "cd3860ab-7b7b-4a0d-9a9a-1949856ae5b0",
+      "name": "Blinds Dusk Automation",
+      "namespace": "ramset",
+      "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/blinds-dusk-automation.groovy",
+      "required": true,
+      "oauth": false,
+      "primary": true,
+      "description": "Lowers a room's blind at dusk, waiting for an open window to close first, and turns on the room light when occupied."
+    }
+  ]
+}

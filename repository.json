@@ -31,6 +31,12 @@
       "category": "Irrigation",
       "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/manifest-zooz-sprinkler.json",
       "description": "Fully-local irrigation controller for Zooz ZEN16/ZEN17 relays — weather-aware scheduling, cycle & soak, moisture, pause-and-resume, and a verified hardware auto-off failsafe."
+    },
+    {
+      "name": "Blinds Dusk Automation",
+      "category": "Convenience",
+      "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/manifest-blinds-dusk.json",
+      "description": "Lowers a room's blind at dusk, waits for an open window to close first (with an optional delay), and turns on the room light when occupied. One instance per room."
     }
   ]
 }
