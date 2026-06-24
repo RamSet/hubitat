@@ -1,8 +1,8 @@
 {
   "packageName": "Ecobee HAP Thermostat (Local)",
   "author": "RamSet",
-  "version": "0.8.1",
-  "releaseNotes": "0.8.1 - Fix null cast in debug log on partial event updates. HAP event push working (instant updates via persistent session).",
+  "version": "0.8.2",
+  "releaseNotes": "0.8.2 - Add Report Motion / Report Occupancy toggles (silence those on thermostat + sensors; skips live subscriptions when off).",
   "category": "Thermostats",
   "tags": "Thermostat, ecobee, HomeKit, HAP, Local, Sensor",
   "dateReleased": "2026-06-24",

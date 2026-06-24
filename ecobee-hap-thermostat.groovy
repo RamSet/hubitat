@@ -26,6 +26,8 @@ metadata {
             input "setupCode", "string", title: "HomeKit setup code — 8 digits, no dashes (e.g. 12345678). Enter and Save to pair.", required: false
         }
         input "pollMins", "number", title: "Refresh interval (minutes)", defaultValue: 1
+        input "reportMotion", "bool", title: "Report motion (thermostat + sensors)", defaultValue: true
+        input "reportOccupancy", "bool", title: "Report occupancy/presence (thermostat + sensors)", defaultValue: true
         input "debugLog", "bool", title: "Enable debug logging", defaultValue: false
     }
 }
@@ -424,8 +426,14 @@ void liveConnect(){
 }
 def liveKeepalive(){ if(state.live && state.sess){ sendEncrypted("GET /characteristics?id=${TAID}.19 HTTP/1.1\r\nHost: ${settings.ip}\r\n\r\n") } else { startLive() } }
 String subscribeBody(){
-    def ev=[]; [17,18,19,20,22,23,24,25,65,66].each{ ev << "{\"aid\":${TAID},\"iid\":${it},\"ev\":true}" }
-    (state.sensors ?: []).each{ s-> [s.temp,s.occ,s.motion,s.lowbatt].each{ if(it!=null) ev << "{\"aid\":${s.aid},\"iid\":${it},\"ev\":true}" } }
+    def ev=[]; def t=[17,18,19,20,22,23,24,25]
+    if(settings.reportMotion!=false) t<<66
+    if(settings.reportOccupancy!=false) t<<65
+    t.each{ ev << "{\"aid\":${TAID},\"iid\":${it},\"ev\":true}" }
+    (state.sensors ?: []).each{ s-> def list=[s.temp,s.lowbatt]
+        if(settings.reportOccupancy!=false) list<<s.occ
+        if(settings.reportMotion!=false) list<<s.motion
+        list.each{ if(it!=null) ev << "{\"aid\":${s.aid},\"iid\":${it},\"ev\":true}" } }
     String b="{\"characteristics\":[${ev.join(',')}]}"
     return "PUT /characteristics HTTP/1.1\r\nHost: ${settings.ip}\r\nContent-Type: application/hap+json\r\nContent-Length: ${b.getBytes('UTF-8').length}\r\nConnection: keep-alive\r\n\r\n"+b
 }
@@ -468,8 +476,8 @@ void applyState(j){
     if(g(18)!=null) sendEvent(name:"thermostatMode", value: [0:"off",1:"heat",2:"cool",3:"auto"][g(18) as int])
     if(g(17)!=null) sendEvent(name:"thermostatOperatingState", value: [0:"idle",1:"heating",2:"cooling"][g(17) as int])
     if(g(75)!=null) sendEvent(name:"thermostatFanMode", value: (g(75) as int)==1?"on":"auto")
-    if(g(66)!=null) sendEvent(name:"motion", value: (g(66)? "active":"inactive"))
-    if(g(65)!=null) sendEvent(name:"presence", value: ((g(65) as int)>0? "present":"not present"))
+    if(settings.reportMotion!=false && g(66)!=null) sendEvent(name:"motion", value: (g(66)? "active":"inactive"))
+    if(settings.reportOccupancy!=false && g(65)!=null) sendEvent(name:"presence", value: ((g(65) as int)>0? "present":"not present"))
     sendEvent(name:"supportedThermostatModes", value: '["off","heat","cool","auto"]')
     sendEvent(name:"supportedThermostatFanModes", value: '["on","auto"]')
     // ---- custom params -> attribute (only when present; events are partial) ----
@@ -487,8 +495,8 @@ void applyState(j){
         }
         if(val(s.serial)!=null) cd.sendEvent(name:"ecobeeId", value: val(s.serial))
         if(val(s.temp)!=null) cd.sendEvent(name:"temperature", value: cToHub(val(s.temp)), unit:"°${isF()?'F':'C'}")
-        if(val(s.occ)!=null) cd.sendEvent(name:"presence", value: ((val(s.occ) as int)>0?"present":"not present"))
-        if(val(s.motion)!=null) cd.sendEvent(name:"motion", value: (val(s.motion)?"active":"inactive"))
+        if(settings.reportOccupancy!=false && val(s.occ)!=null) cd.sendEvent(name:"presence", value: ((val(s.occ) as int)>0?"present":"not present"))
+        if(settings.reportMotion!=false && val(s.motion)!=null) cd.sendEvent(name:"motion", value: (val(s.motion)?"active":"inactive"))
         if(val(s.batt)!=null) cd.sendEvent(name:"battery", value: val(s.batt) as int, unit:"%")
         if(val(s.lowbatt)!=null) cd.sendEvent(name:"lowBattery", value: ((val(s.lowbatt) as int)==1?"true":"false"))
     }
