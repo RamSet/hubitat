@@ -14,12 +14,13 @@ metadata {
         command "setCharacteristic", [[name:"aid.iid",type:"STRING"],[name:"value",type:"STRING"]]
         command "pair"
         command "discover"
+        command "findThermostat"
         command "detectPort"
         attribute "customParams", "string"
         attribute "hapStatus", "string"
     }
     preferences {
-        input "ip",   "string", title: "Thermostat IP address", required: true
+        input "ip",   "string", title: "Thermostat IP (or use the Find Thermostat command)", required: false
         input "port", "number", title: "HAP port (auto-detected from IP — leave blank)", required: false
         if (!state.paired) {
             input "setupCode", "string", title: "HomeKit setup code (XXX-XX-XXX) — enter it and click Save Preferences to pair", required: false
@@ -148,23 +149,78 @@ def mdnsThen(String op){
          timeout:5, callback:"mdnsCallback"]))
     runIn(6,"mdnsTimeout")
 }
-def mdnsTimeout(){ def op=state.afterMdns; state.afterMdns=null; if(op){ log.warn "HAP: mDNS port detect timed out; using configured port ${settings.port}"; dispatchOp(op) } }
+// one-button discovery: multicast browse, find the ecobee, report IP/port + pairing state
+def findThermostat(){
+    state.afterMdns="find"
+    log.info "HAP: searching the LAN for an ecobee thermostat..."
+    sendEvent(name:"hapStatus", value:"searching…")
+    String q="000000000001000000000000045f686170045f746370056c6f63616c00000c8001"
+    sendHubCommand(new hubitat.device.HubAction(q, hubitat.device.Protocol.LAN,
+        [destinationAddress:"224.0.0.251:5353",
+         type:hubitat.device.HubAction.Type.LAN_TYPE_UDPCLIENT,
+         encoding:hubitat.device.HubAction.Encoding.HEX_STRING,
+         timeout:5, callback:"mdnsCallback"]))
+    runIn(6,"mdnsTimeout")
+}
+def mdnsTimeout(){
+    def op=state.afterMdns; state.afterMdns=null; if(!op) return
+    if(op=="find"){ log.warn "HAP: no ecobee found on the LAN (powered on and on Wi-Fi?)"; sendEvent(name:"hapStatus", value:"no thermostat found") }
+    else { log.warn "HAP: mDNS port detect timed out; using configured port ${settings.port}"; dispatchOp(op) }
+}
 def mdnsCallback(message){
-    unschedule("mdnsTimeout")
     try {
-        String desc = message.toString()
-        log.debug "HAP mdns raw: ${desc}"
+        String desc = message.toString(); log.debug "HAP mdns raw: ${desc}"
         def m = null; try { m = parseLanMessage(desc) } catch(ig){}
         String h = ((m?.payload ?: m?.body ?: desc) ?: "").toString().toLowerCase().replaceAll("[^0-9a-f]","")
-        int i = h.indexOf("00210001"); if(i<0) i = h.indexOf("00218001")
-        if(i>=0 && i+32<=h.length()){
-            int port = Integer.parseInt(h.substring(i+28,i+32), 16)
-            device.updateSetting("port",[value:port,type:"number"]); state.discoveredPort=port
-            log.info "HAP: detected port ${port}"
-        } else { log.warn "HAP: no SRV in mDNS reply: ${desc}" }
+        def r = parseMdns(h)
+        if(state.afterMdns=="find"){
+            if(!r.ecobee) return                     // ignore other HAP responders; keep listening
+            device.updateSetting("ip",[value:r.ip,type:"string"])
+            if(r.port) device.updateSetting("port",[value:r.port,type:"number"])
+            state.afterMdns=null; unschedule("mdnsTimeout")
+            boolean haveKeys = (state.paired || settings.iosLtsk)
+            if(r.sf==1){
+                sendEvent(name:"hapStatus", value:"found ${r.ip} — ready to pair")
+                log.info "HAP: found ecobee at ${r.ip}:${r.port}, UNPAIRED. Enter the on-screen setup code and Save to pair."
+            } else if(haveKeys){
+                sendEvent(name:"hapStatus", value:"found ${r.ip} — paired"); log.info "HAP: found ecobee at ${r.ip}:${r.port}, already paired with Hubitat."; runIn(1,"refresh")
+            } else {
+                sendEvent(name:"hapStatus", value:"found ${r.ip} — paired to another controller; reset HomeKit on the thermostat")
+                log.warn "HAP: ecobee at ${r.ip} is already paired to another controller (Apple Home or a previous setup). To use it here, on the thermostat go Settings > HomeKit > Reset HomeKit, then enter the new setup code and Save."
+            }
+            return
+        }
+        if(r.port){ device.updateSetting("port",[value:r.port,type:"number"]); state.discoveredPort=r.port; log.info "HAP: detected port ${r.port}" }
+        else log.warn "HAP: no SRV in mDNS reply"
+        unschedule("mdnsTimeout")
+        def op=state.afterMdns; state.afterMdns=null; if(op) dispatchOp(op)
     } catch(e){ log.error "mdnsCallback: ${e}" }
-    def op=state.afterMdns; state.afterMdns=null; if(op) dispatchOp(op)
 }
+// minimal mDNS/DNS answer walker -> [ecobee, ip, port, sf]
+Map parseMdns(String h){
+    byte[] b; try { b=hex(h) } catch(e){ return [ecobee:false] }
+    def res=[ecobee:false, ip:null, port:null, sf:-1]
+    if(b==null || b.length<12) return res
+    int qd=((b[4]&0xff)<<8)|(b[5]&0xff)
+    int tot=(((b[6]&0xff)<<8)|(b[7]&0xff))+(((b[8]&0xff)<<8)|(b[9]&0xff))+(((b[10]&0xff)<<8)|(b[11]&0xff))
+    int p=12
+    for(int i=0;i<qd;i++){ p=skipName(b,p); p+=4 }
+    for(int i=0;i<tot && p+10<=b.length;i++){
+        p=skipName(b,p); if(p+10>b.length) break
+        int type=((b[p]&0xff)<<8)|(b[p+1]&0xff)
+        int rdlen=((b[p+8]&0xff)<<8)|(b[p+9]&0xff); int rd=p+10
+        if(type==0x21 && rd+6<=b.length){ res.port=((b[rd+4]&0xff)<<8)|(b[rd+5]&0xff) }
+        else if(type==0x01 && rdlen==4 && rd+4<=b.length){ res.ip="${b[rd]&0xff}.${b[rd+1]&0xff}.${b[rd+2]&0xff}.${b[rd+3]&0xff}" }
+        else if(type==0x10){
+            String t=""; int e=Math.min(rd+rdlen,b.length); for(int k=rd;k<e;k++) t+=(char)(b[k]&0xff); t=t.toLowerCase()
+            if(t.contains("md=ecobee")) res.ecobee=true
+            int si=t.indexOf("sf="); if(si>=0 && si+3<t.length()){ try{ res.sf=Integer.parseInt(t.substring(si+3,si+4)) }catch(ig){} }
+        }
+        p=rd+rdlen
+    }
+    return res
+}
+int skipName(byte[] b, int p){ while(p<b.length){ int l=b[p]&0xff; if(l==0) return p+1; if((l&0xC0)==0xC0) return p+2; p+=1+l }; return p }
 void dispatchOp(String op){ if(op=="pairsetup") pairConnect() else if(op in ["read","discover","write"]) hapStart(op) }
 def pair(){
     if(!settings.setupCode){ log.error "Enter the HomeKit setup code first"; return }

@@ -1,8 +1,8 @@
 {
   "packageName": "Ecobee HAP Thermostat (Local)",
   "author": "RamSet",
-  "version": "0.5.0",
-  "releaseNotes": "0.5.0 - Automatic HAP port detection via unicast mDNS on every refresh/pair (no manual port; auto-corrects port changes). Pair needs only IP + setup code.",
+  "version": "0.6.0",
+  "releaseNotes": "0.6.0 - findThermostat: one-click LAN discovery of the ecobee (IP+port) with pairing-state guidance (ready to pair / already paired elsewhere -> reset HomeKit / paired with Hubitat). IP & port now optional.",
   "category": "Thermostats",
   "tags": "Thermostat, ecobee, HomeKit, HAP, Local, Sensor",
   "dateReleased": "2026-06-24",
