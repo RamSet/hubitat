@@ -475,7 +475,7 @@ void applyState(j){
     // ---- custom params -> attribute (only when present; events are partial) ----
     def params=[:]; TCHARS.each{ iid,label-> if(label.startsWith("c_") && g(iid)!=null) params[label]= g(iid) }
     if(params){ sendEvent(name:"customParams", value: groovy.json.JsonOutput.toJson(params)) }
-    rep("READ temp=${cToHub(g(19))} hum=${g(24)} mode=${[0:'off',1:'heat',2:'cool',3:'auto'][g(18) as int]} op=${[0:'idle',1:'heating',2:'cooling'][g(17) as int]} params=${params}")
+    rep("READ temp=${cToHub(g(19))} hum=${g(24)} mode=${g(18)!=null?[0:'off',1:'heat',2:'cool',3:'auto'][g(18) as int]:'-'} op=${g(17)!=null?[0:'idle',1:'heating',2:'cooling'][g(17) as int]:'-'} params=${params}")
     // ---- discovered sensors -> child devices (update only present attrs; events are partial) ----
     (state.sensors ?: []).each{ s->
         def val={ iid-> (iid!=null)? vmap["${s.aid}.${iid}"] : null }

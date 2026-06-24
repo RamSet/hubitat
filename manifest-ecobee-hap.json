@@ -1,8 +1,8 @@
 {
   "packageName": "Ecobee HAP Thermostat (Local)",
   "author": "RamSet",
-  "version": "0.8.0",
-  "releaseNotes": "0.8.0 - HAP event push (beta, opt-in via liveStart): persistent encrypted session + characteristic subscriptions for instant updates; auto-reconnect + keepalive. liveStop to return to polling.",
+  "version": "0.8.1",
+  "releaseNotes": "0.8.1 - Fix null cast in debug log on partial event updates. HAP event push working (instant updates via persistent session).",
   "category": "Thermostats",
   "tags": "Thermostat, ecobee, HomeKit, HAP, Local, Sensor",
   "dateReleased": "2026-06-24",
