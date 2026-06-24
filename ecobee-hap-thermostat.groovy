@@ -1,3 +1,56 @@
+/*
+ * Ecobee HAP Thermostat (Local)
+ *
+ * Description:
+ *   Controls an ecobee thermostat 100% locally over the HomeKit Accessory
+ *   Protocol (HAP) — no cloud account, no Apple hardware, no extra bridge or
+ *   hub. The driver pairs directly with the thermostat using its 8-digit
+ *   HomeKit setup code, then holds a persistent encrypted LAN session for
+ *   mode, setpoints, temperature, humidity, operating state, fan, and resume.
+ *   Remote room sensors are created automatically as child devices, and HAP
+ *   event push keeps everything updated in real time. Pairing uses one of the
+ *   thermostat's HomeKit slots; resetting HomeKit on the device frees a slot.
+ *
+ * Author: RamSet
+ * Version: 0.9.0
+ * Date: 2026-06-24
+ *
+ * Changelog:
+ *  v0.9.0 - HAP event push is now the default: a paired thermostat auto-opens a
+ *           persistent encrypted session, subscribes for instant updates, and
+ *           self-recovers (5-minute keepalive + auto-reconnect). Reads and writes
+ *           route over the live session. Removed the manual Live/Discover and
+ *           advanced setup commands, the Configuration capability, and the poll
+ *           interval — none are needed anymore.
+ *
+ *  v0.8.0 - In-driver pairing (enter IP + setup code, Save to pair) and automatic
+ *           HAP port discovery via mDNS, so no port has to be configured by hand.
+ *           Mode-aware setpoint writes so heat/cool and auto (dual-setpoint)
+ *           targets actually apply on the device.
+ *
+ *  v0.5.0 - Remote room sensors exposed as child devices (temperature, occupancy,
+ *           motion, battery). Added humidity and operating-state reporting.
+ *
+ *  v0.3.0 - Initial release: fully-local HAP control of the ecobee — pair-verify,
+ *           ChaCha20-Poly1305 encrypted session, and thermostat read/write, all on
+ *           the hub with no cloud and no additional hardware.
+ *
+ * HPM Metadata:
+ * {
+ *   "package": "Ecobee HAP Thermostat (Local)",
+ *   "namespace": "RamSet",
+ *   "author": "RamSet",
+ *   "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/ecobee-hap-thermostat.groovy",
+ *   "description": "Local HAP controller for an ecobee thermostat: mode, setpoints, temperature, humidity, operating state, fan, and remote sensors.",
+ *   "required": true,
+ *   "version": "0.9.0"
+ * }
+ *
+ * Copyright 2026 RamSet
+ * Licensed under the Apache License, Version 2.0. Provided as-is, without warranty
+ * of any kind; you assume all risk of controlling real HVAC hardware with it.
+ */
+
 import groovy.transform.Field
 
 metadata {

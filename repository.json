@@ -37,6 +37,12 @@
       "category": "Convenience",
       "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/manifest-blinds-dusk.json",
       "description": "Lowers a room's blind at dusk, waits for an open window to close first (with an optional delay), and turns on the room light when occupied. One instance per room."
+    },
+    {
+      "name": "Ecobee HAP Thermostat (Local)",
+      "category": "Thermostats",
+      "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/manifest-ecobee-hap.json",
+      "description": "Control an ecobee thermostat 100% locally over HomeKit/HAP — no cloud, no Apple hardware, no bridge. In-driver pairing, mode/setpoints/humidity/operating state, remote room sensors as child devices, and real-time HAP event push."
     }
   ]
 }
