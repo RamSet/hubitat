@@ -59,6 +59,7 @@ metadata {
         command "raiseSetpoint"
         command "lowerSetpoint"
         command "resumeProgram"
+        command "setCharacteristic", [[name:"aid.iid*",type:"STRING",description:"HAP characteristic, e.g. 1.40"],[name:"value*",type:"STRING",description:"value to write (number or string)"]]
         attribute "customParams", "string"
         attribute "hapStatus", "string"
     }
@@ -310,6 +311,7 @@ void adjustSetpoint(BigDecimal d){
     } else { log.info "HAP: mode is off — nothing to adjust" }
 }
 def resumeProgram(){ writeChar(TAID,48, true) }
+def setCharacteristic(String aidIid, String value){ def p=aidIid.split("\\."); def v = value.isNumber()? (value.contains(".")? (value as BigDecimal):(value as Integer)) : value; writeChar(p[0] as long, p[1] as int, v) }
 def setThermostatFanMode(String m){ writeChar(TAID,75, (m?.toLowerCase()=="on")?1:0) }
 def fanOn(){ setThermostatFanMode("on") }
 def fanAuto(){ setThermostatFanMode("auto") }
