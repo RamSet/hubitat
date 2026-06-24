@@ -226,7 +226,7 @@ Map parseMdns(String h){
     return res
 }
 int skipName(byte[] b, int p){ while(p<b.length){ int l=b[p]&0xff; if(l==0) return p+1; if((l&0xC0)==0xC0) return p+2; p+=1+l }; return p }
-void dispatchOp(String op){ if(op=="pairsetup") pairConnect() else if(op in ["read","discover","write"]) hapStart(op) }
+void dispatchOp(String op){ if(op=="pairsetup") pairConnect() else if(op in ["read","discover","write"]) hapStart(op, op=="write"? state.writeJson : null) }
 def pair(){
     if(!settings.setupCode){ log.error "Enter the HomeKit setup code first"; return }
     if(!settings.ip){ log.error "Set the thermostat IP first"; return }
