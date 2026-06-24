@@ -12,10 +12,15 @@
  *   thermostat's HomeKit slots; resetting HomeKit on the device frees a slot.
  *
  * Author: RamSet
- * Version: 0.9.0
+ * Version: 0.10.0
  * Date: 2026-06-24
  *
  * Changelog:
+ *  v0.10.0 - Comfort profiles over local HAP: Set Comfort Profile (Home/Away/Sleep) and a
+ *           comfortProfile attribute that reports the active one. Added humidifier target
+ *           (Set Humidity Setpoint) and fan min-on-time controls, plus a generic Set
+ *           Characteristic command for direct writes. None of this needs the cloud.
+ *
  *  v0.9.0 - HomeKit event push is now the default: a paired thermostat auto-opens a
  *           persistent encrypted session, subscribes for instant updates, and
  *           self-recovers (5-minute keepalive + auto-reconnect). Reads and writes
@@ -35,7 +40,7 @@
  *   "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/ecobee-hap-thermostat.groovy",
  *   "description": "Local HAP controller for an ecobee thermostat: mode, setpoints, temperature, humidity, operating state, fan, and remote sensors.",
  *   "required": true,
- *   "version": "0.9.0"
+ *   "version": "0.10.0"
  * }
  *
  * Copyright 2026 RamSet
@@ -59,7 +64,13 @@ metadata {
         command "raiseSetpoint"
         command "lowerSetpoint"
         command "resumeProgram"
+        command "setComfortProfile", [[name:"profile*",type:"ENUM",constraints:["Home","Away","Sleep"]]]
+        command "setHumiditySetpoint", [[name:"humidity %*",type:"NUMBER",description:"target humidity, 20-50"]]
+        command "setFanMinOnTime", [[name:"minutes per hour*",type:"NUMBER",description:"fan minimum runtime per hour, 0-55"]]
         command "setCharacteristic", [[name:"aid.iid*",type:"STRING",description:"HAP characteristic, e.g. 1.40"],[name:"value*",type:"STRING",description:"value to write (number or string)"]]
+        attribute "comfortProfile", "string"
+        attribute "humiditySetpoint", "number"
+        attribute "fanMinOnTime", "number"
         attribute "customParams", "string"
         attribute "hapStatus", "string"
     }
@@ -311,6 +322,10 @@ void adjustSetpoint(BigDecimal d){
     } else { log.info "HAP: mode is off — nothing to adjust" }
 }
 def resumeProgram(){ writeChar(TAID,48, true) }
+// ecobee comfort profiles over HAP iid40 (write) — confirmed mapping: Home=0, Sleep=1, Away=2 (3=manual hold, read-only)
+def setComfortProfile(String p){ def v=[Home:0,Sleep:1,Away:2][p]; if(v!=null){ writeChar(TAID,40, v as int) } else log.warn "HAP: unknown comfort profile $p" }
+def setHumiditySetpoint(h){ writeChar(TAID,25, (h as BigDecimal)) }
+def setFanMinOnTime(m){ writeChar(TAID,52, (m as int)) }
 def setCharacteristic(String aidIid, String value){ def p=aidIid.split("\\."); def v = value.isNumber()? (value.contains(".")? (value as BigDecimal):(value as Integer)) : value; writeChar(p[0] as long, p[1] as int, v) }
 def setThermostatFanMode(String m){ writeChar(TAID,75, (m?.toLowerCase()=="on")?1:0) }
 def fanOn(){ setThermostatFanMode("on") }
@@ -511,6 +526,9 @@ void applyState(j){
     if(g(18)!=null) sendEvent(name:"thermostatMode", value: [0:"off",1:"heat",2:"cool",3:"auto"][g(18) as int])
     if(g(17)!=null) sendEvent(name:"thermostatOperatingState", value: [0:"idle",1:"heating",2:"cooling"][g(17) as int])
     if(g(75)!=null) sendEvent(name:"thermostatFanMode", value: (g(75) as int)==1?"on":"auto")
+    if(g(33)!=null) sendEvent(name:"comfortProfile", value: [0:"Home",1:"Sleep",2:"Away",3:"Hold"][g(33) as int] ?: "Hold")
+    if(g(25)!=null) sendEvent(name:"humiditySetpoint", value: g(25) as int, unit:"%")
+    if(g(52)!=null) sendEvent(name:"fanMinOnTime", value: g(52) as int)
     // (thermostat's own motion/occupancy not reported — capabilities commented out above)
     sendEvent(name:"supportedThermostatModes", value: '["off","heat","cool","auto"]')
     sendEvent(name:"supportedThermostatFanModes", value: '["on","auto"]')
