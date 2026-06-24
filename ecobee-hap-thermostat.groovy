@@ -16,22 +16,14 @@
  * Date: 2026-06-24
  *
  * Changelog:
- *  v0.9.0 - HAP event push is now the default: a paired thermostat auto-opens a
+ *  v0.9.0 - HomeKit event push is now the default: a paired thermostat auto-opens a
  *           persistent encrypted session, subscribes for instant updates, and
  *           self-recovers (5-minute keepalive + auto-reconnect). Reads and writes
- *           route over the live session. Removed the manual Live/Discover and
- *           advanced setup commands, the Configuration capability, and the poll
- *           interval — none are needed anymore.
+ *           route over the live session. In-driver pairing (enter IP + setup code,
+ *           Save to pair) and automatic port discovery, so nothing is configured by
+ *           hand. Remote room sensors are exposed as child devices.
  *
- *  v0.8.0 - In-driver pairing (enter IP + setup code, Save to pair) and automatic
- *           HAP port discovery via mDNS, so no port has to be configured by hand.
- *           Mode-aware setpoint writes so heat/cool and auto (dual-setpoint)
- *           targets actually apply on the device.
- *
- *  v0.5.0 - Remote room sensors exposed as child devices (temperature, occupancy,
- *           motion, battery). Added humidity and operating-state reporting.
- *
- *  v0.3.0 - Initial release: fully-local HAP control of the ecobee — pair-verify,
+ *  v0.3.0 - Initial release: fully-local control of the ecobee — pair-verify,
  *           ChaCha20-Poly1305 encrypted session, and thermostat read/write, all on
  *           the hub with no cloud and no additional hardware.
  *

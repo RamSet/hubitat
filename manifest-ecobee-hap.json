@@ -2,7 +2,7 @@
   "packageName": "Ecobee HAP Thermostat (Local)",
   "author": "RamSet",
   "version": "0.9.0",
-  "releaseNotes": "0.9.0 - HAP event push is now the DEFAULT (auto-starts when paired; instant updates; 5-min keepalive + auto-reconnect; reads/writes route over the live session). Removed manual Live/Discover/Set Characteristic/Set Activity commands and the Configuration capability + poll interval (no longer needed). Leaner command set: Set Desired Temperature, Raise/Lower Setpoint, Resume Program + standard thermostat controls.",
+  "releaseNotes": "0.9.0 - Controls an ecobee 100% locally over the HomeKit Accessory Protocol (HAP) — no cloud, no Apple hardware, no bridge. HomeKit event push is now the DEFAULT (auto-starts when paired; instant updates; 5-min keepalive + auto-reconnect; reads/writes route over the live session). In-driver pairing (enter IP + setup code, Save to pair) with automatic port discovery. Leaner command set: Set Desired Temperature, Raise/Lower Setpoint, Resume Program + standard thermostat controls. Remote room sensors are exposed as child devices.",
   "category": "Thermostats",
   "tags": "Thermostat, ecobee, HomeKit, HAP, Local, Sensor",
   "dateReleased": "2026-06-24",
@@ -14,7 +14,7 @@
       "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/ecobee-hap-thermostat.groovy",
       "required": true,
       "oauth": false,
-      "description": "Local HAP controller for ecobee thermostat: mode, setpoints, temperature, humidity, operating state, and all reachable configurable parameters."
+      "description": "Local controller for an ecobee thermostat over the HomeKit Accessory Protocol (HAP): mode, setpoints, temperature, humidity, operating state, and fan."
     },
     {
       "id": "935d2240-6916-42b5-8832-73e418754f92",
