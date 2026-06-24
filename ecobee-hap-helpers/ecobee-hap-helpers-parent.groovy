@@ -56,8 +56,8 @@ def mainPage() {
 def installed() { log.info "Local Ecobee Helpers installed" }
 def updated()   { log.info "Local Ecobee Helpers updated" }
 
-// shared accessor used by child apps
-def getThermostat() { return thermostat }
+// shared accessor used by child apps (settings.thermostat avoids getter self-recursion)
+def getThermostat() { return settings.thermostat }
 
 // aggregate the per-vent floors reported by Room Vent children
 Map belowFloorReport() {
