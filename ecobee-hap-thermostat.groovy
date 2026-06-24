@@ -73,6 +73,7 @@ metadata {
         attribute "fanMinOnTime", "number"
         attribute "customParams", "string"
         attribute "hapStatus", "string"
+        attribute "diag", "string"
     }
     preferences {
         input "ip", "string", title: "Thermostat IP address", required: true
@@ -114,7 +115,7 @@ metadata {
 
 def installed(){ updated() }
 def updated(){
-    unschedule(); state.live=false
+    unschedule(); state.live=false; state.diag=[]; if(settings.debugLog) sendEvent(name:"diag", value:"")
     if(settings.setupCode && !isPaired()){ log.info "HAP: setup code entered — pairing"; runIn(1,"pair") }
     else if(isPaired()){ runIn(2,"startLive") }   // live event mode is the default once paired
 }
@@ -179,9 +180,23 @@ String uuidStr(){ String h=hx(rnd32()); return "${h[0..7]}-${h[8..11]}-${h[12..1
 void rep(String m){ if(settings.debugLog) log.debug "HAP: ${m}" }
 
 // ===== public commands =====
+// ---- flow diagnostics (read remotely via the 'diag' attribute / fullJson) ----
+String nowHM(){ try{ return new Date().format("HH:mm:ss", location.timeZone) }catch(e){ return "--:--:--" } }
+void dlog(String m){
+    if(!settings.debugLog) return
+    def b = (state.diag instanceof List) ? state.diag : []
+    b << "${nowHM()} ${m}".toString()
+    while(b.size()>28) b.remove(0)
+    state.diag = b
+    sendEvent(name:"diag", value: b.join("\n"))
+}
 def refresh(){
-    if(state.live && state.sess){ sendEncrypted("GET /characteristics?id=${readIds()} HTTP/1.1\r\nHost: ${settings.ip}\r\n\r\n") }
-    else { startLive() }
+    if(state.live && state.sess){
+        String gids=readIds(); String req="GET /characteristics?id=${gids} HTTP/1.1\r\nHost: ${settings.ip}\r\n\r\n"
+        dlog("TX get ids=${gids.split(',').size()} reqLen=${req.length()}")
+        sendEncrypted(req)
+    }
+    else { dlog("refresh: not live/sess -> startLive"); startLive() }
 }
 // mDNS-detect the HAP port, then run the queued op (auto-corrects port changes; no manual port needed)
 def mdnsThen(String op){
@@ -429,8 +444,10 @@ void doM4(Map tv){
     sendEvent(name:"hapStatus", value:"session")
     if(state.op=="live"){
         state.live=true; sendEvent(name:"hapStatus", value:"live"); log.info "HAP: live session up — subscribing to events"
+        dlog("session up (live) -> subscribe + get")
         sendEncrypted(subscribeBody())
-        sendEncrypted("GET /characteristics?id=${readIds()} HTTP/1.1\r\nHost: ${settings.ip}\r\n\r\n")
+        String gids=readIds(); dlog("TX get(connect) ids=${gids.split(',').size()} reqLen=${("GET /characteristics?id=${gids} HTTP/1.1\r\nHost: ${settings.ip}\r\n\r\n").length()}")
+        sendEncrypted("GET /characteristics?id=${gids} HTTP/1.1\r\nHost: ${settings.ip}\r\n\r\n")
     }
     else if(state.op=="read"){ sendEncrypted("GET /characteristics?id=${readIds()} HTTP/1.1\r\nHost: ${settings.ip}\r\n\r\n") }
     else if(state.op=="discover"){ sendEncrypted("GET /accessories HTTP/1.1\r\nHost: ${settings.ip}\r\n\r\n") }
@@ -443,6 +460,7 @@ void handleSession(){
         if(buf.length()<need) break
         byte[] aad=hex(buf.substring(0,4)); byte[] blk=hex(buf.substring(4,need)); RX.delete(0,need); buf=RX.toString()
         byte[] pt=chachaDec(hex(state.a2c),nctr(state.inCtr),blk,aad); state.inCtr=(state.inCtr as long)+1; PLAIN.append(hx(pt))
+        dlog("RXframe ln=${ln} inCtr=${state.inCtr} plain=${(int)(PLAIN.length()/2)}b rxLeft=${(int)(RX.length()/2)}b")
         if(state.op!="live" && ln<1024){ finish(); return }
     }
     if(state.op=="live") processLiveStream()
@@ -490,16 +508,16 @@ String subscribeBody(){
 void processLiveStream(){
     String s = new String(hex(PLAIN.toString()), "ISO-8859-1"); int consumed=0
     while(true){
-        int he=s.indexOf("\r\n\r\n", consumed); if(he<0) break
+        int he=s.indexOf("\r\n\r\n", consumed); if(he<0){ if(s.length()>consumed) dlog("PLS partial-header left=${s.length()-consumed}b"); break }
         String head=s.substring(consumed, he); int bodyStart=he+4; int msgEnd; String body=""
         if(head.toLowerCase().contains("chunked")){
-            int term=s.indexOf("0\r\n\r\n", bodyStart); if(term<0) break
+            int term=s.indexOf("0\r\n\r\n", bodyStart); if(term<0){ dlog("PLS chunked-incomplete left=${s.length()-bodyStart}b"); break }
             String rest=s.substring(bodyStart, term); StringBuilder sb=new StringBuilder()
             while(rest.length()>0){ int nl=rest.indexOf("\r\n"); if(nl<0) break; int n=Integer.parseInt(rest.substring(0,nl).trim(),16); if(n==0) break; sb.append(rest.substring(nl+2,nl+2+n)); rest=rest.substring(nl+2+n+2) }
             body=sb.toString(); msgEnd=term+5
         } else {
             int cl=0; def mm=(head =~ /(?i)content-length:\s*(\d+)/); if(mm.find()) cl=mm.group(1) as int
-            if(s.length()<bodyStart+cl) break
+            if(s.length()<bodyStart+cl){ dlog("PLS body-incomplete have=${s.length()-bodyStart}/${cl}"); break }
             body=s.substring(bodyStart, bodyStart+cl); msgEnd=bodyStart+cl
         }
         handleLiveMessage(head, body); consumed=msgEnd
@@ -507,11 +525,13 @@ void processLiveStream(){
     if(consumed>0){ byte[] left=s.substring(consumed).getBytes("ISO-8859-1"); PLAIN.setLength(0); PLAIN.append(hx(left)) }
 }
 void handleLiveMessage(String head, String body){
-    rep("LIVE ${head.split('\r\n')[0]} (${body.length()}b)")
-    if(!body?.trim()) return
-    def j; try{ j=new groovy.json.JsonSlurper().parseText(body) }catch(e){ return }
-    if(j?.accessories){ buildSensors(j); return }
-    if(j?.characteristics){ applyState(j) }
+    String fl=head.split('\r\n')[0]
+    rep("LIVE ${fl} (${body.length()}b)")
+    if(!body?.trim()){ dlog("HDL ${fl} body=0 (empty)"); return }
+    def j; try{ j=new groovy.json.JsonSlurper().parseText(body) }catch(e){ dlog("HDL ${fl} body=${body.length()} PARSE-FAIL: ${e.message}"); return }
+    if(j?.accessories){ dlog("HDL ${fl} body=${body.length()} -> ACCESSORIES"); buildSensors(j); return }
+    if(j?.characteristics){ dlog("HDL ${fl} body=${body.length()} -> CHARS(${j.characteristics.size()})"); applyState(j) }
+    else dlog("HDL ${fl} body=${body.length()} -> other-json")
 }
 void applyState(j){
     def vmap=[:]   // "aid.iid" -> value
