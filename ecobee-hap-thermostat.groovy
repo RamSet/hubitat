@@ -14,6 +14,7 @@ metadata {
         command "setCharacteristic", [[name:"aid.iid",type:"STRING"],[name:"value",type:"STRING"]]
         command "pair"
         command "discover"
+        command "detectPort"
         attribute "customParams", "string"
         attribute "hapStatus", "string"
     }
@@ -134,6 +135,31 @@ def refresh(){
     if(state.sensors==null){ hapStart("discover", null) } else { hapStart("read", null) }
 }
 def discover(){ hapStart("discover", null) }
+def detectPort(){
+    if(!settings.ip){ log.warn "HAP: set IP first"; return }
+    // unicast mDNS query: PTR _hap._tcp.local (QU bit) -> device replies with SRV (port) + A (ip)
+    String q="000000000001000000000000045f686170045f746370056c6f63616c00000c8001"
+    log.info "HAP: querying ${settings.ip}:5353 for HAP port"
+    sendHubCommand(new hubitat.device.HubAction(q, hubitat.device.Protocol.LAN,
+        [destinationAddress:"${settings.ip}:5353",
+         type:hubitat.device.HubAction.Type.LAN_TYPE_UDPCLIENT,
+         encoding:hubitat.device.HubAction.Encoding.HEX_STRING,
+         timeout:6, callback:"mdnsCallback"]))
+}
+def mdnsCallback(message){
+    try {
+        String desc = (message instanceof String) ? message : (message?.description ?: "${message}")
+        log.debug "HAP mdns raw: ${desc}"
+        def m = null; try { m = parseLanMessage(desc) } catch(ig){}
+        String h = ((m?.payload ?: m?.body ?: desc) ?: "").toString().toLowerCase().replaceAll("[^0-9a-f]","")
+        int i = h.indexOf("00210001"); if(i<0) i = h.indexOf("00218001")
+        if(i<0 || i+32>h.length()){ log.warn "HAP: no SRV in mDNS reply: ${desc}"; return }
+        int port = Integer.parseInt(h.substring(i+28,i+32), 16)
+        device.updateSetting("port",[value:port,type:"number"]); state.discoveredPort=port
+        sendEvent(name:"hapStatus", value:"detected port ${port}")
+        log.info "HAP: detected port ${port}"
+    } catch(e){ log.error "mdnsCallback: ${e}" }
+}
 def pair(){
     if(!settings.setupCode){ log.error "Enter the HomeKit setup code first"; return }
     if(!settings.ip || !settings.port){ log.error "Set IP and port first"; return }

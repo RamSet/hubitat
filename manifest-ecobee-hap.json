@@ -1,8 +1,8 @@
 {
   "packageName": "Ecobee HAP Thermostat (Local)",
   "author": "RamSet",
-  "version": "0.4.3",
-  "releaseNotes": "0.4.3 - Fix: add missing edPub() so in-driver pairing completes M5/M6 with a valid code.",
+  "version": "0.4.4",
+  "releaseNotes": "0.4.4 - Add detectPort: auto-detect HAP port via unicast mDNS to the thermostat IP.",
   "category": "Thermostats",
   "tags": "Thermostat, ecobee, HomeKit, HAP, Local, Sensor",
   "dateReleased": "2026-06-24",
