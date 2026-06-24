@@ -1,8 +1,8 @@
 {
   "packageName": "Ecobee HAP Thermostat (Local)",
   "author": "RamSet",
-  "version": "0.8.4",
-  "releaseNotes": "0.8.4 - Add Set Desired Temperature command (labeled input field on the device page) to set the target setpoint directly.",
+  "version": "0.8.5",
+  "releaseNotes": "0.8.5 - Reorder commands (everyday first, advanced/setup last). Clear one-time pairing secrets from state after pairing.",
   "category": "Thermostats",
   "tags": "Thermostat, ecobee, HomeKit, HAP, Local, Sensor",
   "dateReleased": "2026-06-24",

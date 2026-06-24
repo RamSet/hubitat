@@ -11,15 +11,17 @@ metadata {
         //capability "PresenceSensor"
         capability "Refresh"
         capability "Configuration"
+        // --- everyday ---
         command "setDesiredTemperature", [[name:"Desired temperature*",type:"NUMBER",description:"Target temperature to set on the thermostat"]]
         command "raiseSetpoint"
         command "lowerSetpoint"
         command "resumeProgram"
         command "setActivity", [[name:"climate",type:"NUMBER",description:"0=home 1=away 2=sleep"]]
-        command "setCharacteristic", [[name:"aid.iid",type:"STRING"],[name:"value",type:"STRING"]]
+        // --- advanced / setup (rarely needed) ---
+        command "discover"
         command "liveStart"
         command "liveStop"
-        command "discover"
+        command "setCharacteristic", [[name:"aid.iid",type:"STRING"],[name:"value",type:"STRING"]]
         attribute "customParams", "string"
         attribute "hapStatus", "string"
     }
@@ -245,6 +247,7 @@ void psM6(Map tv){
     device.updateSetting("accPairingId",[value:new String(accId,"UTF-8"),type:"string"])
     device.updateSetting("setupCode",[value:"",type:"string"])
     state.paired=true
+    ["srpK","srpA","srpM1","psSeed","psEncKey","psPid","shared"].each{ state.remove(it) }   // tidy one-time pairing secrets
     sendEvent(name:"hapStatus", value:"paired"); log.info "HAP: paired OK, keys stored"
     interfaces.rawSocket.close(); runIn(3,"refresh")
 }
