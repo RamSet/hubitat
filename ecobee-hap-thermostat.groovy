@@ -232,11 +232,12 @@ def pair(){
     if(!settings.ip){ log.error "Set the thermostat IP first"; return }
     mdnsThen("pairsetup")
 }
+int hapPort(){ return (state.discoveredPort ?: settings.port ?: 0) as int }
 void pairConnect(){
-    if(!settings.port){ log.error "HAP: no port (mDNS failed and none configured)"; return }
+    if(hapPort()<=0){ log.error "HAP: no port (mDNS failed and none configured)"; return }
     state.op="pairsetup"; state.sess=false; state.psstage="2"; RX.setLength(0); PLAIN.setLength(0)
     sendEvent(name:"hapStatus", value:"pairing")
-    try { interfaces.rawSocket.connect([byteInterface:true], settings.ip, (settings.port as int)) }
+    try { interfaces.rawSocket.connect([byteInterface:true], settings.ip, hapPort()) }
     catch(e){ log.error "connect: $e"; return }
     sendHttpTlv("/pair-setup", tlv([[6,[1] as byte[]],[0,[0] as byte[]]]))   // State=M1, Method=PairSetup
 }
@@ -344,12 +345,12 @@ void buildSensors(j){
     log.info "HAP: discovered ${sensors.size()} remote sensor(s)"
 }
 def hapStart(String op, String body){
-    if(!settings.ip || !settings.port){ log.warn "HAP: set IP and port first"; return }
+    if(!settings.ip || hapPort()<=0){ log.warn "HAP: set IP first (port auto-detects)"; return }
     state.op=op; state.inCtr=0; state.outCtr=0; RX.setLength(0); PLAIN.setLength(0)
     state.sess=false; state.vstage="m2"
     def ek=genEph(); state.ephPriv=ek.priv; state.ephPub=ek.pub
     sendEvent(name:"hapStatus", value:"connecting")
-    try { interfaces.rawSocket.connect([byteInterface:true], settings.ip, (settings.port as int)) }
+    try { interfaces.rawSocket.connect([byteInterface:true], settings.ip, hapPort()) }
     catch(e){ log.error "connect: $e"; rep("ERR connect $e"); return }
     sendHttpTlv("/pair-verify", tlv([[6,[1] as byte[]],[3,hex(state.ephPub)]]))
 }
