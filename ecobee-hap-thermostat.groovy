@@ -10,18 +10,10 @@ metadata {
         //capability "MotionSensor"
         //capability "PresenceSensor"
         capability "Refresh"
-        capability "Configuration"
-        // --- everyday ---
         command "setDesiredTemperature", [[name:"Desired temperature*",type:"NUMBER",description:"Target temperature to set on the thermostat"]]
         command "raiseSetpoint"
         command "lowerSetpoint"
         command "resumeProgram"
-        command "setActivity", [[name:"climate",type:"NUMBER",description:"0=home 1=away 2=sleep"]]
-        // --- advanced / setup (rarely needed) ---
-        command "discover"
-        command "liveStart"
-        command "liveStop"
-        command "setCharacteristic", [[name:"aid.iid",type:"STRING"],[name:"value",type:"STRING"]]
         attribute "customParams", "string"
         attribute "hapStatus", "string"
     }
@@ -30,7 +22,6 @@ metadata {
         if (!state.paired) {
             input "setupCode", "string", title: "HomeKit setup code — 8 digits, no dashes (e.g. 12345678). Enter and Save to pair.", required: false
         }
-        input "pollMins", "number", title: "Refresh interval (minutes)", defaultValue: 1
         input "debugLog", "bool", title: "Enable debug logging", defaultValue: false
     }
 }
@@ -66,11 +57,11 @@ metadata {
 
 def installed(){ updated() }
 def updated(){
-    unschedule(); state.live=false   // re-import reverts to polling; use liveStart to re-enable events
-    if(settings.setupCode && !state.paired){ log.info "HAP: setup code entered — pairing"; runIn(1,"pair") }
-    else { runIn(2,"refresh") }
+    unschedule(); state.live=false
+    if(settings.setupCode && !isPaired()){ log.info "HAP: setup code entered — pairing"; runIn(1,"pair") }
+    else if(isPaired()){ runIn(2,"startLive") }   // live event mode is the default once paired
 }
-def configure(){ refresh() }
+boolean isPaired(){ return (state.paired==true || settings.iosLtsk) ? true : false }
 
 // ===== helpers =====
 byte[] hex(String s){ hubitat.helper.HexUtils.hexStringToByteArray(s) }
@@ -132,11 +123,9 @@ void rep(String m){ if(settings.debugLog) log.debug "HAP: ${m}" }
 
 // ===== public commands =====
 def refresh(){
-    Integer pm = (settings.pollMins ?: 1) as Integer
-    if(pm>0) runIn(pm*60, "refresh")   // self-reschedule (Thermostat capability shadows schedule())
-    mdnsThen(state.sensors==null ? "discover" : "read")
+    if(state.live && state.sess){ sendEncrypted("GET /characteristics?id=${readIds()} HTTP/1.1\r\nHost: ${settings.ip}\r\n\r\n") }
+    else { startLive() }
 }
-def discover(){ mdnsThen("discover") }
 // mDNS-detect the HAP port, then run the queued op (auto-corrects port changes; no manual port needed)
 def mdnsThen(String op){
     if(!settings.ip){ log.warn "HAP: set IP first"; return }
@@ -249,7 +238,7 @@ void psM6(Map tv){
     state.paired=true
     ["srpK","srpA","srpM1","psSeed","psEncKey","psPid","shared"].each{ state.remove(it) }   // tidy one-time pairing secrets
     sendEvent(name:"hapStatus", value:"paired"); log.info "HAP: paired OK, keys stored"
-    interfaces.rawSocket.close(); runIn(3,"refresh")
+    interfaces.rawSocket.close(); runIn(3,"startLive")
 }
 def setThermostatMode(String m){ def v=[off:0,heat:1,cool:2,auto:3][m?.toLowerCase()]; if(v!=null) writeChar(TAID,18,v) else log.warn "bad mode $m" }
 def off(){ setThermostatMode("off") }
@@ -275,13 +264,11 @@ void adjustSetpoint(BigDecimal d){
         if(c!=null && h!=null) writeChars([[TAID,22,round1(hubToC((c as BigDecimal)+d))],[TAID,23,round1(hubToC((h as BigDecimal)+d))]])
     } else { log.info "HAP: mode is off — nothing to adjust" }
 }
-def setActivity(climate){ writeChar(TAID,40, (climate as int)) }
 def resumeProgram(){ writeChar(TAID,48, true) }
 def setThermostatFanMode(String m){ writeChar(TAID,75, (m?.toLowerCase()=="on")?1:0) }
 def fanOn(){ setThermostatFanMode("on") }
 def fanAuto(){ setThermostatFanMode("auto") }
 def fanCirculate(){ setThermostatFanMode("on") }
-def setCharacteristic(String aidIid, String value){ def parts=aidIid.split("\\."); def v = value.isNumber()? (value.contains(".")? (value as BigDecimal):(value as Integer)) : value; writeChar(parts[0] as long, parts[1] as int, v) }
 def setSchedule(s){}
 
 BigDecimal round1(BigDecimal v){ return (v*10).setScale(0, java.math.RoundingMode.HALF_UP)/10 }
@@ -415,13 +402,12 @@ void finish(){
         body=sb.toString()
     }
     def j; try{ j=new groovy.json.JsonSlurper().parseText(body) }catch(e){ rep("ERR json ${e}; head=${head.split('\r\n')[0]}"); return }
-    if(state.op=="discover"){ buildSensors(j); runIn(1,"refresh"); return }
+    if(state.op=="discover"){ buildSensors(j); runIn(1,"startLive"); return }
     applyState(j)
 }
 // ===== live event mode (persistent session + subscriptions) =====
-def liveStart(){ unschedule("refresh"); startLive() }
-def startLive(){ if(state.sensors==null){ log.warn "HAP: run Refresh once to discover sensors before live mode" }; mdnsThen("live") }
-def liveStop(){ state.live=false; unschedule("startLive"); unschedule("liveKeepalive"); try{ interfaces.rawSocket.close() }catch(e){}; sendEvent(name:"hapStatus", value:"live stopped"); log.info "HAP: live mode stopped" }
+// live event mode is the default: discover sensors if needed, then open the persistent subscribed session
+def startLive(){ if(!isPaired()){ log.warn "HAP: not paired"; return }; mdnsThen(state.sensors==null ? "discover" : "live") }
 void liveConnect(){
     if(hapPort()<=0){ log.warn "HAP: no port"; return }
     state.op="live"; state.inCtr=0; state.outCtr=0; RX.setLength(0); PLAIN.setLength(0); state.sess=false; state.vstage="m2"; state.live=false

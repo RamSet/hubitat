@@ -1,8 +1,8 @@
 {
   "packageName": "Ecobee HAP Thermostat (Local)",
   "author": "RamSet",
-  "version": "0.8.5",
-  "releaseNotes": "0.8.5 - Reorder commands (everyday first, advanced/setup last). Clear one-time pairing secrets from state after pairing.",
+  "version": "0.9.0",
+  "releaseNotes": "0.9.0 - HAP event push is now the DEFAULT (auto-starts when paired; instant updates; 5-min keepalive + auto-reconnect; reads/writes route over the live session). Removed manual Live/Discover/Set Characteristic/Set Activity commands and the Configuration capability + poll interval (no longer needed). Leaner command set: Set Desired Temperature, Raise/Lower Setpoint, Resume Program + standard thermostat controls.",
   "category": "Thermostats",
   "tags": "Thermostat, ecobee, HomeKit, HAP, Local, Sensor",
   "dateReleased": "2026-06-24",
