@@ -20,7 +20,7 @@ metadata {
     }
     preferences {
         input "ip",   "string", title: "Thermostat IP address", required: true
-        input "port", "number", title: "HAP port (mDNS _hap._tcp)", required: true
+        input "port", "number", title: "HAP port (auto-detected from IP — leave blank)", required: false
         if (!state.paired) {
             input "setupCode", "string", title: "HomeKit setup code (XXX-XX-XXX) — enter it and click Save Preferences to pair", required: false
             input "accLtpk",      "string", title: "Advanced: Accessory LTPK (hex) — leave blank to pair with code", required: false
@@ -132,37 +132,47 @@ void rep(String m){ if(settings.debugLog) log.debug "HAP: ${m}" }
 def refresh(){
     Integer pm = (settings.pollMins ?: 5) as Integer
     if(pm>0) runIn(pm*60, "refresh")   // self-reschedule (Thermostat capability shadows schedule())
-    if(state.sensors==null){ hapStart("discover", null) } else { hapStart("read", null) }
+    mdnsThen(state.sensors==null ? "discover" : "read")
 }
-def discover(){ hapStart("discover", null) }
-def detectPort(){
+def discover(){ mdnsThen("discover") }
+def detectPort(){ mdnsThen("none") }
+// mDNS-detect the HAP port, then run the queued op (auto-corrects port changes; no manual port needed)
+def mdnsThen(String op){
     if(!settings.ip){ log.warn "HAP: set IP first"; return }
-    // unicast mDNS query: PTR _hap._tcp.local (QU bit) -> device replies with SRV (port) + A (ip)
+    state.afterMdns = op
     String q="000000000001000000000000045f686170045f746370056c6f63616c00000c8001"
-    log.info "HAP: querying ${settings.ip}:5353 for HAP port"
     sendHubCommand(new hubitat.device.HubAction(q, hubitat.device.Protocol.LAN,
         [destinationAddress:"${settings.ip}:5353",
          type:hubitat.device.HubAction.Type.LAN_TYPE_UDPCLIENT,
          encoding:hubitat.device.HubAction.Encoding.HEX_STRING,
-         timeout:6, callback:"mdnsCallback"]))
+         timeout:5, callback:"mdnsCallback"]))
+    runIn(6,"mdnsTimeout")
 }
+def mdnsTimeout(){ def op=state.afterMdns; state.afterMdns=null; if(op){ log.warn "HAP: mDNS port detect timed out; using configured port ${settings.port}"; dispatchOp(op) } }
 def mdnsCallback(message){
+    unschedule("mdnsTimeout")
     try {
         String desc = message.toString()
         log.debug "HAP mdns raw: ${desc}"
         def m = null; try { m = parseLanMessage(desc) } catch(ig){}
         String h = ((m?.payload ?: m?.body ?: desc) ?: "").toString().toLowerCase().replaceAll("[^0-9a-f]","")
         int i = h.indexOf("00210001"); if(i<0) i = h.indexOf("00218001")
-        if(i<0 || i+32>h.length()){ log.warn "HAP: no SRV in mDNS reply: ${desc}"; return }
-        int port = Integer.parseInt(h.substring(i+28,i+32), 16)
-        device.updateSetting("port",[value:port,type:"number"]); state.discoveredPort=port
-        sendEvent(name:"hapStatus", value:"detected port ${port}")
-        log.info "HAP: detected port ${port}"
+        if(i>=0 && i+32<=h.length()){
+            int port = Integer.parseInt(h.substring(i+28,i+32), 16)
+            device.updateSetting("port",[value:port,type:"number"]); state.discoveredPort=port
+            log.info "HAP: detected port ${port}"
+        } else { log.warn "HAP: no SRV in mDNS reply: ${desc}" }
     } catch(e){ log.error "mdnsCallback: ${e}" }
+    def op=state.afterMdns; state.afterMdns=null; if(op) dispatchOp(op)
 }
+void dispatchOp(String op){ if(op=="pairsetup") pairConnect() else if(op in ["read","discover","write"]) hapStart(op) }
 def pair(){
     if(!settings.setupCode){ log.error "Enter the HomeKit setup code first"; return }
-    if(!settings.ip || !settings.port){ log.error "Set IP and port first"; return }
+    if(!settings.ip){ log.error "Set the thermostat IP first"; return }
+    mdnsThen("pairsetup")
+}
+void pairConnect(){
+    if(!settings.port){ log.error "HAP: no port (mDNS failed and none configured)"; return }
     state.op="pairsetup"; state.sess=false; state.psstage="2"; RX.setLength(0); PLAIN.setLength(0)
     sendEvent(name:"hapStatus", value:"pairing")
     try { interfaces.rawSocket.connect([byteInterface:true], settings.ip, (settings.port as int)) }
