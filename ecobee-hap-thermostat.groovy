@@ -64,7 +64,6 @@ metadata {
 def installed(){ updated() }
 def updated(){
     unschedule()
-    int pm=(settings.pollMins?:5) as int; if(pm>0){ schedule("0 */${pm} * * * ?","refresh") }
     if(settings.setupCode && !state.paired){ log.info "HAP: setup code entered — pairing"; runIn(1,"pair") }
     else { runIn(2,"refresh") }
 }
@@ -128,7 +127,11 @@ String uuidStr(){ String h=hx(rnd32()); return "${h[0..7]}-${h[8..11]}-${h[12..1
 void rep(String m){ if(settings.debugLog) log.debug "HAP: ${m}" }
 
 // ===== public commands =====
-def refresh(){ if(state.sensors==null){ hapStart("discover", null) } else { hapStart("read", null) } }
+def refresh(){
+    Integer pm = (settings.pollMins ?: 5) as Integer
+    if(pm>0) runIn(pm*60, "refresh")   // self-reschedule (Thermostat capability shadows schedule())
+    if(state.sensors==null){ hapStart("discover", null) } else { hapStart("read", null) }
+}
 def discover(){ hapStart("discover", null) }
 def pair(){
     if(!settings.setupCode){ log.error "Enter the HomeKit setup code first"; return }
@@ -142,6 +145,7 @@ def pair(){
 void routePS(Map tv){ if(state.psstage=="2") psM2(tv) else if(state.psstage=="4") psM4(tv) else psM6(tv) }
 void psM2(Map tv){
     if(tv[7]!=null){ sendEvent(name:"hapStatus",value:"pair err M2 ${hx(tv[7])}"); log.error "pair M2 ${hx(tv[7])}"; interfaces.rawSocket.close(); return }
+    if(tv[2]==null || tv[3]==null){ sendEvent(name:"hapStatus",value:"pair fail: no M2 (device busy? wait & retry)"); log.error "M2 missing salt/key"; interfaces.rawSocket.close(); return }
     byte[] salt=tv[2]; byte[] Bb=tv[3]; java.math.BigInteger B=beBig(Bb)
     java.math.BigInteger a=beBig(rnd32()); byte[] Ab=bigBe(SRP_G.modPow(a,SRP_N),384)
     java.math.BigInteger u=beBig(sha512(cat(Ab,Bb)))
@@ -241,6 +245,7 @@ void buildSensors(j){
     log.info "HAP: discovered ${sensors.size()} remote sensor(s)"
 }
 def hapStart(String op, String body){
+    if(!settings.ip || !settings.port){ log.warn "HAP: set IP and port first"; return }
     state.op=op; state.inCtr=0; state.outCtr=0; RX.setLength(0); PLAIN.setLength(0)
     state.sess=false; state.vstage="m2"
     def ek=genEph(); state.ephPriv=ek.priv; state.ephPub=ek.pub

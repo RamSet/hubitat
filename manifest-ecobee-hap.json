@@ -1,8 +1,8 @@
 {
   "packageName": "Ecobee HAP Thermostat (Local)",
   "author": "RamSet",
-  "version": "0.4.0",
-  "releaseNotes": "0.4.0 - Pair by entering the setup code and clicking Save Preferences (auto-pairs); pairing fields hide once paired. Dynamic sensor discovery, fully-local HAP.",
+  "version": "0.4.1",
+  "releaseNotes": "0.4.1 - Fix: Thermostat 'schedule' attribute clashed with scheduling; switch to self-reschedule. Guard missing IP/port and empty M2. Pair via Save Preferences.",
   "category": "Thermostats",
   "tags": "Thermostat, ecobee, HomeKit, HAP, Local, Sensor",
   "dateReleased": "2026-06-24",
