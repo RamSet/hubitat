@@ -107,6 +107,7 @@ List edDecode(byte[] b){ java.math.BigInteger ye=leBig(b); int sign=ye.testBit(2
     def u=y.multiply(y).subtract(java.math.BigInteger.ONE).mod(P),v=D.multiply(y).multiply(y).add(java.math.BigInteger.ONE).mod(P)
     def w=u.multiply(v.modInverse(P)).mod(P),x=w.modPow(P.add(java.math.BigInteger.valueOf(3)).divide(java.math.BigInteger.valueOf(8)),P)
     if(x.multiply(x).mod(P)!=w) x=x.multiply(SQRTM1).mod(P); if(((x.testBit(0))?1:0)!=sign) x=P.subtract(x); return [x,y,java.math.BigInteger.ONE,x.multiply(y).mod(P)] }
+byte[] edPub(byte[] seed){ byte[] h=sha512(seed); byte[] a32=new byte[32]; for(int i=0;i<32;i++) a32[i]=h[i]; a32[0]=(byte)(a32[0]&248); a32[31]=(byte)(a32[31]&127); a32[31]=(byte)(a32[31]|64); return edEnc(edMul(leBig(a32),edBase())) }
 byte[] edSign(byte[] seed, byte[] M){ byte[] h=sha512(seed); byte[] a32=new byte[32],pre=new byte[32]; for(int i=0;i<32;i++){a32[i]=h[i];pre[i]=h[i+32]}
     a32[0]=(byte)(a32[0]&248);a32[31]=(byte)(a32[31]&127);a32[31]=(byte)(a32[31]|64); java.math.BigInteger s=leBig(a32)
     byte[] A=edEnc(edMul(s,edBase())); java.math.BigInteger r=leBig(sha512(cat(pre,M))).mod(L); byte[] R=edEnc(edMul(r,edBase()))
