@@ -31,8 +31,8 @@ def mainPage() {
             input "contacts", "capability.contactSensor", title: "Window/door contact sensor(s)", multiple: true, required: true
         }
         section("Behavior") {
-            input "openDelay",  "number", title: "Delay before pausing after an open (seconds)",        defaultValue: 0, range: "0..3600", required: true
-            input "closeDelay", "number", title: "Delay before resuming after all are closed (seconds)", defaultValue: 0, range: "0..3600", required: true
+            input "openDelay",  "decimal", title: "Delay before pausing after an open (minutes)",        defaultValue: 0, range: "0..240", required: true
+            input "closeDelay", "decimal", title: "Delay before resuming after all are closed (minutes)", defaultValue: 0, range: "0..240", required: true
         }
         section("Notifications") {
             input "notifier", "capability.notification", title: "Send notifications to (optional)", multiple: true, required: false
@@ -60,12 +60,12 @@ private boolean anyOpen() {
 def contactHandler(evt) {
     if (anyOpen()) {
         unschedule(doResume)
-        if ((openDelay ?: 0) > 0) runIn(openDelay as int, doPause)
-        else doPause()
+        int os = toSeconds(openDelay)
+        if (os > 0) runIn(os, doPause) else doPause()
     } else {
         unschedule(doPause)
-        if ((closeDelay ?: 0) > 0) runIn(closeDelay as int, doResume)
-        else doResume()
+        int cs = toSeconds(closeDelay)
+        if (cs > 0) runIn(cs, doResume) else doResume()
     }
 }
 
@@ -78,7 +78,7 @@ def doPause() {
     state.paused = true
     t.off()
     log.info "Open-Contact Pause '${app.label}': contact open → HVAC off (was ${state.priorMode})"
-    String dur = (openDelay ?: 0) > 0 ? " for ${openDelay}s" : ""
+    String dur = toSeconds(openDelay) > 0 ? " for ${humanDelay(openDelay)}" : ""
     sendNote("HVAC paused: ${openContactNames()} open${dur}. Thermostat is now OFF (was ${state.priorMode}).")
 }
 
@@ -92,6 +92,18 @@ def doResume() {
     t.setThermostatMode(m)
     log.info "Open-Contact Pause '${app.label}': all closed → restored ${m}"
     sendNote("All contacts closed. Thermostat is back ON (${m}).")
+}
+
+private int toSeconds(mins) {
+    Math.round(((mins ?: 0) as double) * 60.0d) as int
+}
+
+// "45s" under a minute, otherwise "N min" (one decimal if needed)
+private String humanDelay(mins) {
+    int secs = toSeconds(mins)
+    if (secs < 60) return "${secs}s"
+    double m = secs / 60.0d
+    return (m == Math.floor(m)) ? "${m as int} min" : "${Math.round(m * 10.0d) / 10.0d} min"
 }
 
 private String openContactNames() {
