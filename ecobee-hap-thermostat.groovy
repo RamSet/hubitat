@@ -499,7 +499,21 @@ void liveConnect(){
     sendHttpTlv("/pair-verify", tlv([[6,[1] as byte[]],[3,hex(state.ephPub)]]))
     unschedule("liveKeepalive"); runEvery5Minutes("liveKeepalive")
 }
-def liveKeepalive(){ if(state.live && state.sess){ sendEncrypted("GET /characteristics?id=${TAID}.19 HTTP/1.1\r\nHost: ${settings.ip}\r\n\r\n") } else { startLive() } }
+def liveKeepalive(){
+    if(state.live && state.sess){
+        state.kaCtr = state.inCtr
+        sendEncrypted("GET /characteristics?id=${TAID}.19 HTTP/1.1\r\nHost: ${settings.ip}\r\n\r\n")
+        runIn(12,"kaWatch")
+    } else { startLive() }
+}
+// watchdog: if the keepalive GET drew no frame back, the session is a zombie (socket half-open) — force reconnect
+def kaWatch(){
+    if(state.live && state.sess && (state.inCtr as long)==(state.kaCtr as long)){
+        log.warn "HAP: keepalive got no response — session stale, reconnecting"
+        dlog("keepalive no-resp inCtr=${state.inCtr} -> reconnect")
+        state.live=false; try{ interfaces.rawSocket.close() }catch(e){}; runIn(2,"startLive")
+    }
+}
 String subscribeBody(){
     def ev=[]; [17,18,19,20,22,23,24,25].each{ ev << "{\"aid\":${TAID},\"iid\":${it},\"ev\":true}" }
     (state.sensors ?: []).each{ s-> [s.temp,s.occ,s.motion,s.lowbatt].each{ if(it!=null) ev << "{\"aid\":${s.aid},\"iid\":${it},\"ev\":true}" } }
