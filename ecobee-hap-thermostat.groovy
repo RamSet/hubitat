@@ -69,6 +69,7 @@ metadata {
         command "setFanMinOnTime", [[name:"minutes per hour*",type:"NUMBER",description:"fan minimum runtime per hour, 0-55"]]
         command "setCharacteristic", [[name:"aid.iid*",type:"STRING",description:"HAP characteristic, e.g. 1.40"],[name:"value*",type:"STRING",description:"value to write (number or string)"]]
         attribute "comfortProfile", "string"
+        attribute "holdEndsAt", "string"
         attribute "humiditySetpoint", "number"
         attribute "fanMinOnTime", "number"
         attribute "customParams", "string"
@@ -547,6 +548,7 @@ void applyState(j){
     if(g(17)!=null) sendEvent(name:"thermostatOperatingState", value: [0:"idle",1:"heating",2:"cooling"][g(17) as int])
     if(g(75)!=null) sendEvent(name:"thermostatFanMode", value: (g(75) as int)==1?"on":"auto")
     if(g(33)!=null) sendEvent(name:"comfortProfile", value: [0:"Home",1:"Sleep",2:"Away",3:"Hold"][g(33) as int] ?: "Hold")
+    if(g(41)!=null){ String h=g(41).toString().replaceAll(/S$/,""); sendEvent(name:"holdEndsAt", value: h.startsWith("2014-01-03")?"":h) }
     if(g(25)!=null) sendEvent(name:"humiditySetpoint", value: g(25) as int, unit:"%")
     if(g(52)!=null) sendEvent(name:"fanMinOnTime", value: g(52) as int)
     // (thermostat's own motion/occupancy not reported — capabilities commented out above)
