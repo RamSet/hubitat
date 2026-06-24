@@ -46,7 +46,7 @@
 import groovy.transform.Field
 
 metadata {
-    definition(name: "Ecobee HAP Thermostat", namespace: "RamSet", author: "RamSet") {
+    definition(name: "Ecobee HAP Thermostat", namespace: "RamSet", author: "RamSet", importUrl: "https://raw.githubusercontent.com/RamSet/hubitat/main/ecobee-hap-thermostat.groovy") {
         capability "Thermostat"
         capability "TemperatureMeasurement"
         capability "RelativeHumidityMeasurement"

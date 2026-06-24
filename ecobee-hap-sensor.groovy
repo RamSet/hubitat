@@ -30,7 +30,7 @@
  */
 
 metadata {
-    definition(name: "Ecobee HAP Remote Sensor", namespace: "RamSet", author: "RamSet") {
+    definition(name: "Ecobee HAP Remote Sensor", namespace: "RamSet", author: "RamSet", importUrl: "https://raw.githubusercontent.com/RamSet/hubitat/main/ecobee-hap-sensor.groovy") {
         capability "TemperatureMeasurement"
         capability "MotionSensor"
         capability "PresenceSensor"
