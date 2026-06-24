@@ -149,7 +149,8 @@ void psM2(Map tv){
     byte[] salt=tv[2]; byte[] Bb=tv[3]; java.math.BigInteger B=beBig(Bb)
     java.math.BigInteger a=beBig(rnd32()); byte[] Ab=bigBe(SRP_G.modPow(a,SRP_N),384)
     java.math.BigInteger u=beBig(sha512(cat(Ab,Bb)))
-    java.math.BigInteger x=beBig(sha512(cat(salt, sha512(("Pair-Setup:"+settings.setupCode).getBytes("UTF-8")))))
+    String code=(settings.setupCode?:"").replaceAll("[^0-9]",""); if(code.length()==8) code="${code[0..2]}-${code[3..4]}-${code[5..7]}"
+    java.math.BigInteger x=beBig(sha512(cat(salt, sha512(("Pair-Setup:"+code).getBytes("UTF-8")))))
     java.math.BigInteger base=B.subtract(SRP_K.multiply(SRP_G.modPow(x,SRP_N))).mod(SRP_N)
     byte[] K=sha512(bigBe(base.modPow(a.add(u.multiply(x)),SRP_N),384))
     byte[] hN=sha512(bigBe(SRP_N,384)); byte[] hg=sha512([5] as byte[]); byte[] hxor=new byte[64]; for(int i=0;i<64;i++) hxor[i]=(byte)(hN[i]^hg[i])
