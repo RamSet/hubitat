@@ -16,7 +16,8 @@ definition(
     category:    "Convenience",
     parent:      "RamSet:Local Ecobee Helpers",
     iconUrl:     "",
-    iconX2Url:   ""
+    iconX2Url:   "",
+    importUrl:   "https://raw.githubusercontent.com/RamSet/hubitat/main/ecobee-hap-helpers/ecobee-hap-contact-pause-child.groovy?v=20260624a"
 )
 
 preferences {

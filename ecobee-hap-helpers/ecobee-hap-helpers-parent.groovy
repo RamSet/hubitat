@@ -15,6 +15,7 @@ definition(
     category:    "Convenience",
     iconUrl:     "",
     iconX2Url:   "",
+    importUrl:   "https://raw.githubusercontent.com/RamSet/hubitat/main/ecobee-hap-helpers/ecobee-hap-helpers-parent.groovy?v=20260624a",
     singleInstance: false
 )
 
