@@ -68,7 +68,7 @@ import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 
 metadata {
-    definition(name: "Acuparse Weather Station", namespace: "Mezel", author: "RamSet") {
+    definition(name: "Acuparse Weather Station", namespace: "Mezel", author: "RamSet", importUrl: "https://raw.githubusercontent.com/RamSet/hubitat/main/acuparse-weather-driver.groovy") {
         capability "Sensor"
         capability "Polling"
         capability "Refresh"

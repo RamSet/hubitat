@@ -12,7 +12,7 @@
  */
 
 metadata {
-    definition(name: "Virtual Air Quality (AQI) Driver", namespace: "RamSet", author: "RamSet") {
+    definition(name: "Virtual Air Quality (AQI) Driver", namespace: "RamSet", author: "RamSet", importUrl: "https://raw.githubusercontent.com/RamSet/hubitat/main/VirtualAQIDriver.groovy") {
         capability "Sensor"
         capability "AirQuality"
 
