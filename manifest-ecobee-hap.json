@@ -1,0 +1,29 @@
+{
+  "packageName": "Ecobee HAP Thermostat (Local)",
+  "author": "RamSet",
+  "version": "0.3.0",
+  "releaseNotes": "0.3.0 - Dynamic remote-sensor discovery (no hardcoded IDs; adapts to any ecobee). In-driver pairing. Fully-local HAP control.",
+  "category": "Thermostats",
+  "tags": "Thermostat, ecobee, HomeKit, HAP, Local, Sensor",
+  "dateReleased": "2026-06-24",
+  "drivers": [
+    {
+      "id": "511b25e3-4ca2-413e-a1f7-351ff50cd3b1",
+      "name": "Ecobee HAP Thermostat",
+      "namespace": "RamSet",
+      "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/ecobee-hap-thermostat.groovy",
+      "required": true,
+      "oauth": false,
+      "description": "Local HAP controller for ecobee thermostat: mode, setpoints, temperature, humidity, operating state, and all reachable configurable parameters."
+    },
+    {
+      "id": "935d2240-6916-42b5-8832-73e418754f92",
+      "name": "Ecobee HAP Remote Sensor",
+      "namespace": "RamSet",
+      "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/ecobee-hap-sensor.groovy",
+      "required": true,
+      "oauth": false,
+      "description": "Child device for ecobee remote sensors (temperature, occupancy, motion, battery). Created automatically by the thermostat driver."
+    }
+  ]
+}
