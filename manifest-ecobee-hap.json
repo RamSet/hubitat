@@ -1,8 +1,8 @@
 {
   "packageName": "Ecobee HAP Thermostat (Local)",
   "author": "RamSet",
-  "version": "0.6.3",
-  "releaseNotes": "0.6.3 - Fix: use mDNS-discovered port immediately (settings.port doesn't refresh same execution). Pair/refresh with blank port now works.",
+  "version": "0.7.0",
+  "releaseNotes": "0.7.0 - Cleanup: prefs reduced to IP + 8-digit setup code (port auto-detected, hidden once paired). Removed pair/detectPort/findThermostat commands (pairing auto-runs on Save). Added Raise/Lower Setpoint buttons that write the thermostat setpoint. Default refresh 1 min.",
   "category": "Thermostats",
   "tags": "Thermostat, ecobee, HomeKit, HAP, Local, Sensor",
   "dateReleased": "2026-06-24",

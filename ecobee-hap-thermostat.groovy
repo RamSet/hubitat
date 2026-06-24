@@ -9,27 +9,21 @@ metadata {
         capability "PresenceSensor"
         capability "Refresh"
         capability "Configuration"
-        command "setActivity", [[name:"climate",type:"NUMBER",description:"0=home 1=away 2=sleep ..."]]
+        command "raiseSetpoint"
+        command "lowerSetpoint"
         command "resumeProgram"
+        command "setActivity", [[name:"climate",type:"NUMBER",description:"0=home 1=away 2=sleep"]]
         command "setCharacteristic", [[name:"aid.iid",type:"STRING"],[name:"value",type:"STRING"]]
-        command "pair"
         command "discover"
-        command "findThermostat"
-        command "detectPort"
         attribute "customParams", "string"
         attribute "hapStatus", "string"
     }
     preferences {
-        input "ip",   "string", title: "Thermostat IP (or use the Find Thermostat command)", required: false
-        input "port", "number", title: "HAP port (auto-detected from IP — leave blank)", required: false
+        input "ip", "string", title: "Thermostat IP address", required: true
         if (!state.paired) {
-            input "setupCode", "string", title: "HomeKit setup code (XXX-XX-XXX) — enter it and click Save Preferences to pair", required: false
-            input "accLtpk",      "string", title: "Advanced: Accessory LTPK (hex) — leave blank to pair with code", required: false
-            input "accPairingId", "string", title: "Advanced: Accessory Pairing ID", required: false
-            input "iosLtsk",      "string", title: "Advanced: Controller LTSK (hex)", required: false
-            input "iosPairingId", "string", title: "Advanced: Controller Pairing ID", required: false
+            input "setupCode", "string", title: "HomeKit setup code — 8 digits, no dashes (e.g. 12345678). Enter and Save to pair.", required: false
         }
-        input "pollMins", "number", title: "Refresh interval (minutes)", defaultValue: 5
+        input "pollMins", "number", title: "Refresh interval (minutes)", defaultValue: 1
         input "debugLog", "bool", title: "Enable debug logging", defaultValue: false
     }
 }
@@ -131,12 +125,11 @@ void rep(String m){ if(settings.debugLog) log.debug "HAP: ${m}" }
 
 // ===== public commands =====
 def refresh(){
-    Integer pm = (settings.pollMins ?: 5) as Integer
+    Integer pm = (settings.pollMins ?: 1) as Integer
     if(pm>0) runIn(pm*60, "refresh")   // self-reschedule (Thermostat capability shadows schedule())
     mdnsThen(state.sensors==null ? "discover" : "read")
 }
 def discover(){ mdnsThen("discover") }
-def detectPort(){ mdnsThen("none") }
 // mDNS-detect the HAP port, then run the queued op (auto-corrects port changes; no manual port needed)
 def mdnsThen(String op){
     if(!settings.ip){ log.warn "HAP: set IP first"; return }
@@ -149,25 +142,9 @@ def mdnsThen(String op){
          timeout:5, callback:"mdnsCallback"]))
     runIn(6,"mdnsTimeout")
 }
-// one-button discovery: multicast browse, find the ecobee, report IP/port + pairing state
-def findThermostat(){
-    state.afterMdns="find"; state.findTries=0
-    log.info "HAP: searching the LAN for an ecobee thermostat..."
-    sendEvent(name:"hapStatus", value:"searching…")
-    sendFindQuery(); runIn(9,"mdnsTimeout")
-}
-void sendFindQuery(){
-    String q="000000000001000000000000045f686170045f746370056c6f63616c00000c8001"
-    sendHubCommand(new hubitat.device.HubAction(q, hubitat.device.Protocol.LAN,
-        [destinationAddress:"224.0.0.251:5353",
-         type:hubitat.device.HubAction.Type.LAN_TYPE_UDPCLIENT,
-         encoding:hubitat.device.HubAction.Encoding.HEX_STRING,
-         timeout:2, callback:"mdnsCallback"]))
-}
 def mdnsTimeout(){
     def op=state.afterMdns; state.afterMdns=null; if(!op) return
-    if(op=="find"){ log.warn "HAP: no ecobee found on the LAN (powered on and on Wi-Fi?)"; sendEvent(name:"hapStatus", value:"no thermostat found") }
-    else { log.warn "HAP: mDNS port detect timed out; using configured port ${settings.port}"; dispatchOp(op) }
+    log.warn "HAP: mDNS port detect timed out; using last-known port"; dispatchOp(op)
 }
 def mdnsCallback(message){
     try {
@@ -175,26 +152,6 @@ def mdnsCallback(message){
         def m = null; try { m = parseLanMessage(desc) } catch(ig){}
         String h = ((m?.payload ?: m?.body ?: desc) ?: "").toString().toLowerCase().replaceAll("[^0-9a-f]","")
         def r = parseMdns(h)
-        if(state.afterMdns=="find"){
-            if(!r.ecobee){                            // other HAP responder — re-query (Hubitat captures only one reply per send)
-                if((state.findTries?:0) < 12){ state.findTries=(state.findTries?:0)+1; sendFindQuery() }
-                return
-            }
-            device.updateSetting("ip",[value:r.ip,type:"string"])
-            if(r.port) device.updateSetting("port",[value:r.port,type:"number"])
-            state.afterMdns=null; unschedule("mdnsTimeout")
-            boolean haveKeys = (state.paired || settings.iosLtsk)
-            if(r.sf==1){
-                sendEvent(name:"hapStatus", value:"found ${r.ip} — ready to pair")
-                log.info "HAP: found ecobee at ${r.ip}:${r.port}, UNPAIRED. Enter the on-screen setup code and Save to pair."
-            } else if(haveKeys){
-                sendEvent(name:"hapStatus", value:"found ${r.ip} — paired"); log.info "HAP: found ecobee at ${r.ip}:${r.port}, already paired with Hubitat."; runIn(1,"refresh")
-            } else {
-                sendEvent(name:"hapStatus", value:"found ${r.ip} — paired to another controller; reset HomeKit on the thermostat")
-                log.warn "HAP: ecobee at ${r.ip} is already paired to another controller (Apple Home or a previous setup). To use it here, on the thermostat go Settings > HomeKit > Reset HomeKit, then enter the new setup code and Save."
-            }
-            return
-        }
         if(r.port){ device.updateSetting("port",[value:r.port,type:"number"]); state.discoveredPort=r.port; log.info "HAP: detected port ${r.port}" }
         else log.warn "HAP: no SRV in mDNS reply"
         unschedule("mdnsTimeout")
@@ -295,6 +252,17 @@ def emergencyHeat(){ setThermostatMode("heat") }
 def setHeatingSetpoint(t){ writeChar(TAID,23, round1(hubToC(t as BigDecimal))) }
 def setCoolingSetpoint(t){ writeChar(TAID,22, round1(hubToC(t as BigDecimal))) }
 def setThermostatSetpoint(t){ writeChar(TAID,20, round1(hubToC(t as BigDecimal))) }
+def raiseSetpoint(){ adjustSetpoint(1) }
+def lowerSetpoint(){ adjustSetpoint(-1) }
+void adjustSetpoint(BigDecimal d){
+    String mode = device.currentValue("thermostatMode")
+    if(mode=="cool"){ def c=device.currentValue("coolingSetpoint"); if(c!=null) setCoolingSetpoint((c as BigDecimal)+d) }
+    else if(mode=="heat"){ def h=device.currentValue("heatingSetpoint"); if(h!=null) setHeatingSetpoint((h as BigDecimal)+d) }
+    else if(mode=="auto"){
+        def c=device.currentValue("coolingSetpoint"); def h=device.currentValue("heatingSetpoint")
+        if(c!=null && h!=null) writeChars([[TAID,22,round1(hubToC((c as BigDecimal)+d))],[TAID,23,round1(hubToC((h as BigDecimal)+d))]])
+    } else { log.info "HAP: mode is off — nothing to adjust" }
+}
 def setActivity(climate){ writeChar(TAID,40, (climate as int)) }
 def resumeProgram(){ writeChar(TAID,48, true) }
 def setThermostatFanMode(String m){ writeChar(TAID,75, (m?.toLowerCase()=="on")?1:0) }
@@ -309,11 +277,12 @@ boolean isF(){ return (location?.temperatureScale ?: "F") == "F" }
 def hubToC(BigDecimal t){ isF()? ((t-32)*5/9) : t }
 def cToHub(v){ if(v==null) return null; def c=(v as BigDecimal); return isF()? round1(c*9/5+32) : round1(c) }
 
-void writeChar(long aid, int iid, val){
-    def jv = (val instanceof Boolean) ? val : ((val instanceof Number)? val : "\"${val}\"")
-    state.writeJson = "{\"characteristics\":[{\"aid\":${aid},\"iid\":${iid},\"value\":${jv}}]}"
+void writeChars(List entries){
+    def parts = entries.collect{ e-> def jv=(e[2] instanceof Boolean)? e[2] : ((e[2] instanceof Number)? e[2] : "\"${e[2]}\""); "{\"aid\":${e[0]},\"iid\":${e[1]},\"value\":${jv}}" }
+    state.writeJson = "{\"characteristics\":[${parts.join(',')}]}"
     hapStart("write", state.writeJson)
 }
+void writeChar(long aid, int iid, val){ writeChars([[aid,iid,val]]) }
 
 // ===== HAP session flow =====
 String readIds(){
