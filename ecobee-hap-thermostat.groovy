@@ -20,11 +20,13 @@ metadata {
     preferences {
         input "ip",   "string", title: "Thermostat IP address", required: true
         input "port", "number", title: "HAP port (mDNS _hap._tcp)", required: true
-        input "setupCode", "string", title: "HomeKit setup code XXX-XX-XXX (initial pairing only; click Pair)", required: false
-        input "accLtpk",      "string", title: "Accessory LTPK (hex)",  required: true
-        input "accPairingId", "string", title: "Accessory Pairing ID",  required: true
-        input "iosLtsk",      "string", title: "Controller LTSK (hex)", required: true
-        input "iosPairingId", "string", title: "Controller Pairing ID", required: true
+        if (!state.paired) {
+            input "setupCode", "string", title: "HomeKit setup code (XXX-XX-XXX) — enter it and click Save Preferences to pair", required: false
+            input "accLtpk",      "string", title: "Advanced: Accessory LTPK (hex) — leave blank to pair with code", required: false
+            input "accPairingId", "string", title: "Advanced: Accessory Pairing ID", required: false
+            input "iosLtsk",      "string", title: "Advanced: Controller LTSK (hex)", required: false
+            input "iosPairingId", "string", title: "Advanced: Controller Pairing ID", required: false
+        }
         input "pollMins", "number", title: "Refresh interval (minutes)", defaultValue: 5
         input "debugLog", "bool", title: "Enable debug logging", defaultValue: false
     }
@@ -60,7 +62,12 @@ metadata {
 @Field static java.math.BigInteger SRP_K = new java.math.BigInteger("a9c2e2559bf0ebb53f0cbbf62282906bede7f2182f00678211fbd5bde5b285033a4993503b87397f9be5ec02080fedbc0835587ad039060879b8621e8c3659e0",16)
 
 def installed(){ updated() }
-def updated(){ unschedule(); int pm=(settings.pollMins?:5) as int; if(pm>0){ schedule("0 */${pm} * * * ?","refresh") }; runIn(2,"refresh") }
+def updated(){
+    unschedule()
+    int pm=(settings.pollMins?:5) as int; if(pm>0){ schedule("0 */${pm} * * * ?","refresh") }
+    if(settings.setupCode && !state.paired){ log.info "HAP: setup code entered — pairing"; runIn(1,"pair") }
+    else { runIn(2,"refresh") }
+}
 def configure(){ refresh() }
 
 // ===== helpers =====
@@ -171,6 +178,7 @@ void psM6(Map tv){
     device.updateSetting("accLtpk",[value:hx(accLtpk),type:"string"])
     device.updateSetting("accPairingId",[value:new String(accId,"UTF-8"),type:"string"])
     device.updateSetting("setupCode",[value:"",type:"string"])
+    state.paired=true
     sendEvent(name:"hapStatus", value:"paired"); log.info "HAP: paired OK, keys stored"
     interfaces.rawSocket.close(); runIn(3,"refresh")
 }

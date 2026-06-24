@@ -1,8 +1,8 @@
 {
   "packageName": "Ecobee HAP Thermostat (Local)",
   "author": "RamSet",
-  "version": "0.3.0",
-  "releaseNotes": "0.3.0 - Dynamic remote-sensor discovery (no hardcoded IDs; adapts to any ecobee). In-driver pairing. Fully-local HAP control.",
+  "version": "0.4.0",
+  "releaseNotes": "0.4.0 - Pair by entering the setup code and clicking Save Preferences (auto-pairs); pairing fields hide once paired. Dynamic sensor discovery, fully-local HAP.",
   "category": "Thermostats",
   "tags": "Thermostat, ecobee, HomeKit, HAP, Local, Sensor",
   "dateReleased": "2026-06-24",
