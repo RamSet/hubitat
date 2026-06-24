@@ -14,6 +14,8 @@ metadata {
         command "resumeProgram"
         command "setActivity", [[name:"climate",type:"NUMBER",description:"0=home 1=away 2=sleep"]]
         command "setCharacteristic", [[name:"aid.iid",type:"STRING"],[name:"value",type:"STRING"]]
+        command "liveStart"
+        command "liveStop"
         command "discover"
         attribute "customParams", "string"
         attribute "hapStatus", "string"
@@ -183,7 +185,7 @@ Map parseMdns(String h){
     return res
 }
 int skipName(byte[] b, int p){ while(p<b.length){ int l=b[p]&0xff; if(l==0) return p+1; if((l&0xC0)==0xC0) return p+2; p+=1+l }; return p }
-void dispatchOp(String op){ if(op=="pairsetup") pairConnect() else if(op in ["read","discover","write"]) hapStart(op, op=="write"? state.writeJson : null) }
+void dispatchOp(String op){ if(op=="pairsetup") pairConnect() else if(op=="live") liveConnect() else if(op in ["read","discover","write"]) hapStart(op, op=="write"? state.writeJson : null) }
 def pair(){
     if(!settings.setupCode){ log.error "Enter the HomeKit setup code first"; return }
     if(!settings.ip){ log.error "Set the thermostat IP first"; return }
@@ -279,8 +281,9 @@ def cToHub(v){ if(v==null) return null; def c=(v as BigDecimal); return isF()? r
 
 void writeChars(List entries){
     def parts = entries.collect{ e-> def jv=(e[2] instanceof Boolean)? e[2] : ((e[2] instanceof Number)? e[2] : "\"${e[2]}\""); "{\"aid\":${e[0]},\"iid\":${e[1]},\"value\":${jv}}" }
-    state.writeJson = "{\"characteristics\":[${parts.join(',')}]}"
-    hapStart("write", state.writeJson)
+    String b = "{\"characteristics\":[${parts.join(',')}]}"; state.writeJson = b
+    if(state.live && state.sess){ sendEncrypted("PUT /characteristics HTTP/1.1\r\nHost: ${settings.ip}\r\nContent-Type: application/hap+json\r\nContent-Length: ${b.getBytes('UTF-8').length}\r\nConnection: keep-alive\r\n\r\n"+b); runIn(2,"liveKeepalive") }
+    else { hapStart("write", b) }
 }
 void writeChar(long aid, int iid, val){ writeChars([[aid,iid,val]]) }
 
@@ -328,7 +331,11 @@ void sendEncrypted(String req){ byte[] plain=req.getBytes("UTF-8"); def o=new ja
     for(int i=0;i<plain.length;i+=1024){ int n=Math.min(1024,plain.length-i); byte[] ch=new byte[n]; for(int j=0;j<n;j++) ch[j]=plain[i+j]
         byte[] aad=le16(n); byte[] ct=chachaEnc(hex(state.c2a),nctr(ctr),ch,aad); ctr++; o.write(aad,0,2); o.write(ct,0,ct.length) }
     state.outCtr=ctr; interfaces.rawSocket.sendMessage(hx(o.toByteArray())) }
-def socketStatus(String s){ if(!s?.toLowerCase()?.contains("close")) log.warn "socket: $s" }
+def socketStatus(String s){
+    String l = s?.toLowerCase() ?: ""
+    if(state.live && (l.contains("close") || l.contains("error"))){ state.live=false; sendEvent(name:"hapStatus", value:"reconnecting"); log.warn "HAP: live socket dropped (${s}); reconnecting"; runIn(8,"startLive") }
+    else if(!l.contains("close")) log.warn "socket: $s"
+}
 
 def parse(String message){
   try {
@@ -361,7 +368,12 @@ void doM4(Map tv){
     state.a2c=hx(hkdf("Control-Salt".getBytes("UTF-8"),shared,"Control-Read-Encryption-Key".getBytes("UTF-8"),32))
     state.sess=true; RX.setLength(0); PLAIN.setLength(0); state.inCtr=0
     sendEvent(name:"hapStatus", value:"session")
-    if(state.op=="read"){ sendEncrypted("GET /characteristics?id=${readIds()} HTTP/1.1\r\nHost: ${settings.ip}\r\n\r\n") }
+    if(state.op=="live"){
+        state.live=true; sendEvent(name:"hapStatus", value:"live"); log.info "HAP: live session up — subscribing to events"
+        sendEncrypted(subscribeBody())
+        sendEncrypted("GET /characteristics?id=${readIds()} HTTP/1.1\r\nHost: ${settings.ip}\r\n\r\n")
+    }
+    else if(state.op=="read"){ sendEncrypted("GET /characteristics?id=${readIds()} HTTP/1.1\r\nHost: ${settings.ip}\r\n\r\n") }
     else if(state.op=="discover"){ sendEncrypted("GET /accessories HTTP/1.1\r\nHost: ${settings.ip}\r\n\r\n") }
     else { String b=state.writeJson; sendEncrypted("PUT /characteristics HTTP/1.1\r\nHost: ${settings.ip}\r\nContent-Type: application/hap+json\r\nContent-Length: ${b.getBytes('UTF-8').length}\r\nConnection: keep-alive\r\n\r\n"+b) }
 }
@@ -369,11 +381,12 @@ void handleSession(){
     String buf=RX.toString()
     while(buf.length()>=4){
         byte[] lh=hex(buf.substring(0,4)); int ln=(lh[0]&0xff)|((lh[1]&0xff)<<8); int need=4+(ln+16)*2
-        if(buf.length()<need) return
+        if(buf.length()<need) break
         byte[] aad=hex(buf.substring(0,4)); byte[] blk=hex(buf.substring(4,need)); RX.delete(0,need); buf=RX.toString()
         byte[] pt=chachaDec(hex(state.a2c),nctr(state.inCtr),blk,aad); state.inCtr=(state.inCtr as long)+1; PLAIN.append(hx(pt))
-        if(ln<1024){ finish(); return }
+        if(state.op!="live" && ln<1024){ finish(); return }
     }
+    if(state.op=="live") processLiveStream()
 }
 void finish(){
     byte[] resp=hex(PLAIN.toString()); String s=new String(resp,"UTF-8"); state.sess=false; state.vstage=null
@@ -395,6 +408,53 @@ void finish(){
     if(state.op=="discover"){ buildSensors(j); runIn(1,"refresh"); return }
     applyState(j)
 }
+// ===== live event mode (persistent session + subscriptions) =====
+def liveStart(){ unschedule("refresh"); startLive() }
+def startLive(){ if(state.sensors==null){ log.warn "HAP: run Refresh once to discover sensors before live mode" }; mdnsThen("live") }
+def liveStop(){ state.live=false; unschedule("startLive"); unschedule("liveKeepalive"); try{ interfaces.rawSocket.close() }catch(e){}; sendEvent(name:"hapStatus", value:"live stopped"); log.info "HAP: live mode stopped" }
+void liveConnect(){
+    if(hapPort()<=0){ log.warn "HAP: no port"; return }
+    state.op="live"; state.inCtr=0; state.outCtr=0; RX.setLength(0); PLAIN.setLength(0); state.sess=false; state.vstage="m2"; state.live=false
+    def ek=genEph(); state.ephPriv=ek.priv; state.ephPub=ek.pub
+    sendEvent(name:"hapStatus", value:"connecting (live)")
+    try { interfaces.rawSocket.connect([byteInterface:true], settings.ip, hapPort()) }
+    catch(e){ log.error "live connect: $e"; runIn(15,"startLive"); return }
+    sendHttpTlv("/pair-verify", tlv([[6,[1] as byte[]],[3,hex(state.ephPub)]]))
+    unschedule("liveKeepalive"); runEvery5Minutes("liveKeepalive")
+}
+def liveKeepalive(){ if(state.live && state.sess){ sendEncrypted("GET /characteristics?id=${TAID}.19 HTTP/1.1\r\nHost: ${settings.ip}\r\n\r\n") } else { startLive() } }
+String subscribeBody(){
+    def ev=[]; [17,18,19,20,22,23,24,25,65,66].each{ ev << "{\"aid\":${TAID},\"iid\":${it},\"ev\":true}" }
+    (state.sensors ?: []).each{ s-> [s.temp,s.occ,s.motion,s.lowbatt].each{ if(it!=null) ev << "{\"aid\":${s.aid},\"iid\":${it},\"ev\":true}" } }
+    String b="{\"characteristics\":[${ev.join(',')}]}"
+    return "PUT /characteristics HTTP/1.1\r\nHost: ${settings.ip}\r\nContent-Type: application/hap+json\r\nContent-Length: ${b.getBytes('UTF-8').length}\r\nConnection: keep-alive\r\n\r\n"+b
+}
+void processLiveStream(){
+    String s = new String(hex(PLAIN.toString()), "ISO-8859-1"); int consumed=0
+    while(true){
+        int he=s.indexOf("\r\n\r\n", consumed); if(he<0) break
+        String head=s.substring(consumed, he); int bodyStart=he+4; int msgEnd; String body=""
+        if(head.toLowerCase().contains("chunked")){
+            int term=s.indexOf("0\r\n\r\n", bodyStart); if(term<0) break
+            String rest=s.substring(bodyStart, term); StringBuilder sb=new StringBuilder()
+            while(rest.length()>0){ int nl=rest.indexOf("\r\n"); if(nl<0) break; int n=Integer.parseInt(rest.substring(0,nl).trim(),16); if(n==0) break; sb.append(rest.substring(nl+2,nl+2+n)); rest=rest.substring(nl+2+n+2) }
+            body=sb.toString(); msgEnd=term+5
+        } else {
+            int cl=0; def mm=(head =~ /(?i)content-length:\s*(\d+)/); if(mm.find()) cl=mm.group(1) as int
+            if(s.length()<bodyStart+cl) break
+            body=s.substring(bodyStart, bodyStart+cl); msgEnd=bodyStart+cl
+        }
+        handleLiveMessage(head, body); consumed=msgEnd
+    }
+    if(consumed>0){ byte[] left=s.substring(consumed).getBytes("ISO-8859-1"); PLAIN.setLength(0); PLAIN.append(hx(left)) }
+}
+void handleLiveMessage(String head, String body){
+    rep("LIVE ${head.split('\r\n')[0]} (${body.length()}b)")
+    if(!body?.trim()) return
+    def j; try{ j=new groovy.json.JsonSlurper().parseText(body) }catch(e){ return }
+    if(j?.accessories){ buildSensors(j); return }
+    if(j?.characteristics){ applyState(j) }
+}
 void applyState(j){
     def vmap=[:]   // "aid.iid" -> value
     j.characteristics.each{ vmap["${it.aid}.${it.iid}"]= it.value }
@@ -412,19 +472,21 @@ void applyState(j){
     if(g(65)!=null) sendEvent(name:"presence", value: ((g(65) as int)>0? "present":"not present"))
     sendEvent(name:"supportedThermostatModes", value: '["off","heat","cool","auto"]')
     sendEvent(name:"supportedThermostatFanModes", value: '["on","auto"]')
-    // ---- all custom params -> attribute + log ----
-    def params=[:]; TCHARS.each{ iid,label-> if(label.startsWith("c_")) params[label]= g(iid) }
-    sendEvent(name:"customParams", value: groovy.json.JsonOutput.toJson(params))
+    // ---- custom params -> attribute (only when present; events are partial) ----
+    def params=[:]; TCHARS.each{ iid,label-> if(label.startsWith("c_") && g(iid)!=null) params[label]= g(iid) }
+    if(params){ sendEvent(name:"customParams", value: groovy.json.JsonOutput.toJson(params)) }
     rep("READ temp=${cToHub(g(19))} hum=${g(24)} mode=${[0:'off',1:'heat',2:'cool',3:'auto'][g(18) as int]} op=${[0:'idle',1:'heating',2:'cooling'][g(17) as int]} params=${params}")
-    // ---- discovered sensors -> child devices ----
+    // ---- discovered sensors -> child devices (update only present attrs; events are partial) ----
     (state.sensors ?: []).each{ s->
         def val={ iid-> (iid!=null)? vmap["${s.aid}.${iid}"] : null }
-        if(val(s.temp)==null) return
-        String nm = val(s.name) ?: "Ecobee Sensor ${s.aid}"
-        def dni="hap-${s.aid}"; def cd=getChildDevice(dni)
-        if(!cd){ try{ cd=addChildDevice("RamSet","Ecobee HAP Remote Sensor",dni,[name:nm,label:nm]) }catch(e){ log.warn "child ${s.aid}: ${e}"; return } }
+        def cd=getChildDevice("hap-${s.aid}")
+        if(!cd){
+            if(val(s.temp)==null) return   // need initial data to create
+            String nm = val(s.name) ?: "Ecobee Sensor ${s.aid}"
+            try{ cd=addChildDevice("RamSet","Ecobee HAP Remote Sensor","hap-${s.aid}",[name:nm,label:nm]) }catch(e){ log.warn "child ${s.aid}: ${e}"; return }
+        }
         if(val(s.serial)!=null) cd.sendEvent(name:"ecobeeId", value: val(s.serial))
-        cd.sendEvent(name:"temperature", value: cToHub(val(s.temp)), unit:"°${isF()?'F':'C'}")
+        if(val(s.temp)!=null) cd.sendEvent(name:"temperature", value: cToHub(val(s.temp)), unit:"°${isF()?'F':'C'}")
         if(val(s.occ)!=null) cd.sendEvent(name:"presence", value: ((val(s.occ) as int)>0?"present":"not present"))
         if(val(s.motion)!=null) cd.sendEvent(name:"motion", value: (val(s.motion)?"active":"inactive"))
         if(val(s.batt)!=null) cd.sendEvent(name:"battery", value: val(s.batt) as int, unit:"%")
