@@ -11,6 +11,7 @@ metadata {
         //capability "PresenceSensor"
         capability "Refresh"
         capability "Configuration"
+        command "setDesiredTemperature", [[name:"Desired temperature*",type:"NUMBER",description:"Target temperature to set on the thermostat"]]
         command "raiseSetpoint"
         command "lowerSetpoint"
         command "resumeProgram"
@@ -257,6 +258,10 @@ def emergencyHeat(){ setThermostatMode("heat") }
 def setHeatingSetpoint(t){ writeChar(TAID, (device.currentValue("thermostatMode")=="auto")?23:20, round1(hubToC(t as BigDecimal))) }
 def setCoolingSetpoint(t){ writeChar(TAID, (device.currentValue("thermostatMode")=="auto")?22:20, round1(hubToC(t as BigDecimal))) }
 def setThermostatSetpoint(t){ writeChar(TAID,20, round1(hubToC(t as BigDecimal))) }
+def setDesiredTemperature(t){
+    String m=device.currentValue("thermostatMode"); BigDecimal c=round1(hubToC(t as BigDecimal))
+    if(m=="auto"){ writeChars([[TAID,22,c],[TAID,23,c]]) } else { writeChar(TAID,20,c) }
+}
 def raiseSetpoint(){ adjustSetpoint(1) }
 def lowerSetpoint(){ adjustSetpoint(-1) }
 void adjustSetpoint(BigDecimal d){

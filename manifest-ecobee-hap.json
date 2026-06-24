@@ -1,8 +1,8 @@
 {
   "packageName": "Ecobee HAP Thermostat (Local)",
   "author": "RamSet",
-  "version": "0.8.3",
-  "releaseNotes": "0.8.3 - Fix setpoint writes (use TargetTemperature in heat/cool so changes apply; thresholds only in auto). Thermostat's own motion/occupancy capabilities commented out (uncomment to enable); sensors keep them.",
+  "version": "0.8.4",
+  "releaseNotes": "0.8.4 - Add Set Desired Temperature command (labeled input field on the device page) to set the target setpoint directly.",
   "category": "Thermostats",
   "tags": "Thermostat, ecobee, HomeKit, HAP, Local, Sensor",
   "dateReleased": "2026-06-24",
