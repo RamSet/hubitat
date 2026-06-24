@@ -5,8 +5,10 @@ metadata {
         capability "Thermostat"
         capability "TemperatureMeasurement"
         capability "RelativeHumidityMeasurement"
-        capability "MotionSensor"
-        capability "PresenceSensor"
+        // The thermostat's own motion/occupancy are DISABLED by default (the room sensors report these on
+        // their child devices). To expose them on the thermostat too, UNCOMMENT the next two lines and re-import/Save.
+        //capability "MotionSensor"
+        //capability "PresenceSensor"
         capability "Refresh"
         capability "Configuration"
         command "raiseSetpoint"
@@ -26,8 +28,6 @@ metadata {
             input "setupCode", "string", title: "HomeKit setup code — 8 digits, no dashes (e.g. 12345678). Enter and Save to pair.", required: false
         }
         input "pollMins", "number", title: "Refresh interval (minutes)", defaultValue: 1
-        input "reportMotion", "bool", title: "Report motion (thermostat + sensors)", defaultValue: true
-        input "reportOccupancy", "bool", title: "Report occupancy/presence (thermostat + sensors)", defaultValue: true
         input "debugLog", "bool", title: "Enable debug logging", defaultValue: false
     }
 }
@@ -63,7 +63,7 @@ metadata {
 
 def installed(){ updated() }
 def updated(){
-    unschedule()
+    unschedule(); state.live=false   // re-import reverts to polling; use liveStart to re-enable events
     if(settings.setupCode && !state.paired){ log.info "HAP: setup code entered — pairing"; runIn(1,"pair") }
     else { runIn(2,"refresh") }
 }
@@ -253,15 +253,15 @@ def heat(){ setThermostatMode("heat") }
 def cool(){ setThermostatMode("cool") }
 def auto(){ setThermostatMode("auto") }
 def emergencyHeat(){ setThermostatMode("heat") }
-def setHeatingSetpoint(t){ writeChar(TAID,23, round1(hubToC(t as BigDecimal))) }
-def setCoolingSetpoint(t){ writeChar(TAID,22, round1(hubToC(t as BigDecimal))) }
+// HAP: in heat/cool the active setpoint is TargetTemperature (iid20); thresholds (22/23) apply only in auto
+def setHeatingSetpoint(t){ writeChar(TAID, (device.currentValue("thermostatMode")=="auto")?23:20, round1(hubToC(t as BigDecimal))) }
+def setCoolingSetpoint(t){ writeChar(TAID, (device.currentValue("thermostatMode")=="auto")?22:20, round1(hubToC(t as BigDecimal))) }
 def setThermostatSetpoint(t){ writeChar(TAID,20, round1(hubToC(t as BigDecimal))) }
 def raiseSetpoint(){ adjustSetpoint(1) }
 def lowerSetpoint(){ adjustSetpoint(-1) }
 void adjustSetpoint(BigDecimal d){
     String mode = device.currentValue("thermostatMode")
-    if(mode=="cool"){ def c=device.currentValue("coolingSetpoint"); if(c!=null) setCoolingSetpoint((c as BigDecimal)+d) }
-    else if(mode=="heat"){ def h=device.currentValue("heatingSetpoint"); if(h!=null) setHeatingSetpoint((h as BigDecimal)+d) }
+    if(mode=="cool" || mode=="heat"){ def sp=device.currentValue("thermostatSetpoint"); if(sp!=null) writeChar(TAID,20, round1(hubToC((sp as BigDecimal)+d))) }
     else if(mode=="auto"){
         def c=device.currentValue("coolingSetpoint"); def h=device.currentValue("heatingSetpoint")
         if(c!=null && h!=null) writeChars([[TAID,22,round1(hubToC((c as BigDecimal)+d))],[TAID,23,round1(hubToC((h as BigDecimal)+d))]])
@@ -426,14 +426,8 @@ void liveConnect(){
 }
 def liveKeepalive(){ if(state.live && state.sess){ sendEncrypted("GET /characteristics?id=${TAID}.19 HTTP/1.1\r\nHost: ${settings.ip}\r\n\r\n") } else { startLive() } }
 String subscribeBody(){
-    def ev=[]; def t=[17,18,19,20,22,23,24,25]
-    if(settings.reportMotion!=false) t<<66
-    if(settings.reportOccupancy!=false) t<<65
-    t.each{ ev << "{\"aid\":${TAID},\"iid\":${it},\"ev\":true}" }
-    (state.sensors ?: []).each{ s-> def list=[s.temp,s.lowbatt]
-        if(settings.reportOccupancy!=false) list<<s.occ
-        if(settings.reportMotion!=false) list<<s.motion
-        list.each{ if(it!=null) ev << "{\"aid\":${s.aid},\"iid\":${it},\"ev\":true}" } }
+    def ev=[]; [17,18,19,20,22,23,24,25].each{ ev << "{\"aid\":${TAID},\"iid\":${it},\"ev\":true}" }
+    (state.sensors ?: []).each{ s-> [s.temp,s.occ,s.motion,s.lowbatt].each{ if(it!=null) ev << "{\"aid\":${s.aid},\"iid\":${it},\"ev\":true}" } }
     String b="{\"characteristics\":[${ev.join(',')}]}"
     return "PUT /characteristics HTTP/1.1\r\nHost: ${settings.ip}\r\nContent-Type: application/hap+json\r\nContent-Length: ${b.getBytes('UTF-8').length}\r\nConnection: keep-alive\r\n\r\n"+b
 }
@@ -476,8 +470,7 @@ void applyState(j){
     if(g(18)!=null) sendEvent(name:"thermostatMode", value: [0:"off",1:"heat",2:"cool",3:"auto"][g(18) as int])
     if(g(17)!=null) sendEvent(name:"thermostatOperatingState", value: [0:"idle",1:"heating",2:"cooling"][g(17) as int])
     if(g(75)!=null) sendEvent(name:"thermostatFanMode", value: (g(75) as int)==1?"on":"auto")
-    if(settings.reportMotion!=false && g(66)!=null) sendEvent(name:"motion", value: (g(66)? "active":"inactive"))
-    if(settings.reportOccupancy!=false && g(65)!=null) sendEvent(name:"presence", value: ((g(65) as int)>0? "present":"not present"))
+    // (thermostat's own motion/occupancy not reported — capabilities commented out above)
     sendEvent(name:"supportedThermostatModes", value: '["off","heat","cool","auto"]')
     sendEvent(name:"supportedThermostatFanModes", value: '["on","auto"]')
     // ---- custom params -> attribute (only when present; events are partial) ----
@@ -495,8 +488,8 @@ void applyState(j){
         }
         if(val(s.serial)!=null) cd.sendEvent(name:"ecobeeId", value: val(s.serial))
         if(val(s.temp)!=null) cd.sendEvent(name:"temperature", value: cToHub(val(s.temp)), unit:"°${isF()?'F':'C'}")
-        if(settings.reportOccupancy!=false && val(s.occ)!=null) cd.sendEvent(name:"presence", value: ((val(s.occ) as int)>0?"present":"not present"))
-        if(settings.reportMotion!=false && val(s.motion)!=null) cd.sendEvent(name:"motion", value: (val(s.motion)?"active":"inactive"))
+        if(val(s.occ)!=null) cd.sendEvent(name:"presence", value: ((val(s.occ) as int)>0?"present":"not present"))
+        if(val(s.motion)!=null) cd.sendEvent(name:"motion", value: (val(s.motion)?"active":"inactive"))
         if(val(s.batt)!=null) cd.sendEvent(name:"battery", value: val(s.batt) as int, unit:"%")
         if(val(s.lowbatt)!=null) cd.sendEvent(name:"lowBattery", value: ((val(s.lowbatt) as int)==1?"true":"false"))
     }
