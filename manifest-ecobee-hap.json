@@ -1,8 +1,8 @@
 {
   "packageName": "Ecobee HAP Thermostat (Local)",
   "author": "RamSet",
-  "version": "0.10.0",
-  "releaseNotes": "0.10.0 - Comfort profiles over local HAP: Set Comfort Profile (Home/Away/Sleep) with a comfortProfile attribute showing the active one, plus humidifier target (Set Humidity Setpoint), fan min-on-time, and a generic Set Characteristic command — all cloud-free. Builds on 0.9.0: controls an ecobee 100% locally over the HomeKit Accessory Protocol (HAP), no cloud/Apple hardware/bridge; HomeKit event push by default (instant updates, keepalive + auto-reconnect); in-driver pairing with automatic port discovery; remote room sensors as child devices.",
+  "version": "0.11.0",
+  "releaseNotes": "0.11.0 - Reliability hardening over local HAP. Keepalive watchdog detects and reconnects a stalled/zombie live session; connect now retries on 'connection refused' (the ecobee briefly drops its HAP listener after a failed pair attempt); mDNS port discovery retries before falling back to the last-known port (the port can change after a reboot/power-cycle). Adds comfortProfile + holdEndsAt attributes (Home/Away/Sleep + active-hold end time) and a debug 'diag' flow trace. Builds on local control with no cloud/Apple hardware/bridge.",
   "category": "Thermostats",
   "tags": "Thermostat, ecobee, HomeKit, HAP, Local, Sensor",
   "dateReleased": "2026-06-24",

@@ -12,10 +12,16 @@
  *   thermostat's HomeKit slots; resetting HomeKit on the device frees a slot.
  *
  * Author: RamSet
- * Version: 0.10.0
+ * Version: 0.11.0
  * Date: 2026-06-24
  *
  * Changelog:
+ *  v0.11.0 - Reliability: keepalive watchdog reconnects a stalled/zombie live session;
+ *           connect retries on "connection refused" (the ecobee drops its HAP listener
+ *           briefly after a failed pair attempt); mDNS port discovery retries before
+ *           falling back to the last-known port (the port can change after a reboot).
+ *           Adds comfortProfile + holdEndsAt attributes and a debug 'diag' flow trace.
+ *
  *  v0.10.0 - Comfort profiles over local HAP: Set Comfort Profile (Home/Away/Sleep) and a
  *           comfortProfile attribute that reports the active one. Added humidifier target
  *           (Set Humidity Setpoint) and fan min-on-time controls, plus a generic Set
@@ -40,7 +46,7 @@
  *   "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/ecobee-hap-thermostat.groovy",
  *   "description": "Local HAP controller for an ecobee thermostat: mode, setpoints, temperature, humidity, operating state, fan, and remote sensors.",
  *   "required": true,
- *   "version": "0.10.0"
+ *   "version": "0.11.0"
  * }
  *
  * Copyright 2026 RamSet
@@ -116,7 +122,7 @@ metadata {
 
 def installed(){ updated() }
 def updated(){
-    unschedule(); state.live=false; state.diag=[]; if(settings.debugLog) sendEvent(name:"diag", value:"")
+    unschedule(); state.live=false; state.diag=[]; state.connTry=0; state.mdnsTries=0; if(settings.debugLog) sendEvent(name:"diag", value:"")
     if(settings.setupCode && !isPaired()){ log.info "HAP: setup code entered — pairing"; runIn(1,"pair") }
     else if(isPaired()){ runIn(2,"startLive") }   // live event mode is the default once paired
 }
@@ -213,6 +219,13 @@ def mdnsThen(String op){
 }
 def mdnsTimeout(){
     def op=state.afterMdns; state.afterMdns=null; if(!op) return
+    int tries=(state.mdnsTries?:0) as int
+    if(tries < 2){   // retry the query — the port can change after a reboot/power-cycle, so getting the CURRENT one matters
+        state.mdnsTries=tries+1
+        log.warn "HAP: mDNS port detect timed out — retry ${state.mdnsTries}/2"
+        mdnsThen(op); return
+    }
+    state.mdnsTries=0
     log.warn "HAP: mDNS port detect timed out; using last-known port"; dispatchOp(op)
 }
 def mdnsCallback(message){
@@ -221,7 +234,7 @@ def mdnsCallback(message){
         def m = null; try { m = parseLanMessage(desc) } catch(ig){}
         String h = ((m?.payload ?: m?.body ?: desc) ?: "").toString().toLowerCase().replaceAll("[^0-9a-f]","")
         def r = parseMdns(h)
-        if(r.port){ device.updateSetting("port",[value:r.port,type:"number"]); state.discoveredPort=r.port; log.info "HAP: detected port ${r.port}" }
+        if(r.port){ device.updateSetting("port",[value:r.port,type:"number"]); state.discoveredPort=r.port; state.mdnsTries=0; log.info "HAP: detected port ${r.port}" }
         else log.warn "HAP: no SRV in mDNS reply"
         unschedule("mdnsTimeout")
         def op=state.afterMdns; state.afterMdns=null; if(op) dispatchOp(op)
@@ -264,7 +277,17 @@ void pairConnect(){
     state.op="pairsetup"; state.sess=false; state.psstage="2"; RX.setLength(0); PLAIN.setLength(0)
     sendEvent(name:"hapStatus", value:"pairing")
     try { interfaces.rawSocket.connect([byteInterface:true], settings.ip, hapPort()) }
-    catch(e){ log.error "connect: $e"; return }
+    catch(e){
+        // the ecobee briefly drops its HAP listener right after a failed/aborted pair attempt — retry, same port
+        if(e.toString().contains("refused") && (state.connTry?:0) < 4){
+            state.connTry=((state.connTry?:0) as int)+1
+            log.warn "HAP: connect refused (ecobee resetting after a failed attempt?) — retry ${state.connTry}/4 in 12s"
+            sendEvent(name:"hapStatus", value:"connect refused — retry ${state.connTry}/4")
+            runIn(12,"pairConnect"); return
+        }
+        log.error "connect: $e"; state.connTry=0; return
+    }
+    state.connTry=0
     sendHttpTlv("/pair-setup", tlv([[6,[1] as byte[]],[0,[0] as byte[]]]))   // State=M1, Method=PairSetup
 }
 void routePS(Map tv){ if(state.psstage=="2") psM2(tv) else if(state.psstage=="4") psM4(tv) else psM6(tv) }
