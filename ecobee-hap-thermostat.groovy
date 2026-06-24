@@ -148,7 +148,7 @@ def detectPort(){
 }
 def mdnsCallback(message){
     try {
-        String desc = (message instanceof String) ? message : (message?.description ?: "${message}")
+        String desc = message.toString()
         log.debug "HAP mdns raw: ${desc}"
         def m = null; try { m = parseLanMessage(desc) } catch(ig){}
         String h = ((m?.payload ?: m?.body ?: desc) ?: "").toString().toLowerCase().replaceAll("[^0-9a-f]","")

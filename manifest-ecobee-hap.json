@@ -1,8 +1,8 @@
 {
   "packageName": "Ecobee HAP Thermostat (Local)",
   "author": "RamSet",
-  "version": "0.4.4",
-  "releaseNotes": "0.4.4 - Add detectPort: auto-detect HAP port via unicast mDNS to the thermostat IP.",
+  "version": "0.4.5",
+  "releaseNotes": "0.4.5 - Fix mDNS callback (GString description) for port auto-detection.",
   "category": "Thermostats",
   "tags": "Thermostat, ecobee, HomeKit, HAP, Local, Sensor",
   "dateReleased": "2026-06-24",
