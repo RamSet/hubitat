@@ -151,16 +151,18 @@ def mdnsThen(String op){
 }
 // one-button discovery: multicast browse, find the ecobee, report IP/port + pairing state
 def findThermostat(){
-    state.afterMdns="find"
+    state.afterMdns="find"; state.findTries=0
     log.info "HAP: searching the LAN for an ecobee thermostat..."
     sendEvent(name:"hapStatus", value:"searching…")
+    sendFindQuery(); runIn(9,"mdnsTimeout")
+}
+void sendFindQuery(){
     String q="000000000001000000000000045f686170045f746370056c6f63616c00000c8001"
     sendHubCommand(new hubitat.device.HubAction(q, hubitat.device.Protocol.LAN,
         [destinationAddress:"224.0.0.251:5353",
          type:hubitat.device.HubAction.Type.LAN_TYPE_UDPCLIENT,
          encoding:hubitat.device.HubAction.Encoding.HEX_STRING,
-         timeout:5, callback:"mdnsCallback"]))
-    runIn(6,"mdnsTimeout")
+         timeout:2, callback:"mdnsCallback"]))
 }
 def mdnsTimeout(){
     def op=state.afterMdns; state.afterMdns=null; if(!op) return
@@ -174,7 +176,10 @@ def mdnsCallback(message){
         String h = ((m?.payload ?: m?.body ?: desc) ?: "").toString().toLowerCase().replaceAll("[^0-9a-f]","")
         def r = parseMdns(h)
         if(state.afterMdns=="find"){
-            if(!r.ecobee) return                     // ignore other HAP responders; keep listening
+            if(!r.ecobee){                            // other HAP responder — re-query (Hubitat captures only one reply per send)
+                if((state.findTries?:0) < 12){ state.findTries=(state.findTries?:0)+1; sendFindQuery() }
+                return
+            }
             device.updateSetting("ip",[value:r.ip,type:"string"])
             if(r.port) device.updateSetting("port",[value:r.port,type:"number"])
             state.afterMdns=null; unschedule("mdnsTimeout")
