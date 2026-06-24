@@ -34,6 +34,9 @@ def mainPage() {
             input "openDelay",  "number", title: "Delay before pausing after an open (seconds)",        defaultValue: 0, range: "0..3600", required: true
             input "closeDelay", "number", title: "Delay before resuming after all are closed (seconds)", defaultValue: 0, range: "0..3600", required: true
         }
+        section("Notifications") {
+            input "notifier", "capability.notification", title: "Send notifications to (optional)", multiple: true, required: false
+        }
         section {
             paragraph "When any contact opens, the thermostat's current mode is remembered and it is set to <b>off</b>. " +
                       "When all contacts close, the previous mode is restored. Any open contact anywhere pauses the entire HVAC."
@@ -75,6 +78,8 @@ def doPause() {
     state.paused = true
     t.off()
     log.info "Open-Contact Pause '${app.label}': contact open → HVAC off (was ${state.priorMode})"
+    String dur = (openDelay ?: 0) > 0 ? " for ${openDelay}s" : ""
+    sendNote("HVAC paused: ${openContactNames()} open${dur}. Thermostat is now OFF (was ${state.priorMode}).")
 }
 
 def doResume() {
@@ -86,4 +91,15 @@ def doResume() {
     state.paused = false
     t.setThermostatMode(m)
     log.info "Open-Contact Pause '${app.label}': all closed → restored ${m}"
+    sendNote("All contacts closed. Thermostat is back ON (${m}).")
+}
+
+private String openContactNames() {
+    def names = contacts?.findAll { it.currentValue("contact") == "open" }?.collect { it.displayName }
+    return names ? names.join(", ") : "contact(s)"
+}
+
+private void sendNote(String msg) {
+    notifier?.each { it.deviceNotification(msg) }
+    log.info "Open-Contact Pause '${app.label}': notify → ${msg}"
 }
