@@ -12,10 +12,13 @@
  *   thermostat's HomeKit slots; resetting HomeKit on the device frees a slot.
  *
  * Author: RamSet
- * Version: 0.11.0
+ * Version: 0.11.1
  * Date: 2026-06-24
  *
  * Changelog:
+ *  v0.11.1 - Fix reversed fan mode: "On" was setting Auto and vice-versa (HAP TargetFanState
+ *           is 0=Manual/On, 1=Auto — the driver had it inverted on both write and read).
+ *
  *  v0.11.0 - Reliability: keepalive watchdog reconnects a stalled/zombie live session;
  *           connect retries on "connection refused" (the ecobee drops its HAP listener
  *           briefly after a failed pair attempt); mDNS port discovery retries before
@@ -46,7 +49,7 @@
  *   "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/ecobee-hap-thermostat.groovy",
  *   "description": "Local HAP controller for an ecobee thermostat: mode, setpoints, temperature, humidity, operating state, fan, and remote sensors.",
  *   "required": true,
- *   "version": "0.11.0"
+ *   "version": "0.11.1"
  * }
  *
  * Copyright 2026 RamSet
@@ -366,7 +369,8 @@ def setComfortProfile(String p){ def v=[Home:0,Sleep:1,Away:2][p]; if(v!=null){ 
 def setHumiditySetpoint(h){ writeChar(TAID,25, (h as BigDecimal)) }
 def setFanMinOnTime(m){ writeChar(TAID,52, (m as int)) }
 def setCharacteristic(String aidIid, String value){ def p=aidIid.split("\\."); def v = value.isNumber()? (value.contains(".")? (value as BigDecimal):(value as Integer)) : value; writeChar(p[0] as long, p[1] as int, v) }
-def setThermostatFanMode(String m){ writeChar(TAID,75, (m?.toLowerCase()=="on")?1:0) }
+// HAP iid75 = TargetFanState: 0=Manual(fan ON/continuous), 1=Auto
+def setThermostatFanMode(String m){ writeChar(TAID,75, (m?.toLowerCase()=="on")?0:1) }
 def fanOn(){ setThermostatFanMode("on") }
 def fanAuto(){ setThermostatFanMode("auto") }
 def fanCirculate(){ setThermostatFanMode("on") }
@@ -583,7 +587,7 @@ void applyState(j){
     if(g(23)!=null) sendEvent(name:"heatingSetpoint", value: cToHub(g(23)))
     if(g(18)!=null) sendEvent(name:"thermostatMode", value: [0:"off",1:"heat",2:"cool",3:"auto"][g(18) as int])
     if(g(17)!=null) sendEvent(name:"thermostatOperatingState", value: [0:"idle",1:"heating",2:"cooling"][g(17) as int])
-    if(g(75)!=null) sendEvent(name:"thermostatFanMode", value: (g(75) as int)==1?"on":"auto")
+    if(g(75)!=null) sendEvent(name:"thermostatFanMode", value: (g(75) as int)==1?"auto":"on")
     if(g(33)!=null) sendEvent(name:"comfortProfile", value: [0:"Home",1:"Sleep",2:"Away",3:"Hold"][g(33) as int] ?: "Hold")
     if(g(41)!=null){ String h=g(41).toString().replaceAll(/S$/,""); sendEvent(name:"holdEndsAt", value: h.startsWith("2014-01-03")?"":h) }
     if(g(25)!=null) sendEvent(name:"humiditySetpoint", value: g(25) as int, unit:"%")

@@ -1,8 +1,8 @@
 {
   "packageName": "Ecobee HAP Thermostat (Local)",
   "author": "RamSet",
-  "version": "0.11.0",
-  "releaseNotes": "0.11.0 - Reliability hardening over local HAP. Keepalive watchdog detects and reconnects a stalled/zombie live session; connect now retries on 'connection refused' (the ecobee briefly drops its HAP listener after a failed pair attempt); mDNS port discovery retries before falling back to the last-known port (the port can change after a reboot/power-cycle). Adds comfortProfile + holdEndsAt attributes (Home/Away/Sleep + active-hold end time) and a debug 'diag' flow trace. Builds on local control with no cloud/Apple hardware/bridge.",
+  "version": "0.11.1",
+  "releaseNotes": "0.11.1 - Bug fix: fan mode was reversed ('On' set the fan to Auto and 'Auto' forced it On). HAP TargetFanState is 0=Manual/On, 1=Auto; the driver had it inverted on both the command and the status read. (prev 0.11.0: Reliability hardening over local HAP. Keepalive watchdog detects and reconnects a stalled/zombie live session; connect now retries on 'connection refused' (the ecobee briefly drops its HAP listener after a failed pair attempt); mDNS port discovery retries before falling back to the last-known port (the port can change after a reboot/power-cycle). Adds comfortProfile + holdEndsAt attributes (Home/Away/Sleep + active-hold end time) and a debug 'diag' flow trace. )",
   "category": "Thermostats",
   "tags": "Thermostat, ecobee, HomeKit, HAP, Local, Sensor",
   "dateReleased": "2026-06-24",
