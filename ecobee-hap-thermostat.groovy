@@ -12,10 +12,15 @@
  *   thermostat's HomeKit slots; resetting HomeKit on the device frees a slot.
  *
  * Author: RamSet
- * Version: 0.11.3
+ * Version: 0.11.4
  * Date: 2026-06-24
  *
  * Changelog:
+ *  v0.11.4 - comfortProfile/holdEndsAt now self-refresh: the 5-min keepalive also reads the
+ *           no-notify characteristics (comfort profile, hold-end, fan min-on-time), so they
+ *           update on their own instead of only after a manual Refresh. (These chars can't be
+ *           event-subscribed — they're read-only with no notify — so a periodic read is the fix.)
+ *
  *  v0.11.3 - Fan mode now updates live: subscribe to TargetFanState (iid75) events so an external
  *           On/Auto change (e.g. from webCoRE or the thermostat) reflects without a manual Refresh;
  *           driver-issued fan commands also update the attribute immediately.
@@ -58,7 +63,7 @@
  *   "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/ecobee-hap-thermostat.groovy",
  *   "description": "Local HAP controller for an ecobee thermostat: mode, setpoints, temperature, humidity, operating state, fan, and remote sensors.",
  *   "required": true,
- *   "version": "0.11.3"
+ *   "version": "0.11.4"
  * }
  *
  * Copyright 2026 RamSet
@@ -538,7 +543,9 @@ void liveConnect(){
 def liveKeepalive(){
     if(state.live && state.sess){
         state.kaCtr = state.inCtr
-        sendEncrypted("GET /characteristics?id=${TAID}.19 HTTP/1.1\r\nHost: ${settings.ip}\r\n\r\n")
+        // also reads the no-notify chars (33=comfortProfile, 41=holdEndsAt, 52=fanMinOnTime) so they self-refresh
+        // every keepalive instead of only on a manual Refresh; doubles as the watchdog liveness probe
+        sendEncrypted("GET /characteristics?id=${TAID}.19,${TAID}.33,${TAID}.41,${TAID}.52 HTTP/1.1\r\nHost: ${settings.ip}\r\n\r\n")
         runIn(12,"kaWatch")
     } else { startLive() }
 }
