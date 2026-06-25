@@ -30,7 +30,7 @@ definition(
     parent:      "RamSet:Local Ecobee Helpers",
     iconUrl:     "",
     iconX2Url:   "",
-    importUrl:   "https://raw.githubusercontent.com/RamSet/hubitat/main/apps/ecobee-hap-humidity-child/ecobee-hap-humidity-child.groovy"
+    importUrl:   "https://raw.githubusercontent.com/RamSet/hubitat/main/apps/ecobee-hap-helpers/ecobee-hap-humidity-child.groovy"
 )
 
 preferences {

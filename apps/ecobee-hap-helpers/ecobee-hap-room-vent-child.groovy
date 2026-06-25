@@ -26,7 +26,7 @@ definition(
     parent:      "RamSet:Local Ecobee Helpers",
     iconUrl:     "",
     iconX2Url:   "",
-    importUrl:   "https://raw.githubusercontent.com/RamSet/hubitat/main/apps/ecobee-hap-room-vent-child/ecobee-hap-room-vent-child.groovy"
+    importUrl:   "https://raw.githubusercontent.com/RamSet/hubitat/main/apps/ecobee-hap-helpers/ecobee-hap-room-vent-child.groovy"
 )
 
 preferences {
