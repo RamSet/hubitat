@@ -41,6 +41,7 @@ def mainPage() {
             input "coolOffset", "decimal", title: "Cooling setpoint offset (added to thermostat cool setpoint)", defaultValue: 0.0, required: true
             input "band",       "decimal", title: "Proportional band — degrees from target at which the vent is fully open", defaultValue: 2.0, required: true
             input "alwaysAdjust", "bool",  title: "Always adjust (modulate on room temp even when the thermostat is idle)", defaultValue: false
+            input "reEvalMinutes", "number", title: "Re-evaluation interval (minutes) — periodic safety re-check even when sensors are quiet", defaultValue: 5, range: "1..120", required: true
         }
         section("Minimum open floor") {
             input "floor", "number", title: "Per-vent minimum open % (0–100)", defaultValue: 10, range: "0..100", required: true, submitOnChange: true
@@ -71,6 +72,17 @@ def initialize() {
         subscribe(t, "thermostatMode",  evtHandler)
     }
     subscribe(tempSensors, "temperature", evtHandler)
+    schedulePeriodic()
+    evaluateVent()
+}
+
+private void schedulePeriodic() {
+    int mins = Math.max(1, (reEvalMinutes ?: 5) as int)
+    runIn(mins * 60, periodicEval)
+}
+
+def periodicEval() {
+    schedulePeriodic()       // reschedule first so an eval error can't break the chain
     evaluateVent()
 }
 
