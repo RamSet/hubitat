@@ -62,7 +62,7 @@ mappings {
     path("/calendar.ics")  { action: [GET: "apiCalendar"] }
 }
 
-String getAppVersion() { return "v0.12.3 (2026-06)" }
+String getAppVersion() { return "v0.12.4 (2026-06)" }
 
 // Simple vs Advanced interface. Simple shows only zones, schedule, weather and
 // hardware safety; Advanced exposes everything (moisture, learning, sensors,
@@ -1194,6 +1194,7 @@ def aboutPage() {
             paragraph "A Hubitat app for running sprinkler zones via Zooz ZEN16 / ZEN17 800LR multi-relay controllers — or any Hubitat device exposing the Switch capability. Hardware-agnostic, multi-instance, with Spruce-style weather adaptation, per-zone moisture-aware watering, restrictions (quiet hours / mode / HSM), pause-and-resume from external sensors, hub-independent hardware watchdog via Z-Wave parameters (model-aware: pushes the right per-relay timers for ZEN16's 3 relays or ZEN17's 2 relays), full external JSON/HTML/iCal API, and granular templated notifications with Pushover support."
         }
         section("Changelog") {
+            paragraph "v0.12.4 — The Hardware-safety push won't set a relay auto-off timer shorter than the longest single watering cycle this schedule actually drives on that controller — it raises the value automatically so the hardware can't cut your own watering short. It also warns before lowering a timer the device already holds higher, which protects controllers shared between two app instances (a relay driven by the other instance may need the longer timer)."
             paragraph "v0.12.3 — Fixed false \"relay unreachable\" alerts right after a successful watering. The reachability watchdog judged the controller only by when its parent device last reported to the hub, which some Zooz drivers don't refresh when a child relay is toggled — so a controller the app had just driven could be flagged unreachable. The app now counts its own successful waterings as proof the controller is reachable, attributed to the specific controller that owns the relay so a run on one controller can't hide a genuine outage on another. The Hardware-safety page now shows, per controller, when the app last drove one of its relays and when the controller last reported to the hub — so you can confirm each controller is mapped correctly."
             paragraph "v0.12.2 — Fixed pause sensors reporting \"0s remaining\" and skipping ahead when they fired during a soak or the gap between zones. The schedule now tracks soak and between-zone phases as pausable too, so a pause that lands mid-soak reports the real soak time left and resumes that soak (valves stay off) instead of jumping to the next zone."
             paragraph "v0.12.1 — The Hardware-Safety push no longer claims \"successful\" just because the commands were sent. It now reads the Auto-Off timers back off each controller ~15s later and reports the truth — \"✓ armed\" with the real values, or \"⚠ did NOT take\" with a prompt to flip the setParameter-order override and push again (and an error notification if any relay is left unprotected)."
@@ -2035,8 +2036,9 @@ def startNextZone() {
     // The app just successfully drove this relay — proof its OWNING controller is
     // reachable. Stamp that specific parent so the watchdog won't false-flag a
     // controller the app just drove, while still catching a real outage on a
-    // different controller that didn't run this cycle.
-    markControllerReachable(sw)
+    // different controller that didn't run this cycle. The per-cycle on-time is
+    // the longest continuous actuation, which the auto-off-timer guard uses.
+    markControllerReachable(sw, perCycleMin * 60)
     // Mirror onto the exposed child Virtual Switch (HomeKit/dashboard view),
     // then reconcile all tiles so any prior zone's tile is cleared.
     setZoneChildSwitch(zid, "on")
@@ -2665,9 +2667,10 @@ def pushHardwareSafety() {
         state.hwLastPushSummary = "No parents selected"
         return
     }
-    Integer mins = (settings.hwAutoOffMinutes ?: (((settings.scheduleMaxRunMinutes ?: 60) as int) + 5)) as int
+    Integer requested = (settings.hwAutoOffMinutes ?: (((settings.scheduleMaxRunMinutes ?: 60) as int) + 5)) as int
     int ok = 0, fail = 0
     List<String> log_ = []
+    Map expectedByDev = [:]
     parents.each { dev ->
         if (!dev.hasCommand("setParameter")) {
             log_ << "${dev.displayName}: setParameter() unsupported — the built-in driver does not expose it; switch the parent to jtp10181's Advanced driver"
@@ -2679,6 +2682,16 @@ def pushHardwareSafety() {
         List<Integer> autoOffParams = (model.autoOff   ?: []) as List<Integer>
         List<Integer> unitParams    = (model.unitParam ?: []) as List<Integer>
         String style = detectSetParameterStyle(dev)
+        // Guard: never set an auto-off shorter than the longest run this instance
+        // drives on the controller — that would let the hardware cut our own
+        // watering short. Raise to the safe floor if the requested value is below.
+        Integer floorMin = requiredAutoOffMinForController(dev.id as String)
+        Integer mins = Math.max(requested, floorMin)
+        // Cross-instance heads-up: if the device already holds a larger auto-off
+        // (e.g. another app instance set it higher for a longer relay on a shared
+        // controller), warn before we lower it.
+        Map cur = parseConfigVals(dev)
+        Integer curMax = ((autoOffParams.collect { cur[it as int] }.findAll { it != null } + [0]).max()) as Integer
         try {
             // Timer unit = minutes
             unitParams.each { p -> callSetParameter(dev, style, p as int, 1, 0) }
@@ -2690,19 +2703,26 @@ def pushHardwareSafety() {
             if (settings.hwForceDcMotorOff != false) {
                 try { callSetParameter(dev, style, 24, 1, 0) } catch (ignored) {}
             }
-            log_ << "${dev.displayName} (${model.name}, ${style} order): sent auto-off ${mins}min to P${autoOffParams.join('/P')}"
+            String note = (mins > requested) ? " — RAISED from ${requested}min (longest single cycle this instance drives here is ~${floorMin - 2}min)" : ""
+            String warn = (curMax > 0 && mins < curMax) ? " — ⚠ this lowers the device's current ${curMax}min; if another instance drives a longer relay on this controller, confirm this won't cut it short" : ""
+            log_ << "${dev.displayName} (${model.name}, ${style} order): sent auto-off ${mins}min to P${autoOffParams.join('/P')}${note}${warn}"
+            expectedByDev[dev.id as String] = mins
             ok++
         } catch (e) {
             log_ << "${dev.displayName}: FAILED to send — ${e.message}"
             fail++
         }
     }
-    state.hwExpectedMins = mins
+    state.hwExpectedMinsByDev = expectedByDev
+    state.hwExpectedMins = requested
     String summary = "Sent to ${ok} controller(s)${fail ? ", ${fail} couldn't (no setParameter)" : ""} @ ${nowString()} — verifying the timers actually took; re-open this page in ~15s.\n" + log_.join("\n")
     state.hwLastPushSummary = summary
-    log.info "${app.label}: hardware safety — sent to ${ok}, ${fail} skipped (${mins}min); verifying in 15s"
+    // Per-controller values may differ once the safe-floor guard raises one;
+    // report the largest actually pushed (falls back to the requested value).
+    Integer reportMins = ((expectedByDev.values().collect { it as int } + [requested]).max()) as int
+    log.info "${app.label}: hardware safety — sent to ${ok}, ${fail} skipped (${reportMins}min max); verifying in 15s"
     runIn(15, "verifyHardwareSafety")
-    notify("hardware.push", [minutes: mins, count: ok])
+    notify("hardware.push", [minutes: reportMins, count: ok])
 }
 
 // Read back the relay Auto-Off timers a few seconds after a push and report
@@ -2712,10 +2732,12 @@ def pushHardwareSafety() {
 def verifyHardwareSafety() {
     def parents = settings.hwZen16Parents
     if (!parents) return
-    Integer mins = (state.hwExpectedMins ?: (settings.hwAutoOffMinutes ?: (((settings.scheduleMaxRunMinutes ?: 60) as int) + 5))) as int
+    Integer fallbackMins = (state.hwExpectedMins ?: (settings.hwAutoOffMinutes ?: (((settings.scheduleMaxRunMinutes ?: 60) as int) + 5))) as int
+    Map expectedByDev = (state.hwExpectedMinsByDev ?: [:]) as Map
     List<String> lines = []
     int armed = 0, gaps = 0
     parents.each { dev ->
+        Integer mins = (expectedByDev[dev.id as String] ?: fallbackMins) as int
         String modelKey = settings."hwModel_${dev.id}" ?: "3"
         Map model = (ZOOZ_RELAY_MODELS[modelKey] ?: ZOOZ_RELAY_MODELS["3"]) as Map
         List<Integer> autoOffParams = (model.autoOff ?: []) as List<Integer>
@@ -2730,7 +2752,7 @@ def verifyHardwareSafety() {
         if (allok) { armed++; lines << "${dev.displayName}: ✓ auto-off ${vals.join('/')} min — armed" }
         else { gaps++; lines << "${dev.displayName}: ⚠ auto-off ${vals.join('/')} (want ${mins}) — did NOT take; flip the setParameter-order override above and push again" }
     }
-    state.hwLastPushSummary = "Verified @ ${nowString()} — ${armed} armed, ${gaps} with gaps (expected ${mins}min auto-off)\n" + lines.join("\n")
+    state.hwLastPushSummary = "Verified @ ${nowString()} — ${armed} armed, ${gaps} with gaps\n" + lines.join("\n")
     log.info "${app.label}: hardware safety verify — ${armed} armed, ${gaps} gaps"
     if (gaps > 0) notify("error", [detail: "hardware auto-off NOT set on ${gaps} relay controller(s) — open Hardware safety"])
 }
@@ -3955,12 +3977,44 @@ private String agoString(Long ms) {
     return "${fmtDuration(deltaSec as int)} ago (${abs})"
 }
 
-private void markControllerReachable(sw) {
+private void markControllerReachable(sw, int actuationSec = 0) {
     String pkey = controllerKeyFor(sw)
     if (!pkey) return
     Map m = (state.lastActuationByParent ?: [:]) as Map
     m[pkey] = now()
     state.lastActuationByParent = m
+    // Remember the longest single continuous on-time we've driven on this
+    // controller (seasonal-adjusted, real) so the hardware push can refuse to set
+    // an auto-off timer shorter than a run we actually perform here.
+    if (actuationSec > 0) {
+        Map mx = (state.maxActuationSecByParent ?: [:]) as Map
+        if (actuationSec > ((mx[pkey] ?: 0) as int)) {
+            mx[pkey] = actuationSec
+            state.maxActuationSecByParent = mx
+        }
+    }
+}
+
+// Minimum safe auto-off (minutes, buffer included) for a controller: the longest
+// single continuous relay on-time THIS instance drives on it — from the schedule
+// and from any longer run actually observed — plus a 2-minute margin. 0 means this
+// instance drives nothing on that controller, so it imposes no floor.
+private Integer requiredAutoOffMinForController(String pkey) {
+    int maxSec = 0
+    int n = (settings.zoneCountPref ?: 0) as int
+    for (int i = 1; i <= n; i++) {
+        if (settings."zone${i}Enabled" == false) continue
+        def sw = settings."zone${i}Switch"
+        if (!sw || controllerKeyFor(sw) != pkey) continue
+        Integer base   = (resolveZoneBaseMinutes(i) ?: 0) as int
+        Integer cycles = Math.max(1, ((settings."zone${i}CycleSoak" ?: "1") as int))
+        int perCycleSec = Math.max(1, (base / cycles) as int) * 60
+        if (perCycleSec > maxSec) maxSec = perCycleSec
+    }
+    Integer observed = (((state.maxActuationSecByParent ?: [:]) as Map)[pkey] ?: 0) as int
+    if (observed > maxSec) maxSec = observed
+    if (maxSec <= 0) return 0
+    return ((int) Math.ceil(maxSec / 60.0d)) + 2
 }
 
 // Resolve a zone switch to its owning parent controller's device id (as String),
