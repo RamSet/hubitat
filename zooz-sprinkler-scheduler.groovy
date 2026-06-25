@@ -62,7 +62,7 @@ mappings {
     path("/calendar.ics")  { action: [GET: "apiCalendar"] }
 }
 
-String getAppVersion() { return "v0.12.1 (2026-06)" }
+String getAppVersion() { return "v0.12.2 (2026-06)" }
 
 // Simple vs Advanced interface. Simple shows only zones, schedule, weather and
 // hardware safety; Advanced exposes everything (moisture, learning, sensors,
@@ -1185,6 +1185,7 @@ def aboutPage() {
             paragraph "A Hubitat app for running sprinkler zones via Zooz ZEN16 / ZEN17 800LR multi-relay controllers — or any Hubitat device exposing the Switch capability. Hardware-agnostic, multi-instance, with Spruce-style weather adaptation, per-zone moisture-aware watering, restrictions (quiet hours / mode / HSM), pause-and-resume from external sensors, hub-independent hardware watchdog via Z-Wave parameters (model-aware: pushes the right per-relay timers for ZEN16's 3 relays or ZEN17's 2 relays), full external JSON/HTML/iCal API, and granular templated notifications with Pushover support."
         }
         section("Changelog") {
+            paragraph "v0.12.2 — Fixed pause sensors reporting \"0s remaining\" and skipping ahead when they fired during a soak or the gap between zones. The schedule now tracks soak and between-zone phases as pausable too, so a pause that lands mid-soak reports the real soak time left and resumes that soak (valves stay off) instead of jumping to the next zone."
             paragraph "v0.12.1 — The Hardware-Safety push no longer claims \"successful\" just because the commands were sent. It now reads the Auto-Off timers back off each controller ~15s later and reports the truth — \"✓ armed\" with the real values, or \"⚠ did NOT take\" with a prompt to flip the setParameter-order override and push again (and an error notification if any relay is left unprotected)."
             paragraph "v0.12.0 — IMPORTANT safety fix: the Hardware-Safety push was sending the relay Auto-Off timers in the wrong setParameter argument order, so they silently never took (the device's P6/P8/P10 stayed 0 — no hardware failsafe) even though the push reported success. The app can't read argument names from Hubitat, so it now defaults to the correct jtp10181/vendored-driver order (paramNumber, value, size), with a manual override on the Hardware-safety page. Re-push after updating, and confirm the Auto Turn-Off timers are non-zero on each relay."
             paragraph "v0.11.11 — Documented a confirmed ZEN16/ZEN17 gotcha on the Rain sensors page: an Sw input set to a sensor/water type won't actually report (stays stuck dry) until the relay is EXCLUDED + RE-INCLUDED — the sensor-report association is only set up during Z-Wave inclusion, not by Save/Configure/power-cycle. Verified on ZEN16 FW 3.10."
@@ -1566,11 +1567,16 @@ def pauseSensorEvent(evt) {
 private void pauseRunningSchedule(String reason) {
     if (!state.running) return
     Integer zid = (state.currentZoneId ?: 0) as int
+    String phaseType = state.currentPhaseType ?: "water"
     if (zid == 0) {
-        // Between zones; just stop and remember plan position.
+        // Before the first zone; just stop and remember plan position.
         log.info "${app.label}: pause requested between zones — holding plan"
+        state.pausedRemainingSec = 0
+        state.pausedPhaseType = "gap"
     } else {
-        // Compute remaining seconds in the current cycle.
+        // Compute remaining seconds left in the current phase (watering,
+        // soak, or between-zone gap). currentPhaseStartMs/DurationSec are kept
+        // in sync by whichever phase is active, so this is accurate for all.
         Long startMs = (state.currentPhaseStartMs ?: now()) as long
         Integer phaseDurSec = (state.currentPhaseDurationSec ?: 0) as int
         long elapsedMs = now() - startMs
@@ -1578,10 +1584,15 @@ private void pauseRunningSchedule(String reason) {
         Integer remainingSec = (remainingMs / 1000L) as int
 
         state.pausedRemainingSec = remainingSec
+        state.pausedPhaseType = phaseType
 
-        def sw = settings."zone${zid}Switch"
-        if (sw) try { sw.off() } catch (e) { log.warn "pause: ${e.message}" }
-        log.warn "${app.label}: PAUSED at ${settings."zone${zid}Name" ?: "zone ${zid}"} — ${remainingSec}s remaining in cycle ${((state.currentZoneCycleIdx ?: 0) as int) + 1}/${state.currentZoneCycles}. Reason: ${reason}"
+        // Only an active watering phase has a valve open to close.
+        if (phaseType == "water") {
+            def sw = settings."zone${zid}Switch"
+            if (sw) try { sw.off() } catch (e) { log.warn "pause: ${e.message}" }
+        }
+        String phaseLabel = (phaseType == "soak") ? "soak" : (phaseType == "gap" ? "between-zone gap" : "watering cycle ${((state.currentZoneCycleIdx ?: 0) as int) + 1}/${state.currentZoneCycles}")
+        log.warn "${app.label}: PAUSED at ${settings."zone${zid}Name" ?: "zone ${zid}"} — ${remainingSec}s left in ${phaseLabel}. Reason: ${reason}"
         notify("pause.activate", [zone: (settings."zone${zid}Name" ?: "Zone ${zid}"), remaining: fmtDuration(remainingSec as int), reason: reason])
     }
 
@@ -1605,6 +1616,7 @@ def doResumeAfterPause() {
     }
     Integer zid = (state.currentZoneId ?: 0) as int
     Integer remainingSec = (state.pausedRemainingSec ?: 0) as int
+    String phaseType = state.pausedPhaseType ?: "water"
     // Accumulate how long we were paused into the run record.
     Long pStart = (state.pauseStartMs ?: 0L) as long
     if (pStart > 0 && state.currentRunRecord) {
@@ -1616,20 +1628,49 @@ def doResumeAfterPause() {
     state.paused = false
     state.running = true
 
-    if (zid == 0 || remainingSec <= 0) {
-        // Resume by moving to the next zone in the plan.
+    if (zid == 0) {
+        // No zone context — fall back to advancing the plan.
         if (descTextEnable) log.info "${app.label}: resuming with next zone in plan"
         runIn(1, "startNextZone")
         return
     }
 
     String zname = settings."zone${zid}Name" ?: "Zone ${zid}"
+
+    // Resume the exact phase we paused in, with its remaining time.
+    if (phaseType == "gap") {
+        if (descTextEnable) log.info "${app.label}: resuming between-zone gap — ${remainingSec}s left"
+        notify("pause.resume", [zone: zname, remaining: fmtDuration(remainingSec as int)])
+        state.currentPhaseStartMs = now()
+        state.currentPhaseDurationSec = remainingSec
+        state.currentPhaseType = "gap"
+        runIn(Math.max(1, remainingSec), "startNextZone")
+        return
+    }
+
+    if (phaseType == "soak") {
+        if (descTextEnable) log.info "${app.label}: resuming soak — ${remainingSec}s left (valves stay off)"
+        notify("pause.resume", [zone: zname, remaining: fmtDuration(remainingSec as int)])
+        state.currentPhaseStartMs = now()
+        state.currentPhaseDurationSec = remainingSec
+        state.currentPhaseType = "soak"
+        runIn(Math.max(1, remainingSec), "zoneCycleResume")
+        return
+    }
+
+    // Watering phase. If somehow nothing is left, advance the plan.
+    if (remainingSec <= 0) {
+        if (descTextEnable) log.info "${app.label}: resuming with next zone in plan"
+        runIn(1, "startNextZone")
+        return
+    }
     def sw = settings."zone${zid}Switch"
     if (sw) try { sw.on() } catch (e) { log.warn "resume: ${e.message}" }
     log.info "${app.label}: RESUMED ${zname} — ${remainingSec}s left in this cycle"
     notify("pause.resume", [zone: zname, remaining: fmtDuration(remainingSec as int)])
     state.currentPhaseStartMs = now()
     state.currentPhaseDurationSec = remainingSec
+    state.currentPhaseType = "water"
     runIn(Math.max(1, remainingSec), "zoneCyclePhaseDone")
 }
 
@@ -1997,6 +2038,7 @@ def startNextZone() {
     // exactly how many seconds are left if we have to stop mid-cycle.
     state.currentPhaseStartMs = now()
     state.currentPhaseDurationSec = perCycleMin * 60
+    state.currentPhaseType = "water"
     runIn(perCycleMin * 60, "zoneCyclePhaseDone")
 }
 
@@ -2031,6 +2073,11 @@ def zoneCyclePhaseDone() {
         }
         state.currentZoneIdx = (state.currentZoneIdx ?: 0) + 1
         Integer betweenSec = (settings.scheduleBetweenZoneSec ?: 10) as int
+        // Track the gap as a pausable phase so a pause sensor that fires
+        // between zones resumes the gap instead of reporting "0s remaining".
+        state.currentPhaseStartMs = now()
+        state.currentPhaseDurationSec = betweenSec
+        state.currentPhaseType = "gap"
         runIn(betweenSec, "startNextZone")
     } else {
         // Soak then resume same zone
@@ -2042,6 +2089,11 @@ def zoneCyclePhaseDone() {
             r.soakSec = ((r.soakSec ?: 0) as int) + soakMin * 60
             state.currentRunRecord = r
         }
+        // Track the soak as a pausable phase (valves off) so a pause sensor
+        // that fires mid-soak resumes the remaining soak instead of advancing.
+        state.currentPhaseStartMs = now()
+        state.currentPhaseDurationSec = soakMin * 60
+        state.currentPhaseType = "soak"
         runIn(soakMin * 60, "zoneCycleResume")
     }
 }
@@ -2057,6 +2109,7 @@ def zoneCycleResume() {
         sw.on()
         state.currentPhaseStartMs = now()
         state.currentPhaseDurationSec = perCycleMin * 60
+        state.currentPhaseType = "water"
         runIn(perCycleMin * 60, "zoneCyclePhaseDone")
     }
 }
