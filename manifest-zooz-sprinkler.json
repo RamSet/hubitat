@@ -12,7 +12,7 @@
       "id": "f6aadfbc-e1fb-43f4-a19b-713a99acc4ef",
       "name": "Zooz Sprinkler Scheduler",
       "namespace": "ramset",
-      "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/zooz-sprinkler-scheduler.groovy",
+      "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/apps/zooz-sprinkler-scheduler/zooz-sprinkler-scheduler.groovy",
       "required": true,
       "oauth": true,
       "primary": true,
@@ -24,7 +24,7 @@
       "id": "5aee38c9-88cf-4a0e-99e6-d9618b2d8632",
       "name": "Zooz ZEN16 MultiRelay Advanced",
       "namespace": "jtp10181",
-      "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/zooz-zen16-multirelay.groovy",
+      "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/drivers/zooz-zen16-multirelay/zooz-zen16-multirelay.groovy",
       "required": false,
       "oauth": false,
       "description": "Zooz ZEN16 (3-relay) driver — RamSet fork of @jtp10181's, exposes setParameter for the hardware auto-off push and adds ping(). Optional: only needed if you drive the zones with a ZEN16."
@@ -33,7 +33,7 @@
       "id": "5355a3c3-d2fa-4d48-ad9a-0e282caea2a0",
       "name": "Zooz ZEN17 Universal Relay Advanced",
       "namespace": "jtp10181",
-      "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/zooz-zen17-universal-relay.groovy",
+      "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/drivers/zooz-zen17-universal-relay/zooz-zen17-universal-relay.groovy",
       "required": false,
       "oauth": false,
       "description": "Zooz ZEN17 (2-relay) driver — RamSet fork of @jtp10181's. Optional: only needed if you drive the zones with a ZEN17."

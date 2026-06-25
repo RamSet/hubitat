@@ -12,7 +12,7 @@
       "id": "1aeebbd8-2370-4f65-9603-83cde41e2d80",
       "name": "IKEA Air Quality to Hub Variables",
       "namespace": "ramset",
-      "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/ikea-air-quality-to-variables.groovy",
+      "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/apps/ikea-air-quality-to-variables/ikea-air-quality-to-variables.groovy",
       "required": true,
       "oauth": false,
       "primary": true,

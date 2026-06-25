@@ -1,44 +1,15 @@
-/*
- * Ecobee HAP Remote Sensor
+/**
+ *  THIS FILE HAS MOVED
+ *  -------------------
+ *  This driver is no longer maintained at this path and will not receive updates here.
  *
- * Description:
- *   Child device for an ecobee remote room sensor (temperature, occupancy,
- *   motion, battery). Created and updated automatically by the Ecobee HAP
- *   Thermostat (Local) driver — install that package; this driver is not used
- *   on its own.
+ *  It now lives at:
+ *      drivers/ecobee-hap-sensor/ecobee-hap-sensor.groovy
  *
- * Author: RamSet
- * Version: 0.9.0
- * Date: 2026-06-24
+ *  To update, import the driver from this raw URL (copy the line below):
  *
- * Changelog:
- *  v0.3.0 - Initial release.
+ *      https://raw.githubusercontent.com/RamSet/hubitat/main/drivers/ecobee-hap-sensor/ecobee-hap-sensor.groovy
  *
- * HPM Metadata:
- * {
- *   "package": "Ecobee HAP Thermostat (Local)",
- *   "namespace": "RamSet",
- *   "author": "RamSet",
- *   "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/ecobee-hap-sensor.groovy",
- *   "description": "Child device for ecobee remote sensors (temperature, occupancy, motion, battery).",
- *   "required": true,
- *   "version": "0.9.0"
- * }
- *
- * Copyright 2026 RamSet
- * Licensed under the Apache License, Version 2.0. Provided as-is, without warranty.
+ *  Steps: open this driver in the editor, paste the URL above into the
+ *  "Import" dialog, and import. This stub is intentionally non-functional.
  */
-
-metadata {
-    definition(name: "Ecobee HAP Remote Sensor", namespace: "RamSet", author: "RamSet", importUrl: "https://raw.githubusercontent.com/RamSet/hubitat/main/ecobee-hap-sensor.groovy") {
-        capability "TemperatureMeasurement"
-        capability "MotionSensor"
-        capability "PresenceSensor"
-        capability "Battery"
-        attribute "lowBattery", "string"
-        attribute "ecobeeId", "string"
-    }
-}
-// Values are pushed by the parent thermostat device on refresh; nothing to do here.
-def installed() {}
-def updated() {}

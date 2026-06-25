@@ -15,7 +15,7 @@
       "id": "virtual-aqi-driver",
       "name": "Virtual Air Quality (AQI) Driver",
       "namespace": "RamSet",
-      "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/VirtualAQIDriver.groovy",
+      "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/drivers/VirtualAQIDriver/VirtualAQIDriver.groovy",
       "required": true
     }
   ]

@@ -1,17 +1,17 @@
 {
   "packageName": "Network Monitor Health Check",
   "author": "RamSet",
-  "version": "1.0.0",
-  "releaseNotes": "v1.0.0 - Initial release of network health monitor driver for ping/status reporting.",
+  "version": "1.4.2",
+  "releaseNotes": "v1.4.2 - Fixes a fresh-install crash (driver used an app-only call), surfaces warnings at the info log level, and removes a stray undeclared-attribute event. Monitors Internet/LAN/optional custom host over HTTP with a manual check command.",
   "category": "Monitoring",
   "tags": "Network, Health Check, Ping, Monitoring",
   "dateReleased": "2025-04-26",
   "drivers": [
     {
       "id": "afe3a491-3205-4c31-8997-5db28b45687b",
-      "name": "Network Monitor Health Check",
+      "name": "Network Monitor HealthCheck (HTTP)",
       "namespace": "RamSet",
-      "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/NetworkMonitorHealthCheck.groovy",
+      "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/drivers/NetworkMonitorHealthCheck/NetworkMonitorHealthCheck.groovy",
       "required": true,
       "oauth": false,
       "description": "Simple network health check driver to monitor device availability using ping and report status."

@@ -12,7 +12,7 @@
       "id": "cd3860ab-7b7b-4a0d-9a9a-1949856ae5b0",
       "name": "Blinds Dusk Automation",
       "namespace": "ramset",
-      "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/blinds-dusk-automation.groovy",
+      "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/apps/blinds-dusk-automation/blinds-dusk-automation.groovy",
       "required": true,
       "oauth": false,
       "primary": true,

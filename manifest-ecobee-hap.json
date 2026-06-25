@@ -11,7 +11,7 @@
       "id": "511b25e3-4ca2-413e-a1f7-351ff50cd3b1",
       "name": "Ecobee HAP Thermostat",
       "namespace": "RamSet",
-      "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/ecobee-hap-thermostat.groovy",
+      "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/drivers/ecobee-hap-thermostat/ecobee-hap-thermostat.groovy",
       "required": true,
       "oauth": false,
       "description": "Local controller for an ecobee thermostat over the HomeKit Accessory Protocol (HAP): mode, setpoints, temperature, humidity, operating state, and fan."
@@ -20,7 +20,7 @@
       "id": "935d2240-6916-42b5-8832-73e418754f92",
       "name": "Ecobee HAP Remote Sensor",
       "namespace": "RamSet",
-      "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/ecobee-hap-sensor.groovy",
+      "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/drivers/ecobee-hap-sensor/ecobee-hap-sensor.groovy",
       "required": true,
       "oauth": false,
       "description": "Child device for ecobee remote sensors (temperature, occupancy, motion, battery). Created automatically by the thermostat driver."
