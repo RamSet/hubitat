@@ -1,0 +1,52 @@
+{
+  "packageName": "Local Ecobee Helpers",
+  "author": "RamSet",
+  "version": "1.0.0",
+  "releaseNotes": "1.0.0 - Initial release. Offline helper apps for the Ecobee HAP Thermostat (Local): a parent that hosts as many helpers as needed, plus three child types - Room Vent (proportional, sensor-driven vent control with an adjustable periodic re-evaluation and an airflow-safety minimum floor), Open-Contact Pause (pauses the entire HVAC while any monitored window/door is open, with minute-based delays and optional pause/resume notifications), and Humidity (runs a humidifier socket while the heater is on, up to a maximum desired humidity, with optional cold-weather frost control). No cloud. Requires the Ecobee HAP Thermostat (Local) driver.",
+  "category": "Thermostats",
+  "tags": "Thermostat, ecobee, Vents, Humidity, Contacts, Local, HAP",
+  "dateReleased": "2026-06-24",
+  "minimumHEVersion": "2.3.0",
+  "apps": [
+    {
+      "id": "c61fa0fc-407f-4a54-b9fa-df92b3766df9",
+      "name": "Local Ecobee Helpers",
+      "namespace": "RamSet",
+      "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/ecobee-hap-helpers/ecobee-hap-helpers-parent.groovy",
+      "required": true,
+      "oauth": false,
+      "primary": true,
+      "description": "Parent app that hosts the Ecobee local helper child apps and holds the shared thermostat reference."
+    },
+    {
+      "id": "ade4e095-cc86-41f9-840b-046dc434844a",
+      "name": "Local Ecobee Room Vent",
+      "namespace": "RamSet",
+      "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/ecobee-hap-helpers/ecobee-hap-room-vent-child.groovy",
+      "required": true,
+      "oauth": false,
+      "primary": false,
+      "description": "Per-room vent control following the thermostat's heating/cooling state and setpoints, with an adjustable periodic re-evaluation and a minimum open floor."
+    },
+    {
+      "id": "50a64621-8f1a-42ba-87d6-8a4c8415d619",
+      "name": "Local Ecobee Open-Contact Pause",
+      "namespace": "RamSet",
+      "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/ecobee-hap-helpers/ecobee-hap-contact-pause-child.groovy",
+      "required": true,
+      "oauth": false,
+      "primary": false,
+      "description": "Pauses the entire HVAC while any monitored window/door contact is open, with minute-based delays and optional notifications."
+    },
+    {
+      "id": "daf16935-5291-4be8-94f6-97e1a3685a32",
+      "name": "Local Ecobee Humidity",
+      "namespace": "RamSet",
+      "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/ecobee-hap-helpers/ecobee-hap-humidity-child.groovy",
+      "required": true,
+      "oauth": false,
+      "primary": false,
+      "description": "Runs a humidifier switch/socket while the heater is on, up to a maximum desired humidity, with optional frost control."
+    }
+  ]
+}

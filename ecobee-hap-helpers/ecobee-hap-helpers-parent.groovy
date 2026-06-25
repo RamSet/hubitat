@@ -6,6 +6,15 @@
  *  Inspired by SANdood Ecobee Suite helpers, rebuilt from scratch.
  *
  *  Namespace: RamSet
+ *
+ *  Author: RamSet
+ *  Version: 1.0.0 (2026-06-24)
+ *  Version history:
+ *    1.0.0 - Initial release. Parent framework for Room Vent, Open-Contact Pause and Humidity helpers.
+ *
+ *  DISCLAIMER: Provided as-is, without warranty of any kind. You are solely
+ *  responsible for the safe operation of your HVAC system and connected devices.
+ *  Use at your own risk.
  */
 definition(
     name:        "Local Ecobee Helpers",

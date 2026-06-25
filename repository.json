@@ -43,6 +43,12 @@
       "category": "Thermostats",
       "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/manifest-ecobee-hap.json",
       "description": "Control an ecobee thermostat 100% locally over the HomeKit Accessory Protocol (HAP) — no cloud, no Apple hardware, no bridge. In-driver pairing, mode/setpoints/humidity/operating state, remote room sensors as child devices, and real-time HomeKit event push."
+    },
+    {
+      "name": "Local Ecobee Helpers",
+      "category": "Thermostats",
+      "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/manifest-ecobee-helpers.json",
+      "description": "Offline helper apps for the Ecobee HAP Thermostat (Local): per-room vent control, open-contact HVAC pause with notifications, and humidifier control. Add as many helpers as needed under one parent."
     }
   ]
 }

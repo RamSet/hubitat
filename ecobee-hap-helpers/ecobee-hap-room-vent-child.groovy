@@ -7,6 +7,15 @@
  *  once the room is satisfied. Fully offline.
  *
  *  Child of: Local Ecobee Helpers (RamSet)
+ *
+ *  Author: RamSet
+ *  Version: 1.0.0 (2026-06-24)
+ *  Version history:
+ *    1.0.0 - Initial release. Proportional vent control with adjustable periodic re-evaluation.
+ *
+ *  DISCLAIMER: Provided as-is, without warranty of any kind. You are solely
+ *  responsible for the safe operation of your HVAC system and connected devices.
+ *  Closing too many vents can damage your system — use at your own risk.
  */
 definition(
     name:        "Local Ecobee Room Vent",
