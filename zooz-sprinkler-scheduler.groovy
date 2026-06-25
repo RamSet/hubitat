@@ -1185,7 +1185,7 @@ def aboutPage() {
             paragraph "A Hubitat app for running sprinkler zones via Zooz ZEN16 / ZEN17 800LR multi-relay controllers — or any Hubitat device exposing the Switch capability. Hardware-agnostic, multi-instance, with Spruce-style weather adaptation, per-zone moisture-aware watering, restrictions (quiet hours / mode / HSM), pause-and-resume from external sensors, hub-independent hardware watchdog via Z-Wave parameters (model-aware: pushes the right per-relay timers for ZEN16's 3 relays or ZEN17's 2 relays), full external JSON/HTML/iCal API, and granular templated notifications with Pushover support."
         }
         section("Changelog") {
-            paragraph "v0.12.3 — Fixed false \"relay unreachable\" alerts right after a successful watering. The reachability watchdog judged the controller only by when its parent device last reported to the hub, which some Zooz drivers don't refresh when a child relay is toggled — so a controller the app had just driven could be flagged unreachable. The app now counts its own successful waterings as proof the controller is reachable."
+            paragraph "v0.12.3 — Fixed false \"relay unreachable\" alerts right after a successful watering. The reachability watchdog judged the controller only by when its parent device last reported to the hub, which some Zooz drivers don't refresh when a child relay is toggled — so a controller the app had just driven could be flagged unreachable. The app now counts its own successful waterings as proof the controller is reachable, attributed to the specific controller that owns the relay so a run on one controller can't hide a genuine outage on another."
             paragraph "v0.12.2 — Fixed pause sensors reporting \"0s remaining\" and skipping ahead when they fired during a soak or the gap between zones. The schedule now tracks soak and between-zone phases as pausable too, so a pause that lands mid-soak reports the real soak time left and resumes that soak (valves stay off) instead of jumping to the next zone."
             paragraph "v0.12.1 — The Hardware-Safety push no longer claims \"successful\" just because the commands were sent. It now reads the Auto-Off timers back off each controller ~15s later and reports the truth — \"✓ armed\" with the real values, or \"⚠ did NOT take\" with a prompt to flip the setParameter-order override and push again (and an error notification if any relay is left unprotected)."
             paragraph "v0.12.0 — IMPORTANT safety fix: the Hardware-Safety push was sending the relay Auto-Off timers in the wrong setParameter argument order, so they silently never took (the device's P6/P8/P10 stayed 0 — no hardware failsafe) even though the push reported success. The app can't read argument names from Hubitat, so it now defaults to the correct jtp10181/vendored-driver order (paramNumber, value, size), with a manual override on the Hardware-safety page. Re-push after updating, and confirm the Auto Turn-Off timers are non-zero on each relay."
@@ -2023,10 +2023,11 @@ def startNextZone() {
     }
     state.lastRunByZone[zid.toString()] = new Date().format("yyyy-MM-dd HH:mm", location?.timeZone ?: TimeZone.getDefault())
     sw.on()
-    // The app just successfully drove a relay — proof the controller is reachable.
-    // The reachability watchdog folds this in so a run it just completed can't be
-    // reported "unreachable" merely because the parent device object stayed quiet.
-    state.lastZoneActuationMs = now()
+    // The app just successfully drove this relay — proof its OWNING controller is
+    // reachable. Stamp that specific parent so the watchdog won't false-flag a
+    // controller the app just drove, while still catching a real outage on a
+    // different controller that didn't run this cycle.
+    markControllerReachable(sw)
     // Mirror onto the exposed child Virtual Switch (HomeKit/dashboard view),
     // then reconcile all tiles so any prior zone's tile is cleared.
     setZoneChildSwitch(zid, "on")
@@ -3893,11 +3894,13 @@ def zen16Watchdog() {
                 Date la = dev.getLastActivity()
                 if (la) last = la.getTime()
             }
-            // A successful watering actuation by the app is itself proof the
+            // A successful watering actuation by the app is itself proof THIS
             // controller is reachable — some Zooz drivers don't bump the parent
             // device's lastActivity when a child relay is toggled, so without this
             // a relay the app just drove would be false-flagged as unreachable.
-            Long appActed = state.lastZoneActuationMs as Long
+            // Keyed per-parent so a run on one controller can't mask an outage on
+            // another that didn't water this cycle.
+            Long appActed = ((state.lastActuationByParent ?: [:]) as Map)[id] as Long
             if (appActed && (last == null || appActed > last)) last = appActed
             // Recent chatter (or no lastActivity support) → treat as reachable.
             if (last == null || (now - last) <= staleMs) {
@@ -3931,6 +3934,30 @@ def zen16Watchdog() {
     }
     state.watchdogProbeAt = probeAt
     state.watchdogAlerted = alerted
+}
+
+// Record that the app successfully drove a relay, attributed to the controller
+// that owns it, so the reachability watchdog treats that one parent as reachable.
+private void markControllerReachable(sw) {
+    String pkey = controllerKeyFor(sw)
+    if (!pkey) return
+    Map m = (state.lastActuationByParent ?: [:]) as Map
+    m[pkey] = now()
+    state.lastActuationByParent = m
+}
+
+// Resolve a zone switch to its owning parent controller's device id (as String),
+// matching the ids of the devices picked under hwZen16Parents. Child component
+// relays report their parent via getParentDeviceId(); if the switch is itself a
+// top-level device, its own id is used.
+private String controllerKeyFor(sw) {
+    if (!sw) return null
+    try {
+        def pid = sw.respondsTo("getParentDeviceId") ? sw.getParentDeviceId() : null
+        return ((pid ?: sw.id) as String)
+    } catch (e) {
+        try { return sw.id as String } catch (e2) { return null }
+    }
 }
 
 // Actively prod a device so a reachable-but-idle relay reports in (updating
