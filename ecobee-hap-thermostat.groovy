@@ -12,10 +12,15 @@
  *   thermostat's HomeKit slots; resetting HomeKit on the device frees a slot.
  *
  * Author: RamSet
- * Version: 0.11.1
+ * Version: 0.11.2
  * Date: 2026-06-24
  *
  * Changelog:
+ *  v0.11.2 - Fix setpoint reporting in heat/cool: the cooling/heating setpoint now reflects the
+ *           actual target (HAP TargetTemperature) instead of the Auto-mode threshold, which made
+ *           the displayed cool/heat point disagree with what the thermostat was really doing.
+ *           (Thresholds are still used in Auto mode.) Matches the existing mode-aware writes.
+ *
  *  v0.11.1 - Fix reversed fan mode: "On" was setting Auto and vice-versa (HAP TargetFanState
  *           is 0=Manual/On, 1=Auto — the driver had it inverted on both write and read).
  *
@@ -49,7 +54,7 @@
  *   "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/ecobee-hap-thermostat.groovy",
  *   "description": "Local HAP controller for an ecobee thermostat: mode, setpoints, temperature, humidity, operating state, fan, and remote sensors.",
  *   "required": true,
- *   "version": "0.11.1"
+ *   "version": "0.11.2"
  * }
  *
  * Copyright 2026 RamSet
@@ -582,10 +587,22 @@ void applyState(j){
     def g={ iid-> vmap["${TAID}.${iid}"] }
     if(g(19)!=null) sendEvent(name:"temperature", value: cToHub(g(19)), unit:"°${isF()?'F':'C'}")
     if(g(24)!=null) sendEvent(name:"humidity", value: g(24) as int, unit:"%")
-    if(g(20)!=null) sendEvent(name:"thermostatSetpoint", value: cToHub(g(20)))
-    if(g(22)!=null) sendEvent(name:"coolingSetpoint", value: cToHub(g(22)))
-    if(g(23)!=null) sendEvent(name:"heatingSetpoint", value: cToHub(g(23)))
     if(g(18)!=null) sendEvent(name:"thermostatMode", value: [0:"off",1:"heat",2:"cool",3:"auto"][g(18) as int])
+    // Setpoint reporting is mode-aware (matches the writes): in heat/cool the real target is iid20
+    // (TargetTemperature); iid22/iid23 (thresholds) only apply in Auto. Reporting iid22/23 in cool/heat
+    // shows a stale Auto threshold instead of the actual target.
+    String tmode = (g(18)!=null) ? [0:"off",1:"heat",2:"cool",3:"auto"][g(18) as int] : device.currentValue("thermostatMode")
+    if(g(20)!=null) sendEvent(name:"thermostatSetpoint", value: cToHub(g(20)))
+    if(tmode=="cool"){
+        if(g(20)!=null) sendEvent(name:"coolingSetpoint", value: cToHub(g(20)))
+        if(g(23)!=null) sendEvent(name:"heatingSetpoint", value: cToHub(g(23)))
+    } else if(tmode=="heat"){
+        if(g(20)!=null) sendEvent(name:"heatingSetpoint", value: cToHub(g(20)))
+        if(g(22)!=null) sendEvent(name:"coolingSetpoint", value: cToHub(g(22)))
+    } else {   // auto / off -> the two thresholds are the active setpoints
+        if(g(22)!=null) sendEvent(name:"coolingSetpoint", value: cToHub(g(22)))
+        if(g(23)!=null) sendEvent(name:"heatingSetpoint", value: cToHub(g(23)))
+    }
     if(g(17)!=null) sendEvent(name:"thermostatOperatingState", value: [0:"idle",1:"heating",2:"cooling"][g(17) as int])
     if(g(75)!=null) sendEvent(name:"thermostatFanMode", value: (g(75) as int)==1?"auto":"on")
     if(g(33)!=null) sendEvent(name:"comfortProfile", value: [0:"Home",1:"Sleep",2:"Away",3:"Hold"][g(33) as int] ?: "Hold")
