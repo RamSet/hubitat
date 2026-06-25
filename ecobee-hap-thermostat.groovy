@@ -12,10 +12,14 @@
  *   thermostat's HomeKit slots; resetting HomeKit on the device frees a slot.
  *
  * Author: RamSet
- * Version: 0.11.2
+ * Version: 0.11.3
  * Date: 2026-06-24
  *
  * Changelog:
+ *  v0.11.3 - Fan mode now updates live: subscribe to TargetFanState (iid75) events so an external
+ *           On/Auto change (e.g. from webCoRE or the thermostat) reflects without a manual Refresh;
+ *           driver-issued fan commands also update the attribute immediately.
+ *
  *  v0.11.2 - Fix setpoint reporting in heat/cool: the cooling/heating setpoint now reflects the
  *           actual target (HAP TargetTemperature) instead of the Auto-mode threshold, which made
  *           the displayed cool/heat point disagree with what the thermostat was really doing.
@@ -54,7 +58,7 @@
  *   "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/ecobee-hap-thermostat.groovy",
  *   "description": "Local HAP controller for an ecobee thermostat: mode, setpoints, temperature, humidity, operating state, fan, and remote sensors.",
  *   "required": true,
- *   "version": "0.11.2"
+ *   "version": "0.11.3"
  * }
  *
  * Copyright 2026 RamSet
@@ -375,7 +379,7 @@ def setHumiditySetpoint(h){ writeChar(TAID,25, (h as BigDecimal)) }
 def setFanMinOnTime(m){ writeChar(TAID,52, (m as int)) }
 def setCharacteristic(String aidIid, String value){ def p=aidIid.split("\\."); def v = value.isNumber()? (value.contains(".")? (value as BigDecimal):(value as Integer)) : value; writeChar(p[0] as long, p[1] as int, v) }
 // HAP iid75 = TargetFanState: 0=Manual(fan ON/continuous), 1=Auto
-def setThermostatFanMode(String m){ writeChar(TAID,75, (m?.toLowerCase()=="on")?0:1) }
+def setThermostatFanMode(String m){ boolean on=(m?.toLowerCase()=="on"); writeChar(TAID,75, on?0:1); sendEvent(name:"thermostatFanMode", value: on?"on":"auto") }
 def fanOn(){ setThermostatFanMode("on") }
 def fanAuto(){ setThermostatFanMode("auto") }
 def fanCirculate(){ setThermostatFanMode("on") }
@@ -547,7 +551,7 @@ def kaWatch(){
     }
 }
 String subscribeBody(){
-    def ev=[]; [17,18,19,20,22,23,24,25].each{ ev << "{\"aid\":${TAID},\"iid\":${it},\"ev\":true}" }
+    def ev=[]; [17,18,19,20,22,23,24,25,75].each{ ev << "{\"aid\":${TAID},\"iid\":${it},\"ev\":true}" }
     (state.sensors ?: []).each{ s-> [s.temp,s.occ,s.motion,s.lowbatt].each{ if(it!=null) ev << "{\"aid\":${s.aid},\"iid\":${it},\"ev\":true}" } }
     String b="{\"characteristics\":[${ev.join(',')}]}"
     return "PUT /characteristics HTTP/1.1\r\nHost: ${settings.ip}\r\nContent-Type: application/hap+json\r\nContent-Length: ${b.getBytes('UTF-8').length}\r\nConnection: keep-alive\r\n\r\n"+b
