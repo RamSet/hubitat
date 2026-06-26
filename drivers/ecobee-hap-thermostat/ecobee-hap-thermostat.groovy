@@ -22,7 +22,8 @@
  *
  *  v0.11.7 - The thermostat's own motion + occupancy (presence) are now ENABLED by default and
  *           reported live (subscribed + keepalive). To turn them off, comment out the two capability
- *           lines and re-import (the emits are capability-guarded, so commenting out fully disables them).
+ *           lines and click Save (not Import); the emits are capability-guarded, so commenting out fully
+ *           disables them. (See the capability-line note — the edit is not preserved across updates.)
  *
  *  v0.11.6 - Consistency: EVERY write command now updates its attribute immediately (optimistic) —
  *           setpoints, comfort profile, humidifier, fan min-on-time (mode & fan already did) — so the
