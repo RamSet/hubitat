@@ -12,10 +12,13 @@
  *   thermostat's HomeKit slots; resetting HomeKit on the device frees a slot.
  *
  * Author: RamSet
- * Version: 0.11.9
+ * Version: 0.11.10
  * Date: 2026-06-24
  *
  * Changelog:
+ *  v0.11.10 - Keepalive also re-reads the remaining undecoded custom characteristics (iid49/50/51/53)
+ *           so their raw values stay live in customParams (groundwork for decoding/exposing them).
+ *
  *  v0.11.9 - Expose more of the HomeKit surface: fanState (actual fan running — inactive/idle/blowing),
  *           thermostatAlert (ecobee alerts/reminders text), and the six per-profile setpoints
  *           (home/away/sleep heat & cool). All read-only; refreshed via subscription + keepalive.
@@ -87,7 +90,7 @@
  *   "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/drivers/ecobee-hap-thermostat/ecobee-hap-thermostat.groovy",
  *   "description": "Local HAP controller for an ecobee thermostat: mode, setpoints, temperature, humidity, operating state, fan, and remote sensors.",
  *   "required": true,
- *   "version": "0.11.9"
+ *   "version": "0.11.10"
  * }
  *
  * Copyright 2026 RamSet
@@ -580,7 +583,7 @@ def liveKeepalive(){
         state.kaCtr = state.inCtr
         // re-reads the full thermostat state every keepalive so ANY event missed during a session drop
         // (mode, setpoints, operating state, fan, comfort/hold) self-heals within ~5 min; doubles as the watchdog probe
-        String ids=[17,18,19,20,22,23,24,25,33,34,35,36,37,38,39,41,52,54,65,66,75,76].collect{ "${TAID}.${it}" }.join(",")
+        String ids=[17,18,19,20,22,23,24,25,33,34,35,36,37,38,39,41,49,50,51,52,53,54,65,66,75,76].collect{ "${TAID}.${it}" }.join(",")
         sendEncrypted("GET /characteristics?id=${ids} HTTP/1.1\r\nHost: ${settings.ip}\r\n\r\n")
         runIn(12,"kaWatch")
     } else { startLive() }
