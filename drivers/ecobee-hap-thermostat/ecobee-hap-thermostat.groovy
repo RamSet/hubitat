@@ -12,10 +12,14 @@
  *   thermostat's HomeKit slots; resetting HomeKit on the device frees a slot.
  *
  * Author: RamSet
- * Version: 0.11.8
+ * Version: 0.11.9
  * Date: 2026-06-24
  *
  * Changelog:
+ *  v0.11.9 - Expose more of the HomeKit surface: fanState (actual fan running — inactive/idle/blowing),
+ *           thermostatAlert (ecobee alerts/reminders text), and the six per-profile setpoints
+ *           (home/away/sleep heat & cool). All read-only; refreshed via subscription + keepalive.
+ *
  *  v0.11.8 - Doc fix: corrected the note on disabling the thermostat's motion/occupancy — comment the
  *           capability lines out and SAVE (not Import, which overwrites edits), and note that the change
  *           is a manual code edit not preserved across a re-import or HPM update (must be redone).
@@ -83,7 +87,7 @@
  *   "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/drivers/ecobee-hap-thermostat/ecobee-hap-thermostat.groovy",
  *   "description": "Local HAP controller for an ecobee thermostat: mode, setpoints, temperature, humidity, operating state, fan, and remote sensors.",
  *   "required": true,
- *   "version": "0.11.8"
+ *   "version": "0.11.9"
  * }
  *
  * Copyright 2026 RamSet
@@ -117,6 +121,14 @@ metadata {
         attribute "holdEndsAt", "string"
         attribute "humiditySetpoint", "number"
         attribute "fanMinOnTime", "number"
+        attribute "fanState", "string"          // actual fan running state: inactive / idle / blowing (HAP iid76)
+        attribute "thermostatAlert", "string"   // ecobee alerts/reminders text (HAP iid54)
+        attribute "homeHeatSetpoint", "number"  // per-comfort-profile targets (HAP iid34-39, Home/Away/Sleep)
+        attribute "homeCoolSetpoint", "number"
+        attribute "awayHeatSetpoint", "number"
+        attribute "awayCoolSetpoint", "number"
+        attribute "sleepHeatSetpoint", "number"
+        attribute "sleepCoolSetpoint", "number"
         attribute "customParams", "string"
         attribute "hapStatus", "string"
         attribute "diag", "string"
@@ -568,7 +580,7 @@ def liveKeepalive(){
         state.kaCtr = state.inCtr
         // re-reads the full thermostat state every keepalive so ANY event missed during a session drop
         // (mode, setpoints, operating state, fan, comfort/hold) self-heals within ~5 min; doubles as the watchdog probe
-        String ids=[17,18,19,20,22,23,24,25,33,41,52,65,66,75].collect{ "${TAID}.${it}" }.join(",")
+        String ids=[17,18,19,20,22,23,24,25,33,34,35,36,37,38,39,41,52,54,65,66,75,76].collect{ "${TAID}.${it}" }.join(",")
         sendEncrypted("GET /characteristics?id=${ids} HTTP/1.1\r\nHost: ${settings.ip}\r\n\r\n")
         runIn(12,"kaWatch")
     } else { startLive() }
@@ -582,7 +594,7 @@ def kaWatch(){
     }
 }
 String subscribeBody(){
-    def ev=[]; [17,18,19,20,22,23,24,25,65,66,75].each{ ev << "{\"aid\":${TAID},\"iid\":${it},\"ev\":true}" }
+    def ev=[]; [17,18,19,20,22,23,24,25,65,66,75,76].each{ ev << "{\"aid\":${TAID},\"iid\":${it},\"ev\":true}" }
     (state.sensors ?: []).each{ s-> [s.temp,s.occ,s.motion,s.batt,s.lowbatt].each{ if(it!=null) ev << "{\"aid\":${s.aid},\"iid\":${it},\"ev\":true}" } }
     String b="{\"characteristics\":[${ev.join(',')}]}"
     return "PUT /characteristics HTTP/1.1\r\nHost: ${settings.ip}\r\nContent-Type: application/hap+json\r\nContent-Length: ${b.getBytes('UTF-8').length}\r\nConnection: keep-alive\r\n\r\n"+b
@@ -644,6 +656,15 @@ void applyState(j){
     if(g(41)!=null){ String h=g(41).toString().replaceAll(/S$/,""); sendEvent(name:"holdEndsAt", value: h.startsWith("2014-01-03")?"":h) }
     if(g(25)!=null) sendEvent(name:"humiditySetpoint", value: g(25) as int, unit:"%")
     if(g(52)!=null) sendEvent(name:"fanMinOnTime", value: g(52) as int)
+    if(g(76)!=null) sendEvent(name:"fanState", value: [0:"inactive",1:"idle",2:"blowing"][g(76) as int] ?: "unknown")
+    if(g(54)!=null) sendEvent(name:"thermostatAlert", value: g(54).toString())
+    // per-profile setpoints (HAP iid34-39 follow ecobee's fixed Home/Away/Sleep climate order)
+    if(g(34)!=null) sendEvent(name:"homeHeatSetpoint",  value: cToHub(g(34)))
+    if(g(35)!=null) sendEvent(name:"homeCoolSetpoint",  value: cToHub(g(35)))
+    if(g(36)!=null) sendEvent(name:"awayHeatSetpoint",  value: cToHub(g(36)))
+    if(g(37)!=null) sendEvent(name:"awayCoolSetpoint",  value: cToHub(g(37)))
+    if(g(38)!=null) sendEvent(name:"sleepHeatSetpoint", value: cToHub(g(38)))
+    if(g(39)!=null) sendEvent(name:"sleepCoolSetpoint", value: cToHub(g(39)))
     // thermostat's own motion (iid66) / occupancy (iid65) — only emitted if those capabilities are enabled above
     if(g(66)!=null && device.hasCapability("MotionSensor")) sendEvent(name:"motion", value: (g(66) ? "active":"inactive"))
     if(g(65)!=null && device.hasCapability("PresenceSensor")) sendEvent(name:"presence", value: ((g(65) as int)>0 ? "present":"not present"))
