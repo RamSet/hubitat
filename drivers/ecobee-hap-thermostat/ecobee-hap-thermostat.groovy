@@ -12,10 +12,15 @@
  *   thermostat's HomeKit slots; resetting HomeKit on the device frees a slot.
  *
  * Author: RamSet
- * Version: 0.11.10
+ * Version: 0.11.11
  * Date: 2026-06-24
  *
  * Changelog:
+ *  v0.11.11 - Removed setFanMinOnTime command + fanMinOnTime attribute: empirically confirmed (on real
+ *           hardware) that iid52 is NOT the fan minimum runtime — changing it on the thermostat (to 5
+ *           and 20 min/hr) never moved iid52. Fan min-runtime isn't exposed over HAP, and the command
+ *           was writing an unidentified characteristic, so it's gone. (iid52 remains raw in customParams.)
+ *
  *  v0.11.10 - Keepalive also re-reads the remaining undecoded custom characteristics (iid49/50/51/53)
  *           so their raw values stay live in customParams (groundwork for decoding/exposing them).
  *
@@ -90,7 +95,7 @@
  *   "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/drivers/ecobee-hap-thermostat/ecobee-hap-thermostat.groovy",
  *   "description": "Local HAP controller for an ecobee thermostat: mode, setpoints, temperature, humidity, operating state, fan, and remote sensors.",
  *   "required": true,
- *   "version": "0.11.10"
+ *   "version": "0.11.11"
  * }
  *
  * Copyright 2026 RamSet
@@ -118,12 +123,10 @@ metadata {
         command "resumeProgram"
         command "setComfortProfile", [[name:"profile*",type:"ENUM",constraints:["Home","Away","Sleep"]]]
         command "setHumiditySetpoint", [[name:"humidity %*",type:"NUMBER",description:"target humidity, 20-50"]]
-        command "setFanMinOnTime", [[name:"minutes per hour*",type:"NUMBER",description:"fan minimum runtime per hour, 0-55"]]
         command "setCharacteristic", [[name:"aid.iid*",type:"STRING",description:"HAP characteristic, e.g. 1.40"],[name:"value*",type:"STRING",description:"value to write (number or string)"]]
         attribute "comfortProfile", "string"
         attribute "holdEndsAt", "string"
         attribute "humiditySetpoint", "number"
-        attribute "fanMinOnTime", "number"
         attribute "fanState", "string"          // actual fan running state: inactive / idle / blowing (HAP iid76)
         attribute "thermostatAlert", "string"   // ecobee alerts/reminders text (HAP iid54)
         attribute "homeHeatSetpoint", "number"  // per-comfort-profile targets (HAP iid34-39, Home/Away/Sleep)
@@ -419,7 +422,6 @@ def resumeProgram(){ writeChar(TAID,48, true) }
 // ecobee comfort profiles over HAP iid40 (write) — confirmed mapping: Home=0, Sleep=1, Away=2 (3=manual hold, read-only)
 def setComfortProfile(String p){ def v=[Home:0,Sleep:1,Away:2][p]; if(v!=null){ writeChar(TAID,40, v as int); sendEvent(name:"comfortProfile", value:p) } else log.warn "HAP: unknown comfort profile $p" }
 def setHumiditySetpoint(h){ writeChar(TAID,25, (h as BigDecimal)); sendEvent(name:"humiditySetpoint", value:(h as int), unit:"%") }
-def setFanMinOnTime(m){ writeChar(TAID,52, (m as int)); sendEvent(name:"fanMinOnTime", value:(m as int)) }
 def setCharacteristic(String aidIid, String value){ def p=aidIid.split("\\."); def v = value.isNumber()? (value.contains(".")? (value as BigDecimal):(value as Integer)) : value; writeChar(p[0] as long, p[1] as int, v) }
 // HAP iid75 = TargetFanState: 0=Manual(fan ON/continuous), 1=Auto
 def setThermostatFanMode(String m){ boolean on=(m?.toLowerCase()=="on"); writeChar(TAID,75, on?0:1); sendEvent(name:"thermostatFanMode", value: on?"on":"auto") }
@@ -658,7 +660,6 @@ void applyState(j){
     if(g(33)!=null) sendEvent(name:"comfortProfile", value: [0:"Home",1:"Sleep",2:"Away",3:"Hold"][g(33) as int] ?: "Hold")
     if(g(41)!=null){ String h=g(41).toString().replaceAll(/S$/,""); sendEvent(name:"holdEndsAt", value: h.startsWith("2014-01-03")?"":h) }
     if(g(25)!=null) sendEvent(name:"humiditySetpoint", value: g(25) as int, unit:"%")
-    if(g(52)!=null) sendEvent(name:"fanMinOnTime", value: g(52) as int)
     if(g(76)!=null) sendEvent(name:"fanState", value: [0:"inactive",1:"idle",2:"blowing"][g(76) as int] ?: "unknown")
     if(g(54)!=null) sendEvent(name:"thermostatAlert", value: g(54).toString())
     // per-profile setpoints (HAP iid34-39 follow ecobee's fixed Home/Away/Sleep climate order)
