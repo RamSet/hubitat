@@ -12,10 +12,14 @@
  *   thermostat's HomeKit slots; resetting HomeKit on the device frees a slot.
  *
  * Author: RamSet
- * Version: 0.11.7
+ * Version: 0.11.8
  * Date: 2026-06-24
  *
  * Changelog:
+ *  v0.11.8 - Doc fix: corrected the note on disabling the thermostat's motion/occupancy — comment the
+ *           capability lines out and SAVE (not Import, which overwrites edits), and note that the change
+ *           is a manual code edit not preserved across a re-import or HPM update (must be redone).
+ *
  *  v0.11.7 - The thermostat's own motion + occupancy (presence) are now ENABLED by default and
  *           reported live (subscribed + keepalive). To turn them off, comment out the two capability
  *           lines and re-import (the emits are capability-guarded, so commenting out fully disables them).
@@ -78,7 +82,7 @@
  *   "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/drivers/ecobee-hap-thermostat/ecobee-hap-thermostat.groovy",
  *   "description": "Local HAP controller for an ecobee thermostat: mode, setpoints, temperature, humidity, operating state, fan, and remote sensors.",
  *   "required": true,
- *   "version": "0.11.7"
+ *   "version": "0.11.8"
  * }
  *
  * Copyright 2026 RamSet
@@ -93,8 +97,10 @@ metadata {
         capability "Thermostat"
         capability "TemperatureMeasurement"
         capability "RelativeHumidityMeasurement"
-        // The thermostat's own motion/occupancy are ENABLED. If you don't want them on the thermostat
-        // (e.g. you rely only on the room sensors' child devices), COMMENT OUT the next two lines and re-import/Save.
+        // The thermostat's own motion/occupancy are ENABLED by default. To turn them OFF, comment out the
+        // two capability lines below, then click SAVE in this code editor (do NOT use Import — importing
+        // overwrites your edit with the published version). NOTE: this is a manual code change and is NOT
+        // preserved across a re-import or a package (HPM) update — you must redo it after any update.
         capability "MotionSensor"
         capability "PresenceSensor"
         capability "Refresh"
