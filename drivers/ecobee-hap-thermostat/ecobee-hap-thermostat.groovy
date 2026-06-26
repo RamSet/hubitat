@@ -12,10 +12,14 @@
  *   thermostat's HomeKit slots; resetting HomeKit on the device frees a slot.
  *
  * Author: RamSet
- * Version: 0.11.6
+ * Version: 0.11.7
  * Date: 2026-06-24
  *
  * Changelog:
+ *  v0.11.7 - The thermostat's own motion + occupancy (presence) are now ENABLED by default and
+ *           reported live (subscribed + keepalive). To turn them off, comment out the two capability
+ *           lines and re-import (the emits are capability-guarded, so commenting out fully disables them).
+ *
  *  v0.11.6 - Consistency: EVERY write command now updates its attribute immediately (optimistic) —
  *           setpoints, comfort profile, humidifier, fan min-on-time (mode & fan already did) — so the
  *           UI never lags a command, even for characteristics the ecobee doesn't push events for.
@@ -74,7 +78,7 @@
  *   "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/drivers/ecobee-hap-thermostat/ecobee-hap-thermostat.groovy",
  *   "description": "Local HAP controller for an ecobee thermostat: mode, setpoints, temperature, humidity, operating state, fan, and remote sensors.",
  *   "required": true,
- *   "version": "0.11.6"
+ *   "version": "0.11.7"
  * }
  *
  * Copyright 2026 RamSet
@@ -89,10 +93,10 @@ metadata {
         capability "Thermostat"
         capability "TemperatureMeasurement"
         capability "RelativeHumidityMeasurement"
-        // The thermostat's own motion/occupancy are DISABLED by default (the room sensors report these on
-        // their child devices). To expose them on the thermostat too, UNCOMMENT the next two lines and re-import/Save.
-        //capability "MotionSensor"
-        //capability "PresenceSensor"
+        // The thermostat's own motion/occupancy are ENABLED. If you don't want them on the thermostat
+        // (e.g. you rely only on the room sensors' child devices), COMMENT OUT the next two lines and re-import/Save.
+        capability "MotionSensor"
+        capability "PresenceSensor"
         capability "Refresh"
         command "setDesiredTemperature", [[name:"Desired temperature*",type:"NUMBER",description:"Target temperature to set on the thermostat"]]
         command "raiseSetpoint"
@@ -557,7 +561,7 @@ def liveKeepalive(){
         state.kaCtr = state.inCtr
         // re-reads the full thermostat state every keepalive so ANY event missed during a session drop
         // (mode, setpoints, operating state, fan, comfort/hold) self-heals within ~5 min; doubles as the watchdog probe
-        String ids=[17,18,19,20,22,23,24,25,33,41,52,75].collect{ "${TAID}.${it}" }.join(",")
+        String ids=[17,18,19,20,22,23,24,25,33,41,52,65,66,75].collect{ "${TAID}.${it}" }.join(",")
         sendEncrypted("GET /characteristics?id=${ids} HTTP/1.1\r\nHost: ${settings.ip}\r\n\r\n")
         runIn(12,"kaWatch")
     } else { startLive() }
@@ -571,7 +575,7 @@ def kaWatch(){
     }
 }
 String subscribeBody(){
-    def ev=[]; [17,18,19,20,22,23,24,25,75].each{ ev << "{\"aid\":${TAID},\"iid\":${it},\"ev\":true}" }
+    def ev=[]; [17,18,19,20,22,23,24,25,65,66,75].each{ ev << "{\"aid\":${TAID},\"iid\":${it},\"ev\":true}" }
     (state.sensors ?: []).each{ s-> [s.temp,s.occ,s.motion,s.batt,s.lowbatt].each{ if(it!=null) ev << "{\"aid\":${s.aid},\"iid\":${it},\"ev\":true}" } }
     String b="{\"characteristics\":[${ev.join(',')}]}"
     return "PUT /characteristics HTTP/1.1\r\nHost: ${settings.ip}\r\nContent-Type: application/hap+json\r\nContent-Length: ${b.getBytes('UTF-8').length}\r\nConnection: keep-alive\r\n\r\n"+b
@@ -633,7 +637,9 @@ void applyState(j){
     if(g(41)!=null){ String h=g(41).toString().replaceAll(/S$/,""); sendEvent(name:"holdEndsAt", value: h.startsWith("2014-01-03")?"":h) }
     if(g(25)!=null) sendEvent(name:"humiditySetpoint", value: g(25) as int, unit:"%")
     if(g(52)!=null) sendEvent(name:"fanMinOnTime", value: g(52) as int)
-    // (thermostat's own motion/occupancy not reported — capabilities commented out above)
+    // thermostat's own motion (iid66) / occupancy (iid65) — only emitted if those capabilities are enabled above
+    if(g(66)!=null && device.hasCapability("MotionSensor")) sendEvent(name:"motion", value: (g(66) ? "active":"inactive"))
+    if(g(65)!=null && device.hasCapability("PresenceSensor")) sendEvent(name:"presence", value: ((g(65) as int)>0 ? "present":"not present"))
     sendEvent(name:"supportedThermostatModes", value: '["off","heat","cool","auto"]')
     sendEvent(name:"supportedThermostatFanModes", value: '["on","auto"]')
     // ---- custom params -> attribute (only when present; events are partial) ----
