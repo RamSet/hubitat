@@ -12,10 +12,21 @@
  *   thermostat's HomeKit slots; resetting HomeKit on the device frees a slot.
  *
  * Author: RamSet
- * Version: 0.11.4
+ * Version: 0.11.6
  * Date: 2026-06-24
  *
  * Changelog:
+ *  v0.11.6 - Consistency: EVERY write command now updates its attribute immediately (optimistic) —
+ *           setpoints, comfort profile, humidifier, fan min-on-time (mode & fan already did) — so the
+ *           UI never lags a command, even for characteristics the ecobee doesn't push events for.
+ *           Remote-sensor battery added to the live subscription. (Driver relocated in the repo to
+ *           drivers/ecobee-hap-thermostat/.)
+ *
+ *  v0.11.5 - thermostatMode now follows commands immediately (optimistic update, like fan mode in
+ *           0.11.3) — fixes the mode showing stale (e.g. "off") after an app/rule sets it. Also the
+ *           5-min keepalive now re-reads the FULL thermostat state, so any event missed during a
+ *           session drop (mode, setpoints, operating state, fan) self-heals within ~5 min.
+ *
  *  v0.11.4 - comfortProfile/holdEndsAt now self-refresh: the 5-min keepalive also reads the
  *           no-notify characteristics (comfort profile, hold-end, fan min-on-time), so they
  *           update on their own instead of only after a manual Refresh. (These chars can't be
@@ -63,7 +74,7 @@
  *   "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/drivers/ecobee-hap-thermostat/ecobee-hap-thermostat.groovy",
  *   "description": "Local HAP controller for an ecobee thermostat: mode, setpoints, temperature, humidity, operating state, fan, and remote sensors.",
  *   "required": true,
- *   "version": "0.11.4"
+ *   "version": "0.11.6"
  * }
  *
  * Copyright 2026 RamSet
@@ -353,35 +364,36 @@ void psM6(Map tv){
     sendEvent(name:"hapStatus", value:"paired"); log.info "HAP: paired OK, keys stored"
     interfaces.rawSocket.close(); runIn(3,"startLive")
 }
-def setThermostatMode(String m){ def v=[off:0,heat:1,cool:2,auto:3][m?.toLowerCase()]; if(v!=null) writeChar(TAID,18,v) else log.warn "bad mode $m" }
+def setThermostatMode(String m){ String lm=m?.toLowerCase(); def v=[off:0,heat:1,cool:2,auto:3][lm]; if(v!=null){ writeChar(TAID,18,v); sendEvent(name:"thermostatMode", value:lm) } else log.warn "bad mode $m" }
 def off(){ setThermostatMode("off") }
 def heat(){ setThermostatMode("heat") }
 def cool(){ setThermostatMode("cool") }
 def auto(){ setThermostatMode("auto") }
 def emergencyHeat(){ setThermostatMode("heat") }
 // HAP: in heat/cool the active setpoint is TargetTemperature (iid20); thresholds (22/23) apply only in auto
-def setHeatingSetpoint(t){ writeChar(TAID, (device.currentValue("thermostatMode")=="auto")?23:20, round1(hubToC(t as BigDecimal))) }
-def setCoolingSetpoint(t){ writeChar(TAID, (device.currentValue("thermostatMode")=="auto")?22:20, round1(hubToC(t as BigDecimal))) }
-def setThermostatSetpoint(t){ writeChar(TAID,20, round1(hubToC(t as BigDecimal))) }
+def setHeatingSetpoint(t){ String m=device.currentValue("thermostatMode"); writeChar(TAID, (m=="auto")?23:20, round1(hubToC(t as BigDecimal))); sendEvent(name:"heatingSetpoint", value:t); if(m!="auto") sendEvent(name:"thermostatSetpoint", value:t) }
+def setCoolingSetpoint(t){ String m=device.currentValue("thermostatMode"); writeChar(TAID, (m=="auto")?22:20, round1(hubToC(t as BigDecimal))); sendEvent(name:"coolingSetpoint", value:t); if(m!="auto") sendEvent(name:"thermostatSetpoint", value:t) }
+def setThermostatSetpoint(t){ String m=device.currentValue("thermostatMode"); writeChar(TAID,20, round1(hubToC(t as BigDecimal))); sendEvent(name:"thermostatSetpoint", value:t); if(m=="cool") sendEvent(name:"coolingSetpoint", value:t); else if(m=="heat") sendEvent(name:"heatingSetpoint", value:t) }
 def setDesiredTemperature(t){
     String m=device.currentValue("thermostatMode"); BigDecimal c=round1(hubToC(t as BigDecimal))
-    if(m=="auto"){ writeChars([[TAID,22,c],[TAID,23,c]]) } else { writeChar(TAID,20,c) }
+    if(m=="auto"){ writeChars([[TAID,22,c],[TAID,23,c]]); sendEvent(name:"coolingSetpoint", value:t); sendEvent(name:"heatingSetpoint", value:t) }
+    else { writeChar(TAID,20,c); sendEvent(name:"thermostatSetpoint", value:t); if(m=="cool") sendEvent(name:"coolingSetpoint", value:t); else if(m=="heat") sendEvent(name:"heatingSetpoint", value:t) }
 }
 def raiseSetpoint(){ adjustSetpoint(1) }
 def lowerSetpoint(){ adjustSetpoint(-1) }
 void adjustSetpoint(BigDecimal d){
     String mode = device.currentValue("thermostatMode")
-    if(mode=="cool" || mode=="heat"){ def sp=device.currentValue("thermostatSetpoint"); if(sp!=null) writeChar(TAID,20, round1(hubToC((sp as BigDecimal)+d))) }
+    if(mode=="cool" || mode=="heat"){ def sp=device.currentValue("thermostatSetpoint"); if(sp!=null){ BigDecimal nv=(sp as BigDecimal)+d; writeChar(TAID,20, round1(hubToC(nv))); sendEvent(name:"thermostatSetpoint", value:nv); sendEvent(name:(mode=="cool"?"coolingSetpoint":"heatingSetpoint"), value:nv) } }
     else if(mode=="auto"){
         def c=device.currentValue("coolingSetpoint"); def h=device.currentValue("heatingSetpoint")
-        if(c!=null && h!=null) writeChars([[TAID,22,round1(hubToC((c as BigDecimal)+d))],[TAID,23,round1(hubToC((h as BigDecimal)+d))]])
+        if(c!=null && h!=null){ BigDecimal nc=(c as BigDecimal)+d, nh=(h as BigDecimal)+d; writeChars([[TAID,22,round1(hubToC(nc))],[TAID,23,round1(hubToC(nh))]]); sendEvent(name:"coolingSetpoint", value:nc); sendEvent(name:"heatingSetpoint", value:nh) }
     } else { log.info "HAP: mode is off — nothing to adjust" }
 }
 def resumeProgram(){ writeChar(TAID,48, true) }
 // ecobee comfort profiles over HAP iid40 (write) — confirmed mapping: Home=0, Sleep=1, Away=2 (3=manual hold, read-only)
-def setComfortProfile(String p){ def v=[Home:0,Sleep:1,Away:2][p]; if(v!=null){ writeChar(TAID,40, v as int) } else log.warn "HAP: unknown comfort profile $p" }
-def setHumiditySetpoint(h){ writeChar(TAID,25, (h as BigDecimal)) }
-def setFanMinOnTime(m){ writeChar(TAID,52, (m as int)) }
+def setComfortProfile(String p){ def v=[Home:0,Sleep:1,Away:2][p]; if(v!=null){ writeChar(TAID,40, v as int); sendEvent(name:"comfortProfile", value:p) } else log.warn "HAP: unknown comfort profile $p" }
+def setHumiditySetpoint(h){ writeChar(TAID,25, (h as BigDecimal)); sendEvent(name:"humiditySetpoint", value:(h as int), unit:"%") }
+def setFanMinOnTime(m){ writeChar(TAID,52, (m as int)); sendEvent(name:"fanMinOnTime", value:(m as int)) }
 def setCharacteristic(String aidIid, String value){ def p=aidIid.split("\\."); def v = value.isNumber()? (value.contains(".")? (value as BigDecimal):(value as Integer)) : value; writeChar(p[0] as long, p[1] as int, v) }
 // HAP iid75 = TargetFanState: 0=Manual(fan ON/continuous), 1=Auto
 def setThermostatFanMode(String m){ boolean on=(m?.toLowerCase()=="on"); writeChar(TAID,75, on?0:1); sendEvent(name:"thermostatFanMode", value: on?"on":"auto") }
@@ -543,9 +555,10 @@ void liveConnect(){
 def liveKeepalive(){
     if(state.live && state.sess){
         state.kaCtr = state.inCtr
-        // also reads the no-notify chars (33=comfortProfile, 41=holdEndsAt, 52=fanMinOnTime) so they self-refresh
-        // every keepalive instead of only on a manual Refresh; doubles as the watchdog liveness probe
-        sendEncrypted("GET /characteristics?id=${TAID}.19,${TAID}.33,${TAID}.41,${TAID}.52 HTTP/1.1\r\nHost: ${settings.ip}\r\n\r\n")
+        // re-reads the full thermostat state every keepalive so ANY event missed during a session drop
+        // (mode, setpoints, operating state, fan, comfort/hold) self-heals within ~5 min; doubles as the watchdog probe
+        String ids=[17,18,19,20,22,23,24,25,33,41,52,75].collect{ "${TAID}.${it}" }.join(",")
+        sendEncrypted("GET /characteristics?id=${ids} HTTP/1.1\r\nHost: ${settings.ip}\r\n\r\n")
         runIn(12,"kaWatch")
     } else { startLive() }
 }
@@ -559,7 +572,7 @@ def kaWatch(){
 }
 String subscribeBody(){
     def ev=[]; [17,18,19,20,22,23,24,25,75].each{ ev << "{\"aid\":${TAID},\"iid\":${it},\"ev\":true}" }
-    (state.sensors ?: []).each{ s-> [s.temp,s.occ,s.motion,s.lowbatt].each{ if(it!=null) ev << "{\"aid\":${s.aid},\"iid\":${it},\"ev\":true}" } }
+    (state.sensors ?: []).each{ s-> [s.temp,s.occ,s.motion,s.batt,s.lowbatt].each{ if(it!=null) ev << "{\"aid\":${s.aid},\"iid\":${it},\"ev\":true}" } }
     String b="{\"characteristics\":[${ev.join(',')}]}"
     return "PUT /characteristics HTTP/1.1\r\nHost: ${settings.ip}\r\nContent-Type: application/hap+json\r\nContent-Length: ${b.getBytes('UTF-8').length}\r\nConnection: keep-alive\r\n\r\n"+b
 }
