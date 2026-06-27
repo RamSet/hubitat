@@ -12,10 +12,14 @@
  *   thermostat's HomeKit slots; resetting HomeKit on the device frees a slot.
  *
  * Author: RamSet
- * Version: 0.12.2
+ * Version: 0.12.3
  * Date: 2026-06-24
  *
  * Changelog:
+ *  v0.12.3 - Added a Dump Accessories command (debug): fetches the thermostat's full HAP accessory map
+ *           and logs a compact per-characteristic summary (aid / service type / iid / type / perms / value).
+ *           Lets us diagnose unknown models (which sensors/services they expose) without guesswork.
+ *
  *  v0.12.2 - Clearer logging when a thermostat has no sensors: explicitly states that no sensor child
  *           is created and that this is normal (e.g. ecobee3 lite, which has no built-in occupancy sensor),
  *           instead of the terse "discovered 0 remote sensor(s)". No behavior change.
@@ -115,7 +119,7 @@
  *   "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/drivers/ecobee-hap-thermostat/ecobee-hap-thermostat.groovy",
  *   "description": "Local HAP controller for an ecobee thermostat: mode, setpoints, temperature, humidity, operating state, fan, and remote sensors.",
  *   "required": true,
- *   "version": "0.12.2"
+ *   "version": "0.12.3"
  * }
  *
  * Copyright 2026 RamSet
@@ -142,6 +146,7 @@ metadata {
         command "setComfortProfile", [[name:"profile*",type:"ENUM",constraints:["Home","Away","Sleep"]]]
         command "setHumiditySetpoint", [[name:"humidity %*",type:"NUMBER",description:"target humidity, 20-50"]]
         command "setCharacteristic", [[name:"aid.iid*",type:"STRING",description:"HAP characteristic, e.g. 1.40"],[name:"value*",type:"STRING",description:"value to write (number or string)"]]
+        command "dumpAccessories"   // debug: logs this thermostat's full HAP accessory/service/characteristic map
         attribute "comfortProfile", "string"
         attribute "holdEndsAt", "string"
         attribute "humiditySetpoint", "number"
@@ -276,6 +281,23 @@ void dlog(String m){
     while(b.size()>28) b.remove(0)
     state.diag = b
     sendEvent(name:"diag", value: b.join("\n"))
+}
+// debug: fetch /accessories over the live session and log a compact structural map (for diagnosing unknown models)
+def dumpAccessories(){
+    if(state.live && state.sess){ state.dumpReq=true; log.info "HAP: requesting /accessories dump…"; sendEncrypted("GET /accessories HTTP/1.1\r\nHost: ${settings.ip}\r\n\r\n") }
+    else { log.warn "HAP: not connected — open the session first (device must be paired and live)" }
+}
+void dumpAcc(j){
+    def code={ x-> x?.toString()?.replace("-","")?.toUpperCase()?.replaceAll(/^0+/,"") }
+    log.info "===== HAP /accessories dump (driver v0.12.3) ====="
+    j.accessories.each{ acc->
+        log.info "ACC aid=${acc.aid}"
+        acc.services.each{ sv->
+            def parts=sv.characteristics.collect{ c-> "iid${c.iid} t=${code(c.type)} [${(c.perms?:[]).join('/')}]=${(c.value!=null)? (c.value.toString().take(24)) : ''}" }
+            log.info "  svc ${code(sv.type)}: " + parts.join("  ")
+        }
+    }
+    log.info "===== end dump ====="
 }
 def refresh(){
     if(state.live && state.sess){
@@ -666,7 +688,7 @@ void handleLiveMessage(String head, String body){
     rep("LIVE ${fl} (${body.length()}b)")
     if(!body?.trim()){ dlog("HDL ${fl} body=0 (empty)"); return }
     def j; try{ j=new groovy.json.JsonSlurper().parseText(body) }catch(e){ dlog("HDL ${fl} body=${body.length()} PARSE-FAIL: ${e.message}"); return }
-    if(j?.accessories){ dlog("HDL ${fl} body=${body.length()} -> ACCESSORIES"); buildSensors(j); return }
+    if(j?.accessories){ dlog("HDL ${fl} body=${body.length()} -> ACCESSORIES"); if(state.dumpReq){ state.dumpReq=false; dumpAcc(j) }; buildSensors(j); return }
     if(j?.characteristics){ dlog("HDL ${fl} body=${body.length()} -> CHARS(${j.characteristics.size()})"); applyState(j) }
     else dlog("HDL ${fl} body=${body.length()} -> other-json")
 }
