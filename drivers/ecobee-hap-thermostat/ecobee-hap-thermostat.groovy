@@ -12,10 +12,15 @@
  *   thermostat's HomeKit slots; resetting HomeKit on the device frees a slot.
  *
  * Author: RamSet
- * Version: 0.11.12
+ * Version: 0.12.0
  * Date: 2026-06-24
  *
  * Changelog:
+ *  v0.12.0 - Thermostat's own motion + occupancy are now exposed as their OWN child sensor device
+ *           ("<thermostat> Sensor"), instead of capabilities on the thermostat. This keeps the parent a
+ *           pure Thermostat (so it still exports to Apple HomeKit) while motion AND presence export
+ *           separately via the child — works whether or not you have remote sensors. No more either/or.
+ *
  *  v0.11.12 - Reverted the thermostat's own motion/occupancy to DISABLED by default. Enabling them makes
  *           Hubitat's HomeKit Integration unable to classify the device, so the thermostat stops exporting
  *           to Apple HomeKit entirely. The room-sensor children already provide motion/presence, so this is
@@ -100,7 +105,7 @@
  *   "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/drivers/ecobee-hap-thermostat/ecobee-hap-thermostat.groovy",
  *   "description": "Local HAP controller for an ecobee thermostat: mode, setpoints, temperature, humidity, operating state, fan, and remote sensors.",
  *   "required": true,
- *   "version": "0.11.12"
+ *   "version": "0.12.0"
  * }
  *
  * Copyright 2026 RamSet
@@ -115,14 +120,10 @@ metadata {
         capability "Thermostat"
         capability "TemperatureMeasurement"
         capability "RelativeHumidityMeasurement"
-        // The thermostat's own motion/occupancy are DISABLED by default. Reason: enabling them makes
-        // Hubitat's HomeKit Integration unable to classify the device, so the THERMOSTAT no longer exports
-        // to Apple HomeKit at all. The room-sensor child devices already provide motion/presence (and export
-        // fine on their own), so you lose nothing by leaving these off. To enable them on the thermostat
-        // anyway (only if you do NOT re-export it to HomeKit), uncomment the two lines below and click SAVE
-        // (not Import). NOTE: a manual edit here is NOT preserved across a re-import or HPM update.
-        //capability "MotionSensor"
-        //capability "PresenceSensor"
+        // NOTE: the thermostat's own motion/occupancy are intentionally NOT capabilities on this device.
+        // A Thermostat that also has MotionSensor/PresenceSensor can't be classified by Hubitat's HomeKit
+        // Integration and silently drops out of the HomeKit export. Instead, the thermostat's built-in
+        // sensor is exposed as its own child device (a motion/occupancy sensor) — see buildSensors().
         capability "Refresh"
         command "setDesiredTemperature", [[name:"Desired temperature*",type:"NUMBER",description:"Target temperature to set on the thermostat"]]
         command "raiseSetpoint"
@@ -460,7 +461,19 @@ void buildSensors(j){
     def code={ x-> x.replace("-","").toUpperCase().replaceAll(/^0+/,"") }
     def sensors=[]
     j.accessories.each{ acc->
-        if(acc.aid==TAID) return
+        if(acc.aid==TAID){
+            // the thermostat's OWN built-in motion/occupancy -> its own child sensor device, so the parent
+            // stays a pure Thermostat (a Thermostat + MotionSensor/PresenceSensor can't be exported to HomeKit)
+            def ts=[aid:TAID, isMain:true, temp:19]   // temp 19 = the thermostat's reading, gives the child a valid temp
+            acc.services.each{ sv-> def sc=code(sv.type)
+                sv.characteristics.each{ c-> def cc=code(c.type)
+                    if(sc=="85" && cc=="22") ts.motion=c.iid
+                    else if(sc=="86" && cc=="71") ts.occ=c.iid
+                }
+            }
+            if(ts.motion || ts.occ) sensors << ts
+            return
+        }
         if(!acc.services.any{ code(it.type)=="8A" }) return   // remote sensor = has TemperatureSensor service
         def s=[aid:acc.aid]
         acc.services.each{ sv-> def sc=code(sv.type)
@@ -477,7 +490,7 @@ void buildSensors(j){
         sensors << s
     }
     state.sensors=sensors
-    log.info "HAP: discovered ${sensors.size()} remote sensor(s)"
+    log.info "HAP: discovered ${sensors.findAll{!it.isMain}.size()} remote sensor(s)${sensors.any{it.isMain}?' + thermostat sensor':''}"
 }
 def hapStart(String op, String body){
     if(!settings.ip || hapPort()<=0){ log.warn "HAP: set IP first (port auto-detects)"; return }
@@ -676,9 +689,8 @@ void applyState(j){
     if(g(37)!=null) sendEvent(name:"awayCoolSetpoint",  value: cToHub(g(37)))
     if(g(38)!=null) sendEvent(name:"sleepHeatSetpoint", value: cToHub(g(38)))
     if(g(39)!=null) sendEvent(name:"sleepCoolSetpoint", value: cToHub(g(39)))
-    // thermostat's own motion (iid66) / occupancy (iid65) — only emitted if those capabilities are enabled above
-    if(g(66)!=null && device.hasCapability("MotionSensor")) sendEvent(name:"motion", value: (g(66) ? "active":"inactive"))
-    if(g(65)!=null && device.hasCapability("PresenceSensor")) sendEvent(name:"presence", value: ((g(65) as int)>0 ? "present":"not present"))
+    // thermostat's own motion (iid66) / occupancy (iid65) are routed to a child sensor device (see the
+    // sensor loop below + buildSensors), NOT to parent capabilities — keeps the parent exportable to HomeKit.
     sendEvent(name:"supportedThermostatModes", value: '["off","heat","cool","auto"]')
     sendEvent(name:"supportedThermostatFanModes", value: '["on","auto"]')
     // ---- custom params -> attribute (only when present; events are partial) ----
@@ -690,8 +702,8 @@ void applyState(j){
         def val={ iid-> (iid!=null)? vmap["${s.aid}.${iid}"] : null }
         def cd=getChildDevice("hap-${s.aid}")
         if(!cd){
-            if(val(s.temp)==null) return   // need initial data to create
-            String nm = val(s.name) ?: "Ecobee Sensor ${s.aid}"
+            if(val(s.temp)==null && val(s.occ)==null && val(s.motion)==null) return   // need some initial data to create
+            String nm = s.isMain ? "${device.displayName} Sensor" : (val(s.name) ?: "Ecobee Sensor ${s.aid}")
             try{ cd=addChildDevice("RamSet","Ecobee HAP Remote Sensor","hap-${s.aid}",[name:nm,label:nm]) }catch(e){ log.warn "child ${s.aid}: ${e}"; return }
         }
         if(val(s.serial)!=null) cd.sendEvent(name:"ecobeeId", value: val(s.serial))
@@ -699,6 +711,7 @@ void applyState(j){
         if(val(s.occ)!=null) cd.sendEvent(name:"presence", value: ((val(s.occ) as int)>0?"present":"not present"))
         if(val(s.motion)!=null) cd.sendEvent(name:"motion", value: (val(s.motion)?"active":"inactive"))
         if(val(s.batt)!=null) cd.sendEvent(name:"battery", value: val(s.batt) as int, unit:"%")
+        else if(s.isMain) cd.sendEvent(name:"battery", value: 100, unit:"%")   // thermostat is wired — report full
         if(val(s.lowbatt)!=null) cd.sendEvent(name:"lowBattery", value: ((val(s.lowbatt) as int)==1?"true":"false"))
     }
 }
