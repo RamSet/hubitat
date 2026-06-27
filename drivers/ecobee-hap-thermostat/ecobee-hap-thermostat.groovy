@@ -12,10 +12,13 @@
  *   thermostat's HomeKit slots; resetting HomeKit on the device frees a slot.
  *
  * Author: RamSet
- * Version: 0.12.6
+ * Version: 0.12.7
  * Date: 2026-06-24
  *
  * Changelog:
+ *  v0.12.7 - Dropped the hardcoded version from the Dump Accessories log header (it was stale, said v0.12.4
+ *           regardless of the running version, which could mislead support). Cosmetic only.
+ *
  *  v0.12.6 - CRITICAL fix: the paired-check in the preferences block read settings.iosLtsk, but `settings`
  *           is null when the hub evaluates metadata at code-save time -> NPE -> the driver wouldn't save
  *           (HPM "Failed to upgrade driver", and manual import threw "Cannot get property iosLtsk on null").
@@ -131,7 +134,7 @@
  *   "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/drivers/ecobee-hap-thermostat/ecobee-hap-thermostat.groovy",
  *   "description": "Local HAP controller for an ecobee thermostat: mode, setpoints, temperature, humidity, operating state, fan, and remote sensors.",
  *   "required": true,
- *   "version": "0.12.6"
+ *   "version": "0.12.7"
  * }
  *
  * Copyright 2026 RamSet
@@ -303,7 +306,7 @@ def dumpAccessories(){
 }
 void dumpAcc(j){
     def code={ x-> x?.toString()?.replace("-","")?.toUpperCase()?.replaceAll(/^0+/,"") }
-    log.info "===== HAP /accessories dump (driver v0.12.4) ====="
+    log.info "===== HAP /accessories dump ====="
     j.accessories.each{ acc->
         log.info "ACC aid=${acc.aid}"
         acc.services.each{ sv->

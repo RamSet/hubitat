@@ -1,8 +1,8 @@
 {
   "packageName": "Ecobee HAP Thermostat (Local)",
   "author": "RamSet",
-  "version": "0.12.6",
-  "releaseNotes": "0.12.6 - CRITICAL FIX: 0.12.4/0.12.5 would not save (HPM 'Failed to upgrade driver'; manual import threw 'Cannot get property iosLtsk on null'). Cause: the preferences block read settings.iosLtsk, but settings is null when the hub evaluates metadata at save time. Fixed with safe navigation. Please update.",
+  "version": "0.12.7",
+  "releaseNotes": "0.12.7 - Cosmetic: removed the stale hardcoded version from the Dump Accessories log header so it does not misreport the driver version in diagnostics.",
   "category": "Thermostats",
   "tags": "Thermostat, ecobee, HomeKit, HAP, Local, Sensor",
   "dateReleased": "2026-06-24",
