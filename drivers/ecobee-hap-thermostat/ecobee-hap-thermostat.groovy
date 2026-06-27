@@ -188,6 +188,7 @@ metadata {
 def installed(){ updated() }
 def updated(){
     unschedule(); state.live=false; state.diag=[]; state.connTry=0; state.mdnsTries=0; if(settings.debugLog) sendEvent(name:"diag", value:"")
+    state.remove("sensors")   // force a fresh /accessories discovery on Save so sensor topology (incl. the thermostat's own sensor) rebuilds
     if(settings.setupCode && !isPaired()){ log.info "HAP: setup code entered — pairing"; runIn(1,"pair") }
     else if(isPaired()){ runIn(2,"startLive") }   // live event mode is the default once paired
 }
