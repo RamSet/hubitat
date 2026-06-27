@@ -12,10 +12,12 @@
  *   thermostat's HomeKit slots; resetting HomeKit on the device frees a slot.
  *
  * Author: RamSet
- * Version: 0.12.4
+ * Version: 0.12.5
  * Date: 2026-06-24
  *
  * Changelog:
+ *  v0.12.5 - Inlined the paired-check in the preferences block (no method call during page render).
+ *
  *  v0.12.4 - Logging polish: added an "Enable info logging" preference (default on) so routine info
  *           messages can be turned off; the mDNS raw line is now gated behind debug logging (was always
  *           printing); and the setup-code field now hides whenever the device is paired (keys present),
@@ -124,7 +126,7 @@
  *   "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/drivers/ecobee-hap-thermostat/ecobee-hap-thermostat.groovy",
  *   "description": "Local HAP controller for an ecobee thermostat: mode, setpoints, temperature, humidity, operating state, fan, and remote sensors.",
  *   "required": true,
- *   "version": "0.12.4"
+ *   "version": "0.12.5"
  * }
  *
  * Copyright 2026 RamSet
@@ -169,7 +171,7 @@ metadata {
     }
     preferences {
         input "ip", "string", title: "Thermostat IP address", required: true
-        if (!isPaired()) {   // hide once paired (keys present), not just when state.paired happens to be set
+        if (!(state.paired==true || settings.iosLtsk)) {   // hide once paired (keys present); inline, no method call in preferences
             input "setupCode", "string", title: "HomeKit setup code — 8 digits, no dashes (e.g. 12345678). Enter and Save to pair.", required: false
         }
         input "infoLog", "bool", title: "Enable info logging", defaultValue: true
