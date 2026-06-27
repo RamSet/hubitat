@@ -12,10 +12,15 @@
  *   thermostat's HomeKit slots; resetting HomeKit on the device frees a slot.
  *
  * Author: RamSet
- * Version: 0.12.5
+ * Version: 0.12.6
  * Date: 2026-06-24
  *
  * Changelog:
+ *  v0.12.6 - CRITICAL fix: the paired-check in the preferences block read settings.iosLtsk, but `settings`
+ *           is null when the hub evaluates metadata at code-save time -> NPE -> the driver wouldn't save
+ *           (HPM "Failed to upgrade driver", and manual import threw "Cannot get property iosLtsk on null").
+ *           Now uses safe navigation (settings?.iosLtsk). Affected 0.12.4 and 0.12.5 only.
+ *
  *  v0.12.5 - Inlined the paired-check in the preferences block (no method call during page render).
  *
  *  v0.12.4 - Logging polish: added an "Enable info logging" preference (default on) so routine info
@@ -126,7 +131,7 @@
  *   "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/drivers/ecobee-hap-thermostat/ecobee-hap-thermostat.groovy",
  *   "description": "Local HAP controller for an ecobee thermostat: mode, setpoints, temperature, humidity, operating state, fan, and remote sensors.",
  *   "required": true,
- *   "version": "0.12.5"
+ *   "version": "0.12.6"
  * }
  *
  * Copyright 2026 RamSet
@@ -171,7 +176,7 @@ metadata {
     }
     preferences {
         input "ip", "string", title: "Thermostat IP address", required: true
-        if (!(state.paired==true || settings.iosLtsk)) {   // hide once paired (keys present); inline, no method call in preferences
+        if (!(state.paired==true || settings?.iosLtsk)) {   // settings is null at code-save time -> MUST use safe-nav (settings?.) or it NPEs and the save fails
             input "setupCode", "string", title: "HomeKit setup code — 8 digits, no dashes (e.g. 12345678). Enter and Save to pair.", required: false
         }
         input "infoLog", "bool", title: "Enable info logging", defaultValue: true
@@ -219,7 +224,7 @@ def updated(){
     if(settings.setupCode && !isPaired()){ logInfo "HAP: setup code entered — pairing"; runIn(1,"pair") }
     else if(isPaired()){ runIn(2,"startLive") }   // live event mode is the default once paired
 }
-boolean isPaired(){ return (state.paired==true || settings.iosLtsk) ? true : false }
+boolean isPaired(){ return (state.paired==true || settings?.iosLtsk) ? true : false }
 
 // ===== helpers =====
 byte[] hex(String s){ hubitat.helper.HexUtils.hexStringToByteArray(s) }
@@ -271,7 +276,7 @@ byte[] tlv(List items){ def o=new java.io.ByteArrayOutputStream(); items.each{ i
 Map tdec(byte[] b){ def d=[:]; int i=0; while(i<b.length){ int t=b[i]&0xff; int l=b[i+1]&0xff; byte[] v=new byte[l]; for(int j=0;j<l;j++) v[j]=b[i+2+j]; i+=2+l; d[t]=(d[t]!=null)?cat(d[t],v):v }; return d }
 byte[] rnd32(){ byte[] raw=new byte[32]
     try{ def kp=java.security.KeyPairGenerator.getInstance("X25519").generateKeyPair(); byte[] enc=kp.getPrivate().getEncoded(); for(int i=0;i<32;i++) raw[i]=enc[enc.length-32+i] }
-    catch(Throwable e){ state.entc=(state.entc?:0)+1; byte[] hh=sha512((""+now()+":"+state.entc+":"+(settings.iosLtsk?:'x')).getBytes("UTF-8")); for(int i=0;i<32;i++) raw[i]=hh[i] }
+    catch(Throwable e){ state.entc=(state.entc?:0)+1; byte[] hh=sha512((""+now()+":"+state.entc+":"+(settings?.iosLtsk?:'x')).getBytes("UTF-8")); for(int i=0;i<32;i++) raw[i]=hh[i] }
     return raw }
 Map genEph(){ byte[] raw=rnd32(); byte[] pub=x25519(raw, hex("0900000000000000000000000000000000000000000000000000000000000000")); return [priv:hx(raw),pub:hx(pub)] }
 java.math.BigInteger beBig(byte[] b){ return new java.math.BigInteger(1,b) }
