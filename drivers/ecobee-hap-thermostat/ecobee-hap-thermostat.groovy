@@ -12,10 +12,15 @@
  *   thermostat's HomeKit slots; resetting HomeKit on the device frees a slot.
  *
  * Author: RamSet
- * Version: 0.11.11
+ * Version: 0.11.12
  * Date: 2026-06-24
  *
  * Changelog:
+ *  v0.11.12 - Reverted the thermostat's own motion/occupancy to DISABLED by default. Enabling them makes
+ *           Hubitat's HomeKit Integration unable to classify the device, so the thermostat stops exporting
+ *           to Apple HomeKit entirely. The room-sensor children already provide motion/presence, so this is
+ *           a no-loss default. Can still be enabled in code if you don't re-export the thermostat to HomeKit.
+ *
  *  v0.11.11 - Removed setFanMinOnTime command + fanMinOnTime attribute: empirically confirmed (on real
  *           hardware) that iid52 is NOT the fan minimum runtime — changing it on the thermostat (to 5
  *           and 20 min/hr) never moved iid52. Fan min-runtime isn't exposed over HAP, and the command
@@ -95,7 +100,7 @@
  *   "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/drivers/ecobee-hap-thermostat/ecobee-hap-thermostat.groovy",
  *   "description": "Local HAP controller for an ecobee thermostat: mode, setpoints, temperature, humidity, operating state, fan, and remote sensors.",
  *   "required": true,
- *   "version": "0.11.11"
+ *   "version": "0.11.12"
  * }
  *
  * Copyright 2026 RamSet
@@ -110,12 +115,14 @@ metadata {
         capability "Thermostat"
         capability "TemperatureMeasurement"
         capability "RelativeHumidityMeasurement"
-        // The thermostat's own motion/occupancy are ENABLED by default. To turn them OFF, comment out the
-        // two capability lines below, then click SAVE in this code editor (do NOT use Import — importing
-        // overwrites your edit with the published version). NOTE: this is a manual code change and is NOT
-        // preserved across a re-import or a package (HPM) update — you must redo it after any update.
-        capability "MotionSensor"
-        capability "PresenceSensor"
+        // The thermostat's own motion/occupancy are DISABLED by default. Reason: enabling them makes
+        // Hubitat's HomeKit Integration unable to classify the device, so the THERMOSTAT no longer exports
+        // to Apple HomeKit at all. The room-sensor child devices already provide motion/presence (and export
+        // fine on their own), so you lose nothing by leaving these off. To enable them on the thermostat
+        // anyway (only if you do NOT re-export it to HomeKit), uncomment the two lines below and click SAVE
+        // (not Import). NOTE: a manual edit here is NOT preserved across a re-import or HPM update.
+        //capability "MotionSensor"
+        //capability "PresenceSensor"
         capability "Refresh"
         command "setDesiredTemperature", [[name:"Desired temperature*",type:"NUMBER",description:"Target temperature to set on the thermostat"]]
         command "raiseSetpoint"
