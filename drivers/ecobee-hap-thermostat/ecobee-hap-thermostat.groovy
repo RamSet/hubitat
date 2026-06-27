@@ -12,10 +12,14 @@
  *   thermostat's HomeKit slots; resetting HomeKit on the device frees a slot.
  *
  * Author: RamSet
- * Version: 0.12.1
+ * Version: 0.12.2
  * Date: 2026-06-24
  *
  * Changelog:
+ *  v0.12.2 - Clearer logging when a thermostat has no sensors: explicitly states that no sensor child
+ *           is created and that this is normal (e.g. ecobee3 lite, which has no built-in occupancy sensor),
+ *           instead of the terse "discovered 0 remote sensor(s)". No behavior change.
+ *
  *  v0.12.1 - Multi-instance support. The in-memory socket buffers were @Field static (shared across ALL
  *           instances), so two paired thermostats would corrupt each other's sessions — now keyed per
  *           device. Child sensor DNIs are namespaced with the parent device id (the thermostat's own
@@ -111,7 +115,7 @@
  *   "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/drivers/ecobee-hap-thermostat/ecobee-hap-thermostat.groovy",
  *   "description": "Local HAP controller for an ecobee thermostat: mode, setpoints, temperature, humidity, operating state, fan, and remote sensors.",
  *   "required": true,
- *   "version": "0.12.1"
+ *   "version": "0.12.2"
  * }
  *
  * Copyright 2026 RamSet
@@ -501,7 +505,10 @@ void buildSensors(j){
         sensors << s
     }
     state.sensors=sensors
-    log.info "HAP: discovered ${sensors.findAll{!it.isMain}.size()} remote sensor(s)${sensors.any{it.isMain}?' + thermostat sensor':''}"
+    if(sensors.isEmpty())
+        log.info "HAP: this thermostat has no built-in occupancy/motion sensor and no remote sensors — no sensor child device is created (this is normal, e.g. ecobee3 lite)"
+    else
+        log.info "HAP: discovered ${sensors.findAll{!it.isMain}.size()} remote sensor(s)${sensors.any{it.isMain}?' + thermostat sensor':''}"
 }
 def hapStart(String op, String body){
     if(!settings.ip || hapPort()<=0){ log.warn "HAP: set IP first (port auto-detects)"; return }
