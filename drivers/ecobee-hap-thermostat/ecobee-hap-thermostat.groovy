@@ -12,10 +12,16 @@
  *   thermostat's HomeKit slots; resetting HomeKit on the device frees a slot.
  *
  * Author: RamSet
- * Version: 0.12.0
+ * Version: 0.12.1
  * Date: 2026-06-24
  *
  * Changelog:
+ *  v0.12.1 - Multi-instance support. The in-memory socket buffers were @Field static (shared across ALL
+ *           instances), so two paired thermostats would corrupt each other's sessions — now keyed per
+ *           device. Child sensor DNIs are namespaced with the parent device id (the thermostat's own
+ *           sensor is always aid 1, so two thermostats both wanted DNI hap-1) and existing children are
+ *           adopted so current single-thermostat installs aren't disrupted. You can now run 2+ ecobees.
+ *
  *  v0.12.0 - Thermostat's own motion + occupancy are now exposed as their OWN child sensor device
  *           ("<thermostat> Sensor"), instead of capabilities on the thermostat. This keeps the parent a
  *           pure Thermostat (so it still exports to Apple HomeKit) while motion AND presence export
@@ -105,7 +111,7 @@
  *   "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/drivers/ecobee-hap-thermostat/ecobee-hap-thermostat.groovy",
  *   "description": "Local HAP controller for an ecobee thermostat: mode, setpoints, temperature, humidity, operating state, fan, and remote sensors.",
  *   "required": true,
- *   "version": "0.12.0"
+ *   "version": "0.12.1"
  * }
  *
  * Copyright 2026 RamSet
@@ -168,9 +174,13 @@ metadata {
     53:"c_iid53", 54:"c_iid54", 75:"c_iid75", 76:"c_iid76"
 ]
 // sensors are discovered dynamically from /accessories into state.sensors
-// in-memory receive/plaintext buffers (the /accessories response is large; keep it off state)
-@Field static StringBuilder RX = new StringBuilder()
-@Field static StringBuilder PLAIN = new StringBuilder()
+// in-memory receive/plaintext buffers (the /accessories response is large; keep it off state).
+// Keyed by device.id so MULTIPLE thermostat instances each get their own buffers (@Field static is
+// shared across all instances, so a bare StringBuilder would corrupt across two paired thermostats).
+@Field static Map RXBUF = [:]
+@Field static Map PLAINBUF = [:]
+StringBuilder rxbuf(){ if(RXBUF[device.id]==null) RXBUF[device.id]=new StringBuilder(); return RXBUF[device.id] }
+StringBuilder plainbuf(){ if(PLAINBUF[device.id]==null) PLAINBUF[device.id]=new StringBuilder(); return PLAINBUF[device.id] }
 
 // ===== curve constants =====
 @Field static java.math.BigInteger P  = new java.math.BigInteger("57896044618658097711785492504343953926634992332820282019728792003956564819949")
@@ -340,7 +350,7 @@ def pair(){
 int hapPort(){ return (state.discoveredPort ?: settings.port ?: 0) as int }
 void pairConnect(){
     if(hapPort()<=0){ log.error "HAP: no port (mDNS failed and none configured)"; return }
-    state.op="pairsetup"; state.sess=false; state.psstage="2"; RX.setLength(0); PLAIN.setLength(0)
+    state.op="pairsetup"; state.sess=false; state.psstage="2"; rxbuf().setLength(0); plainbuf().setLength(0)
     sendEvent(name:"hapStatus", value:"pairing")
     try { interfaces.rawSocket.connect([byteInterface:true], settings.ip, hapPort()) }
     catch(e){
@@ -369,7 +379,7 @@ void psM2(Map tv){
     byte[] K=sha512(bigBe(base.modPow(a.add(u.multiply(x)),SRP_N),384))
     byte[] hN=sha512(bigBe(SRP_N,384)); byte[] hg=sha512([5] as byte[]); byte[] hxor=new byte[64]; for(int i=0;i<64;i++) hxor[i]=(byte)(hN[i]^hg[i])
     byte[] M1=sha512(cat(hxor, sha512("Pair-Setup".getBytes("UTF-8")), salt, Ab, Bb, K))
-    state.srpK=hx(K); state.srpA=hx(Ab); state.srpM1=hx(M1); state.psstage="4"; RX.setLength(0)
+    state.srpK=hx(K); state.srpA=hx(Ab); state.srpM1=hx(M1); state.psstage="4"; rxbuf().setLength(0)
     sendHttpTlv("/pair-setup", tlv([[6,[3] as byte[]],[3,Ab],[4,M1]]))
 }
 void psM4(Map tv){
@@ -383,7 +393,7 @@ void psM4(Map tv){
     byte[] sig=edSign(seed, cat(iosX, pid.getBytes("UTF-8"), ltpk))
     byte[] sub=tlv([[1,pid.getBytes("UTF-8")],[3,ltpk],[10,sig]])
     byte[] enc=chachaEnc(encKey, nlabel("PS-Msg05"), sub, null)
-    state.psSeed=hx(seed); state.psPid=pid; state.psEncKey=hx(encKey); state.psstage="6"; RX.setLength(0)
+    state.psSeed=hx(seed); state.psPid=pid; state.psEncKey=hx(encKey); state.psstage="6"; rxbuf().setLength(0)
     sendHttpTlv("/pair-setup", tlv([[6,[5] as byte[]],[5,enc]]))
 }
 void psM6(Map tv){
@@ -495,7 +505,7 @@ void buildSensors(j){
 }
 def hapStart(String op, String body){
     if(!settings.ip || hapPort()<=0){ log.warn "HAP: set IP first (port auto-detects)"; return }
-    state.op=op; state.inCtr=0; state.outCtr=0; RX.setLength(0); PLAIN.setLength(0)
+    state.op=op; state.inCtr=0; state.outCtr=0; rxbuf().setLength(0); plainbuf().setLength(0)
     state.sess=false; state.vstage="m2"
     def ek=genEph(); state.ephPriv=ek.priv; state.ephPub=ek.pub
     sendEvent(name:"hapStatus", value:"connecting")
@@ -516,13 +526,13 @@ def socketStatus(String s){
 
 def parse(String message){
   try {
-    RX.append(message.toLowerCase())
+    rxbuf().append(message.toLowerCase())
     if(!state.sess){
-        String buf=RX.toString()
+        String buf=rxbuf().toString()
         int p=buf.indexOf("0d0a0d0a"); if(p<0) return
         String hh=new String(hex(buf.substring(0,p))); def m=(hh =~ /(?i)content-length:\s*(\d+)/); int cl=m.find()?(m.group(1) as int):0
         int need=p+8+cl*2; if(buf.length()<need) return
-        byte[] body=hex(buf.substring(p+8,need)); RX.delete(0,need); def tv=tdec(body)
+        byte[] body=hex(buf.substring(p+8,need)); rxbuf().delete(0,need); def tv=tdec(body)
         if(state.op=="pairsetup"){ routePS(tv) }
         else if(state.vstage=="m4"){ doM4(tv) } else { doM2(tv) }
     } else { handleSession() }
@@ -535,7 +545,7 @@ void doM2(Map tv){
     if(!edVerify(hex(settings.accLtpk), cat(accPub,accName.getBytes("UTF-8"),hex(state.ephPub)), d1[10])){ rep("ERR acc sig"); interfaces.rawSocket.close(); return }
     byte[] iosInfo=cat(hex(state.ephPub),settings.iosPairingId.getBytes("UTF-8"),accPub)
     byte[] sub=tlv([[1,settings.iosPairingId.getBytes("UTF-8")],[10,edSign(hex(settings.iosLtsk),iosInfo)]])
-    byte[] ct=chachaEnc(sk,nlabel("PV-Msg03"),sub,null); state.vstage="m4"; RX.setLength(0)
+    byte[] ct=chachaEnc(sk,nlabel("PV-Msg03"),sub,null); state.vstage="m4"; rxbuf().setLength(0)
     sendHttpTlv("/pair-verify", tlv([[6,[3] as byte[]],[5,ct]]))
 }
 void doM4(Map tv){
@@ -543,7 +553,7 @@ void doM4(Map tv){
     byte[] shared=hex(state.shared)
     state.c2a=hx(hkdf("Control-Salt".getBytes("UTF-8"),shared,"Control-Write-Encryption-Key".getBytes("UTF-8"),32))
     state.a2c=hx(hkdf("Control-Salt".getBytes("UTF-8"),shared,"Control-Read-Encryption-Key".getBytes("UTF-8"),32))
-    state.sess=true; RX.setLength(0); PLAIN.setLength(0); state.inCtr=0
+    state.sess=true; rxbuf().setLength(0); plainbuf().setLength(0); state.inCtr=0
     sendEvent(name:"hapStatus", value:"session")
     if(state.op=="live"){
         state.live=true; sendEvent(name:"hapStatus", value:"live"); log.info "HAP: live session up — subscribing to events"
@@ -557,20 +567,20 @@ void doM4(Map tv){
     else { String b=state.writeJson; sendEncrypted("PUT /characteristics HTTP/1.1\r\nHost: ${settings.ip}\r\nContent-Type: application/hap+json\r\nContent-Length: ${b.getBytes('UTF-8').length}\r\nConnection: keep-alive\r\n\r\n"+b) }
 }
 void handleSession(){
-    String buf=RX.toString()
+    String buf=rxbuf().toString()
     while(buf.length()>=4){
         byte[] lh=hex(buf.substring(0,4)); int ln=(lh[0]&0xff)|((lh[1]&0xff)<<8); int need=4+(ln+16)*2
         if(buf.length()<need) break
-        byte[] aad=hex(buf.substring(0,4)); byte[] blk=hex(buf.substring(4,need)); RX.delete(0,need); buf=RX.toString()
-        byte[] pt=chachaDec(hex(state.a2c),nctr(state.inCtr),blk,aad); state.inCtr=(state.inCtr as long)+1; PLAIN.append(hx(pt))
-        dlog("RXframe ln=${ln} inCtr=${state.inCtr} plain=${(int)(PLAIN.length()/2)}b rxLeft=${(int)(RX.length()/2)}b")
+        byte[] aad=hex(buf.substring(0,4)); byte[] blk=hex(buf.substring(4,need)); rxbuf().delete(0,need); buf=rxbuf().toString()
+        byte[] pt=chachaDec(hex(state.a2c),nctr(state.inCtr),blk,aad); state.inCtr=(state.inCtr as long)+1; plainbuf().append(hx(pt))
+        dlog("RXframe ln=${ln} inCtr=${state.inCtr} plain=${(int)(plainbuf().length()/2)}b rxLeft=${(int)(rxbuf().length()/2)}b")
         if(state.op!="live" && ln<1024){ finish(); return }
     }
     if(state.op=="live") processLiveStream()
 }
 void finish(){
-    byte[] resp=hex(PLAIN.toString()); String s=new String(resp,"UTF-8"); state.sess=false; state.vstage=null
-    PLAIN.setLength(0); RX.setLength(0)
+    byte[] resp=hex(plainbuf().toString()); String s=new String(resp,"UTF-8"); state.sess=false; state.vstage=null
+    plainbuf().setLength(0); rxbuf().setLength(0)
     int bi=s.indexOf("\r\n\r\n"); String head=bi>=0? s.substring(0,bi):s; String body=bi>=0? s.substring(bi+4):""
     interfaces.rawSocket.close()
     if(state.op=="write"){
@@ -593,7 +603,7 @@ void finish(){
 def startLive(){ if(!isPaired()){ log.warn "HAP: not paired"; return }; mdnsThen(state.sensors==null ? "discover" : "live") }
 void liveConnect(){
     if(hapPort()<=0){ log.warn "HAP: no port"; return }
-    state.op="live"; state.inCtr=0; state.outCtr=0; RX.setLength(0); PLAIN.setLength(0); state.sess=false; state.vstage="m2"; state.live=false
+    state.op="live"; state.inCtr=0; state.outCtr=0; rxbuf().setLength(0); plainbuf().setLength(0); state.sess=false; state.vstage="m2"; state.live=false
     def ek=genEph(); state.ephPriv=ek.priv; state.ephPub=ek.pub
     sendEvent(name:"hapStatus", value:"connecting (live)")
     try { interfaces.rawSocket.connect([byteInterface:true], settings.ip, hapPort()) }
@@ -626,7 +636,7 @@ String subscribeBody(){
     return "PUT /characteristics HTTP/1.1\r\nHost: ${settings.ip}\r\nContent-Type: application/hap+json\r\nContent-Length: ${b.getBytes('UTF-8').length}\r\nConnection: keep-alive\r\n\r\n"+b
 }
 void processLiveStream(){
-    String s = new String(hex(PLAIN.toString()), "ISO-8859-1"); int consumed=0
+    String s = new String(hex(plainbuf().toString()), "ISO-8859-1"); int consumed=0
     while(true){
         int he=s.indexOf("\r\n\r\n", consumed); if(he<0){ if(s.length()>consumed) dlog("PLS partial-header left=${s.length()-consumed}b"); break }
         String head=s.substring(consumed, he); int bodyStart=he+4; int msgEnd; String body=""
@@ -642,7 +652,7 @@ void processLiveStream(){
         }
         handleLiveMessage(head, body); consumed=msgEnd
     }
-    if(consumed>0){ byte[] left=s.substring(consumed).getBytes("ISO-8859-1"); PLAIN.setLength(0); PLAIN.append(hx(left)) }
+    if(consumed>0){ byte[] left=s.substring(consumed).getBytes("ISO-8859-1"); plainbuf().setLength(0); plainbuf().append(hx(left)) }
 }
 void handleLiveMessage(String head, String body){
     String fl=head.split('\r\n')[0]
@@ -701,11 +711,15 @@ void applyState(j){
     // ---- discovered sensors -> child devices (update only present attrs; events are partial) ----
     (state.sensors ?: []).each{ s->
         def val={ iid-> (iid!=null)? vmap["${s.aid}.${iid}"] : null }
-        def cd=getChildDevice("hap-${s.aid}")
+        // DNI namespaced with the parent device id so multiple thermostats don't collide (esp. the
+        // thermostat's own sensor, always aid 1). Adopt a pre-v0.12.1 child ("hap-<aid>") if present so
+        // existing single-thermostat installs keep their child instead of getting a duplicate.
+        String dni="hap-${device.id}-${s.aid}"
+        def cd=getChildDevice(dni) ?: getChildDevice("hap-${s.aid}")
         if(!cd){
             if(val(s.temp)==null && val(s.occ)==null && val(s.motion)==null) return   // need some initial data to create
             String nm = s.isMain ? "${device.displayName} Sensor" : (val(s.name) ?: "Ecobee Sensor ${s.aid}")
-            try{ cd=addChildDevice("RamSet","Ecobee HAP Remote Sensor","hap-${s.aid}",[name:nm,label:nm]) }catch(e){ log.warn "child ${s.aid}: ${e}"; return }
+            try{ cd=addChildDevice("RamSet","Ecobee HAP Remote Sensor",dni,[name:nm,label:nm]) }catch(e){ log.warn "child ${s.aid}: ${e}"; return }
         }
         if(val(s.serial)!=null) cd.sendEvent(name:"ecobeeId", value: val(s.serial))
         if(val(s.temp)!=null) cd.sendEvent(name:"temperature", value: cToHub(val(s.temp)), unit:"°${isF()?'F':'C'}")
