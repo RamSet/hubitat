@@ -12,10 +12,15 @@
  *   thermostat's HomeKit slots; resetting HomeKit on the device frees a slot.
  *
  * Author: RamSet
- * Version: 0.12.3
+ * Version: 0.12.4
  * Date: 2026-06-24
  *
  * Changelog:
+ *  v0.12.4 - Logging polish: added an "Enable info logging" preference (default on) so routine info
+ *           messages can be turned off; the mDNS raw line is now gated behind debug logging (was always
+ *           printing); and the setup-code field now hides whenever the device is paired (keys present),
+ *           not just when state.paired is set — fixes it reappearing after a re-pair.
+ *
  *  v0.12.3 - Added a Dump Accessories command (debug): fetches the thermostat's full HAP accessory map
  *           and logs a compact per-characteristic summary (aid / service type / iid / type / perms / value).
  *           Lets us diagnose unknown models (which sensors/services they expose) without guesswork.
@@ -119,7 +124,7 @@
  *   "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/drivers/ecobee-hap-thermostat/ecobee-hap-thermostat.groovy",
  *   "description": "Local HAP controller for an ecobee thermostat: mode, setpoints, temperature, humidity, operating state, fan, and remote sensors.",
  *   "required": true,
- *   "version": "0.12.3"
+ *   "version": "0.12.4"
  * }
  *
  * Copyright 2026 RamSet
@@ -164,9 +169,10 @@ metadata {
     }
     preferences {
         input "ip", "string", title: "Thermostat IP address", required: true
-        if (!state.paired) {
+        if (!isPaired()) {   // hide once paired (keys present), not just when state.paired happens to be set
             input "setupCode", "string", title: "HomeKit setup code — 8 digits, no dashes (e.g. 12345678). Enter and Save to pair.", required: false
         }
+        input "infoLog", "bool", title: "Enable info logging", defaultValue: true
         input "debugLog", "bool", title: "Enable debug logging", defaultValue: false
     }
 }
@@ -208,7 +214,7 @@ def installed(){ updated() }
 def updated(){
     unschedule(); state.live=false; state.diag=[]; state.connTry=0; state.mdnsTries=0; if(settings.debugLog) sendEvent(name:"diag", value:"")
     state.remove("sensors")   // force a fresh /accessories discovery on Save so sensor topology (incl. the thermostat's own sensor) rebuilds
-    if(settings.setupCode && !isPaired()){ log.info "HAP: setup code entered — pairing"; runIn(1,"pair") }
+    if(settings.setupCode && !isPaired()){ logInfo "HAP: setup code entered — pairing"; runIn(1,"pair") }
     else if(isPaired()){ runIn(2,"startLive") }   // live event mode is the default once paired
 }
 boolean isPaired(){ return (state.paired==true || settings.iosLtsk) ? true : false }
@@ -270,6 +276,7 @@ java.math.BigInteger beBig(byte[] b){ return new java.math.BigInteger(1,b) }
 byte[] bigBe(java.math.BigInteger n, int len){ byte[] t=n.toByteArray(); byte[] r=new byte[len]; int src=(t.length>len)?t.length-len:0; int copy=t.length-src; for(int i=0;i<copy;i++) r[len-copy+i]=t[src+i]; return r }
 String uuidStr(){ String h=hx(rnd32()); return "${h[0..7]}-${h[8..11]}-${h[12..15]}-${h[16..19]}-${h[20..31]}" }
 void rep(String m){ if(settings.debugLog) log.debug "HAP: ${m}" }
+void logInfo(String m){ if(settings.infoLog!=false) log.info m }   // info logging on unless explicitly disabled
 
 // ===== public commands =====
 // ---- flow diagnostics (read remotely via the 'diag' attribute / fullJson) ----
@@ -284,12 +291,12 @@ void dlog(String m){
 }
 // debug: fetch /accessories over the live session and log a compact structural map (for diagnosing unknown models)
 def dumpAccessories(){
-    if(state.live && state.sess){ state.dumpReq=true; log.info "HAP: requesting /accessories dump…"; sendEncrypted("GET /accessories HTTP/1.1\r\nHost: ${settings.ip}\r\n\r\n") }
+    if(state.live && state.sess){ state.dumpReq=true; logInfo "HAP: requesting /accessories dump…"; sendEncrypted("GET /accessories HTTP/1.1\r\nHost: ${settings.ip}\r\n\r\n") }
     else { log.warn "HAP: not connected — open the session first (device must be paired and live)" }
 }
 void dumpAcc(j){
     def code={ x-> x?.toString()?.replace("-","")?.toUpperCase()?.replaceAll(/^0+/,"") }
-    log.info "===== HAP /accessories dump (driver v0.12.3) ====="
+    log.info "===== HAP /accessories dump (driver v0.12.4) ====="
     j.accessories.each{ acc->
         log.info "ACC aid=${acc.aid}"
         acc.services.each{ sv->
@@ -332,11 +339,11 @@ def mdnsTimeout(){
 }
 def mdnsCallback(message){
     try {
-        String desc = message.toString(); log.debug "HAP mdns raw: ${desc}"
+        String desc = message.toString(); if(settings.debugLog) log.debug "HAP mdns raw: ${desc}"
         def m = null; try { m = parseLanMessage(desc) } catch(ig){}
         String h = ((m?.payload ?: m?.body ?: desc) ?: "").toString().toLowerCase().replaceAll("[^0-9a-f]","")
         def r = parseMdns(h)
-        if(r.port){ device.updateSetting("port",[value:r.port,type:"number"]); state.discoveredPort=r.port; state.mdnsTries=0; log.info "HAP: detected port ${r.port}" }
+        if(r.port){ device.updateSetting("port",[value:r.port,type:"number"]); state.discoveredPort=r.port; state.mdnsTries=0; logInfo "HAP: detected port ${r.port}" }
         else log.warn "HAP: no SRV in mDNS reply"
         unschedule("mdnsTimeout")
         def op=state.afterMdns; state.afterMdns=null; if(op) dispatchOp(op)
@@ -435,7 +442,7 @@ void psM6(Map tv){
     device.updateSetting("setupCode",[value:"",type:"string"])
     state.paired=true
     ["srpK","srpA","srpM1","psSeed","psEncKey","psPid","shared"].each{ state.remove(it) }   // tidy one-time pairing secrets
-    sendEvent(name:"hapStatus", value:"paired"); log.info "HAP: paired OK, keys stored"
+    sendEvent(name:"hapStatus", value:"paired"); logInfo "HAP: paired OK, keys stored"
     interfaces.rawSocket.close(); runIn(3,"startLive")
 }
 def setThermostatMode(String m){ String lm=m?.toLowerCase(); def v=[off:0,heat:1,cool:2,auto:3][lm]; if(v!=null){ writeChar(TAID,18,v); sendEvent(name:"thermostatMode", value:lm) } else log.warn "bad mode $m" }
@@ -461,7 +468,7 @@ void adjustSetpoint(BigDecimal d){
     else if(mode=="auto"){
         def c=device.currentValue("coolingSetpoint"); def h=device.currentValue("heatingSetpoint")
         if(c!=null && h!=null){ BigDecimal nc=(c as BigDecimal)+d, nh=(h as BigDecimal)+d; writeChars([[TAID,22,round1(hubToC(nc))],[TAID,23,round1(hubToC(nh))]]); sendEvent(name:"coolingSetpoint", value:nc); sendEvent(name:"heatingSetpoint", value:nh) }
-    } else { log.info "HAP: mode is off — nothing to adjust" }
+    } else { logInfo "HAP: mode is off — nothing to adjust" }
 }
 def resumeProgram(){ writeChar(TAID,48, true) }
 // ecobee comfort profiles over HAP iid40 (write) — confirmed mapping: Home=0, Sleep=1, Away=2 (3=manual hold, read-only)
@@ -528,9 +535,9 @@ void buildSensors(j){
     }
     state.sensors=sensors
     if(sensors.isEmpty())
-        log.info "HAP: this thermostat has no built-in occupancy/motion sensor and no remote sensors — no sensor child device is created (this is normal, e.g. ecobee3 lite)"
+        logInfo "HAP: this thermostat has no built-in occupancy/motion sensor and no remote sensors — no sensor child device is created (this is normal, e.g. ecobee3 lite)"
     else
-        log.info "HAP: discovered ${sensors.findAll{!it.isMain}.size()} remote sensor(s)${sensors.any{it.isMain}?' + thermostat sensor':''}"
+        logInfo "HAP: discovered ${sensors.findAll{!it.isMain}.size()} remote sensor(s)${sensors.any{it.isMain}?' + thermostat sensor':''}"
 }
 def hapStart(String op, String body){
     if(!settings.ip || hapPort()<=0){ log.warn "HAP: set IP first (port auto-detects)"; return }
@@ -585,7 +592,7 @@ void doM4(Map tv){
     state.sess=true; rxbuf().setLength(0); plainbuf().setLength(0); state.inCtr=0
     sendEvent(name:"hapStatus", value:"session")
     if(state.op=="live"){
-        state.live=true; sendEvent(name:"hapStatus", value:"live"); log.info "HAP: live session up — subscribing to events"
+        state.live=true; sendEvent(name:"hapStatus", value:"live"); logInfo "HAP: live session up — subscribing to events"
         dlog("session up (live) -> subscribe + get")
         sendEncrypted(subscribeBody())
         String gids=readIds(); dlog("TX get(connect) ids=${gids.split(',').size()} reqLen=${("GET /characteristics?id=${gids} HTTP/1.1\r\nHost: ${settings.ip}\r\n\r\n").length()}")
