@@ -12,10 +12,15 @@
  *   thermostat's HomeKit slots; resetting HomeKit on the device frees a slot.
  *
  * Author: RamSet
- * Version: 0.13.0
+ * Version: 0.14.0
  * Date: 2026-06-24
  *
  * Changelog:
+ *  v0.14.0 - More "macgyvered" capabilities (synthesized from HAP + driver timers/derivation):
+ *           Hold Until (set a comfort profile or temp for N minutes, then auto-resume), Boost (nudge the
+ *           setpoint +/- for N minutes, then resume), and two derived booleans for easy rule-gating:
+ *           onHold (true when on any override) and alertActive (true when the ecobee has a pending alert).
+ *
  *  v0.13.0 - Added Set Fan Run Time (minutes): the ecobee's per-hour fan minimum isn't exposed over HomeKit,
  *           so this emulates it — runs the blower for N minutes then returns to Auto (driver-timed). Pair it
  *           with a rule/webCoRE to set per-hour run time from temps. (Ceiling-fans-when-blower-runs is already
@@ -139,7 +144,7 @@
  *   "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/drivers/ecobee-hap-thermostat/ecobee-hap-thermostat.groovy",
  *   "description": "Local HAP controller for an ecobee thermostat: mode, setpoints, temperature, humidity, operating state, fan, and remote sensors.",
  *   "required": true,
- *   "version": "0.13.0"
+ *   "version": "0.14.0"
  * }
  *
  * Copyright 2026 RamSet
@@ -165,10 +170,14 @@ metadata {
         command "resumeProgram"
         command "setComfortProfile", [[name:"profile*",type:"ENUM",constraints:["Home","Away","Sleep"]]]
         command "setFanRunTime", [[name:"minutes*",type:"NUMBER",description:"run the blower this many minutes, then back to Auto (emulates fan min-runtime; drive per-hour from a rule)"]]
+        command "holdUntil", [[name:"target*",type:"STRING",description:"comfort profile (Home/Away/Sleep) or a temperature like 72"],[name:"minutes*",type:"NUMBER",description:"auto-resume the schedule after this many minutes"]]
+        command "boost", [[name:"degrees*",type:"NUMBER",description:"raise (+) or lower (-) the setpoint by this much"],[name:"minutes*",type:"NUMBER",description:"then resume the schedule"]]
         command "setHumiditySetpoint", [[name:"humidity %*",type:"NUMBER",description:"target humidity, 20-50"]]
         command "setCharacteristic", [[name:"aid.iid*",type:"STRING",description:"HAP characteristic, e.g. 1.40"],[name:"value*",type:"STRING",description:"value to write (number or string)"]]
         command "dumpAccessories"   // debug: logs this thermostat's full HAP accessory/service/characteristic map
         attribute "comfortProfile", "string"
+        attribute "onHold", "string"          // true when on an override/hold (derived from comfortProfile) — easy rule-gating
+        attribute "alertActive", "string"     // true when the ecobee has a pending alert/reminder (derived from thermostatAlert)
         attribute "holdEndsAt", "string"
         attribute "humiditySetpoint", "number"
         attribute "fanState", "string"          // actual fan running state: inactive / idle / blowing (HAP iid76)
@@ -500,6 +509,18 @@ def fanCirculate(){ setThermostatFanMode("on") }
 // turn the fan On, then back to Auto after N minutes (driver-timed). Drive it from a rule/webCoRE per hour.
 def setFanRunTime(minutes){ int n=(minutes as int); if(n<=0){ setThermostatFanMode("auto"); return }; setThermostatFanMode("on"); runIn(n*60, "fanRunTimeEnd") }
 def fanRunTimeEnd(){ setThermostatFanMode("auto") }
+// macgyver: temporary override -> set a comfort profile or a temp now, then auto-resume the schedule after N minutes
+def holdUntil(String target, minutes){
+    String t=target?.trim()
+    if(t?.isNumber()) setDesiredTemperature(t as BigDecimal)
+    else setComfortProfile(t?.toLowerCase()?.capitalize())   // Home / Away / Sleep
+    int n=(minutes as int); if(n>0) runIn(n*60, "resumeProgram")
+}
+// macgyver: nudge the setpoint by +/- degrees for N minutes, then resume the schedule
+def boost(degrees, minutes){
+    adjustSetpoint(degrees as BigDecimal)
+    int n=(minutes as int); if(n>0) runIn(n*60, "resumeProgram")
+}
 def setSchedule(s){}
 
 BigDecimal round1(BigDecimal v){ return (v*10).setScale(0, java.math.RoundingMode.HALF_UP)/10 }
@@ -744,11 +765,11 @@ void applyState(j){
     }
     if(g(17)!=null) sendEvent(name:"thermostatOperatingState", value: [0:"idle",1:"heating",2:"cooling"][g(17) as int])
     if(g(75)!=null) sendEvent(name:"thermostatFanMode", value: (g(75) as int)==1?"auto":"on")
-    if(g(33)!=null) sendEvent(name:"comfortProfile", value: [0:"Home",1:"Sleep",2:"Away",3:"Hold"][g(33) as int] ?: "Hold")
+    if(g(33)!=null){ String cp=[0:"Home",1:"Sleep",2:"Away",3:"Hold"][g(33) as int] ?: "Hold"; sendEvent(name:"comfortProfile", value: cp); sendEvent(name:"onHold", value: (cp=="Hold")) }
     if(g(41)!=null){ String h=g(41).toString().replaceAll(/S$/,""); sendEvent(name:"holdEndsAt", value: h.startsWith("2014-01-03")?"":h) }
     if(g(25)!=null) sendEvent(name:"humiditySetpoint", value: g(25) as int, unit:"%")
     if(g(76)!=null) sendEvent(name:"fanState", value: [0:"inactive",1:"idle",2:"blowing"][g(76) as int] ?: "unknown")
-    if(g(54)!=null) sendEvent(name:"thermostatAlert", value: g(54).toString())
+    if(g(54)!=null){ String a=g(54).toString(); sendEvent(name:"thermostatAlert", value: a); sendEvent(name:"alertActive", value: !(a.toLowerCase().contains("no pending alert"))) }
     // per-profile setpoints (HAP iid34-39 follow ecobee's fixed Home/Away/Sleep climate order)
     if(g(34)!=null) sendEvent(name:"homeHeatSetpoint",  value: cToHub(g(34)))
     if(g(35)!=null) sendEvent(name:"homeCoolSetpoint",  value: cToHub(g(35)))
