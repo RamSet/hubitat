@@ -1,8 +1,8 @@
 {
   "packageName": "Ecobee HAP Thermostat (Local)",
   "author": "RamSet",
-  "version": "0.14.1",
-  "releaseNotes": "0.14.1 - State hygiene: stale one-time pair-setup values (~1.2KB) are now cleared on Save, so hubs paired on older versions reclaim that dead state on the next re-import. No functional change.",
+  "version": "0.14.2",
+  "releaseNotes": "0.14.2 - Debug logging auto-disables after 30 minutes (off by default). The debug trace writes state on every frame/event, so leaving it on raised the devices busy% and state size; auto-off keeps both down and clears the diag buffer.",
   "category": "Thermostats",
   "tags": "Thermostat, ecobee, HomeKit, HAP, Local, Sensor",
   "dateReleased": "2026-06-24",

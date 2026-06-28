@@ -12,10 +12,14 @@
  *   thermostat's HomeKit slots; resetting HomeKit on the device frees a slot.
  *
  * Author: RamSet
- * Version: 0.14.1
+ * Version: 0.14.2
  * Date: 2026-06-24
  *
  * Changelog:
+ *  v0.14.2 - Debug logging now auto-disables after 30 minutes (it's off by default already). The diag trace
+ *           writes state on every socket frame/event, so leaving it on inflated both the device's busy% and
+ *           state size — auto-off keeps both down. logsOff() also clears the diag buffer.
+ *
  *  v0.14.1 - State hygiene: shed stale pair-setup temporaries (srpA/srpK/srpM1/psSeed/psEncKey/psPid/psstage,
  *           ~1.2KB) on Save, not just after a fresh pair — already-paired hubs that never re-pair now reclaim
  *           that dead state on the next re-import. (No functional change; pairing recreates them as needed.)
@@ -148,7 +152,7 @@
  *   "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/drivers/ecobee-hap-thermostat/ecobee-hap-thermostat.groovy",
  *   "description": "Local HAP controller for an ecobee thermostat: mode, setpoints, temperature, humidity, operating state, fan, and remote sensors.",
  *   "required": true,
- *   "version": "0.14.1"
+ *   "version": "0.14.2"
  * }
  *
  * Copyright 2026 RamSet
@@ -244,6 +248,7 @@ def updated(){
     unschedule(); state.live=false; state.diag=[]; state.connTry=0; state.mdnsTries=0; if(settings.debugLog) sendEvent(name:"diag", value:"")
     state.remove("sensors")   // force a fresh /accessories discovery on Save so sensor topology (incl. the thermostat's own sensor) rebuilds
     ["srpK","srpA","srpM1","psSeed","psEncKey","psPid","psstage"].each{ state.remove(it) }   // shed stale pair-setup temporaries (re-created if pairing; ~1.2KB reclaimed on already-paired hubs)
+    if(settings.debugLog) runIn(1800,"logsOff")   // debug is off by default and auto-disables after 30 min (it writes state on every frame — keeps the device's busy% + state size down)
     if(settings.setupCode && !isPaired()){ logInfo "HAP: setup code entered — pairing"; runIn(1,"pair") }
     else if(isPaired()){ runIn(2,"startLive") }   // live event mode is the default once paired
 }
@@ -307,6 +312,7 @@ byte[] bigBe(java.math.BigInteger n, int len){ byte[] t=n.toByteArray(); byte[] 
 String uuidStr(){ String h=hx(rnd32()); return "${h[0..7]}-${h[8..11]}-${h[12..15]}-${h[16..19]}-${h[20..31]}" }
 void rep(String m){ if(settings.debugLog) log.debug "HAP: ${m}" }
 void logInfo(String m){ if(settings.infoLog!=false) log.info m }   // info logging on unless explicitly disabled
+def logsOff(){ device.updateSetting("debugLog",[value:"false",type:"bool"]); state.diag=[]; sendEvent(name:"diag", value:""); log.info "HAP: debug logging auto-disabled" }
 
 // ===== public commands =====
 // ---- flow diagnostics (read remotely via the 'diag' attribute / fullJson) ----
