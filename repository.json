@@ -30,7 +30,7 @@
       "name": "Zooz Sprinkler Scheduler",
       "category": "Irrigation",
       "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/manifest-zooz-sprinkler.json",
-      "description": "Fully-local irrigation controller for Zooz ZEN16/ZEN17 relays — weather-aware scheduling, cycle & soak, moisture, pause-and-resume, and a verified hardware auto-off failsafe."
+      "description": "Fully-local irrigation controller for Zooz ZEN16/ZEN17 relays \u2014 weather-aware scheduling, cycle & soak, moisture, pause-and-resume, and a verified hardware auto-off failsafe."
     },
     {
       "name": "Blinds Dusk Automation",
@@ -42,13 +42,19 @@
       "name": "Ecobee HAP Thermostat (Local)",
       "category": "Thermostats",
       "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/manifest-ecobee-hap.json",
-      "description": "Control an ecobee thermostat 100% locally over the HomeKit Accessory Protocol (HAP) — no cloud, no Apple hardware, no bridge. In-driver pairing, mode/setpoints/humidity/operating state, remote room sensors as child devices, and real-time HomeKit event push."
+      "description": "Control an ecobee thermostat 100% locally over the HomeKit Accessory Protocol (HAP) \u2014 no cloud, no Apple hardware, no bridge. In-driver pairing, mode/setpoints/humidity/operating state, remote room sensors as child devices, and real-time HomeKit event push."
     },
     {
       "name": "Local Ecobee Helpers",
       "category": "Thermostats",
       "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/manifest-ecobee-helpers.json",
       "description": "Offline helper apps for the Ecobee HAP Thermostat (Local): per-room vent control, open-contact HVAC pause with notifications, and humidifier control. Add as many helpers as needed under one parent."
+    },
+    {
+      "name": "HomeKit Import (Local)",
+      "category": "Integrations",
+      "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/manifest-homekit-import.json",
+      "description": "Import any LAN/Wi-Fi HomeKit (HAP) accessory into Hubitat \u2014 pair with a setup code and the driver auto-maps the accessory to a Hubitat device. No cloud, no Apple hardware, no Homebridge. Runs on any hub (C5/C7/C8)."
     }
   ]
 }
