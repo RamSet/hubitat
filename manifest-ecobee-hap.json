@@ -1,8 +1,8 @@
 {
   "packageName": "Ecobee HAP Thermostat (Local)",
   "author": "RamSet",
-  "version": "0.14.0",
-  "releaseNotes": "0.14.0 - New macgyvered capabilities: Hold Until (comfort profile or temp for N minutes, then auto-resume), Boost (nudge setpoint +/- for N minutes, then resume), and two derived attributes for easy rules - onHold (on any override) and alertActive (ecobee has a pending alert/reminder).",
+  "version": "0.14.1",
+  "releaseNotes": "0.14.1 - State hygiene: stale one-time pair-setup values (~1.2KB) are now cleared on Save, so hubs paired on older versions reclaim that dead state on the next re-import. No functional change.",
   "category": "Thermostats",
   "tags": "Thermostat, ecobee, HomeKit, HAP, Local, Sensor",
   "dateReleased": "2026-06-24",

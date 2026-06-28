@@ -12,10 +12,14 @@
  *   thermostat's HomeKit slots; resetting HomeKit on the device frees a slot.
  *
  * Author: RamSet
- * Version: 0.14.0
+ * Version: 0.14.1
  * Date: 2026-06-24
  *
  * Changelog:
+ *  v0.14.1 - State hygiene: shed stale pair-setup temporaries (srpA/srpK/srpM1/psSeed/psEncKey/psPid/psstage,
+ *           ~1.2KB) on Save, not just after a fresh pair — already-paired hubs that never re-pair now reclaim
+ *           that dead state on the next re-import. (No functional change; pairing recreates them as needed.)
+ *
  *  v0.14.0 - More "macgyvered" capabilities (synthesized from HAP + driver timers/derivation):
  *           Hold Until (set a comfort profile or temp for N minutes, then auto-resume), Boost (nudge the
  *           setpoint +/- for N minutes, then resume), and two derived booleans for easy rule-gating:
@@ -144,7 +148,7 @@
  *   "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/drivers/ecobee-hap-thermostat/ecobee-hap-thermostat.groovy",
  *   "description": "Local HAP controller for an ecobee thermostat: mode, setpoints, temperature, humidity, operating state, fan, and remote sensors.",
  *   "required": true,
- *   "version": "0.14.0"
+ *   "version": "0.14.1"
  * }
  *
  * Copyright 2026 RamSet
@@ -239,6 +243,7 @@ def installed(){ updated() }
 def updated(){
     unschedule(); state.live=false; state.diag=[]; state.connTry=0; state.mdnsTries=0; if(settings.debugLog) sendEvent(name:"diag", value:"")
     state.remove("sensors")   // force a fresh /accessories discovery on Save so sensor topology (incl. the thermostat's own sensor) rebuilds
+    ["srpK","srpA","srpM1","psSeed","psEncKey","psPid","psstage"].each{ state.remove(it) }   // shed stale pair-setup temporaries (re-created if pairing; ~1.2KB reclaimed on already-paired hubs)
     if(settings.setupCode && !isPaired()){ logInfo "HAP: setup code entered — pairing"; runIn(1,"pair") }
     else if(isPaired()){ runIn(2,"startLive") }   // live event mode is the default once paired
 }
@@ -466,7 +471,7 @@ void psM6(Map tv){
     device.updateSetting("accPairingId",[value:new String(accId,"UTF-8"),type:"string"])
     device.updateSetting("setupCode",[value:"",type:"string"])
     state.paired=true
-    ["srpK","srpA","srpM1","psSeed","psEncKey","psPid","shared"].each{ state.remove(it) }   // tidy one-time pairing secrets
+    ["srpK","srpA","srpM1","psSeed","psEncKey","psPid","psstage","shared"].each{ state.remove(it) }   // tidy one-time pairing secrets
     sendEvent(name:"hapStatus", value:"paired"); logInfo "HAP: paired OK, keys stored"
     interfaces.rawSocket.close(); runIn(3,"startLive")
 }
