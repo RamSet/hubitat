@@ -18,9 +18,13 @@
  *   Contact/Motion/Occupancy/Temperature/Humidity/Light sensors, Battery. Unmapped -> Dump Accessories.
  *
  * Author: RamSet
- * Version: 0.9.5
+ * Version: 0.10.0
  *
  * Changelog:
+ *  v0.10.0 - Renamed all device types to "HomeKit HAP ..." (e.g. HomeKit HAP Switch, HomeKit HAP
+ *           Accessory) so they're clearly identifiable in the driver-type dropdown and don't blur into
+ *           Hubitat's built-in HomeKit features. No functional change; existing devices keep working
+ *           (Hubitat binds devices to drivers internally, not by display name).
  *  v0.9.5 - PURE LISTEN: never poll at all (like a real HomeKit controller). The ev:true subscription
  *           carries real-time updates; the only watchdog now RECONNECTS (never polls) after a long
  *           total silence, so a silently-dead link still recovers without the GET that kills cheap chips.
@@ -83,7 +87,7 @@
 import groovy.transform.Field
 
 metadata {
-    definition(name: "HomeKit Accessory", namespace: "RamSet", author: "RamSet", importUrl: "https://raw.githubusercontent.com/RamSet/hubitat/main/drivers/homekit-accessory/homekit-accessory.groovy") {
+    definition(name: "HomeKit HAP Accessory", namespace: "RamSet", author: "RamSet", importUrl: "http://10.33.47.84/api/v1/repos/RamSet/hubitat-homekit-import/raw/drivers/homekit-accessory/homekit-accessory.groovy?token=8813b22a89d3c96578b1eca8a56c2f8e6c2b3561") {
         capability "Refresh"
         command "pair"
         command "unpair"            // HAP RemovePairing — cleanly release this accessory (like a Z-Wave exclude), then remove its children
@@ -114,22 +118,22 @@ metadata {
 // ===== service -> capability mapping (HAP type code -> child driver) =====
 // type/char codes are short-form (dashes stripped, uppercased, leading zeros removed) — see hapCode().
 @Field static Map SERVICE_MAP = [
-    "49": [name:"Switch",             driver:"HomeKit Switch"],              // Switch
-    "47": [name:"Outlet",             driver:"HomeKit Switch"],              // Outlet (reuse Switch)
-    "43": [name:"Light",              driver:"HomeKit Light"],               // Lightbulb
-    "45": [name:"Lock",               driver:"HomeKit Lock"],                // LockMechanism
-    "80": [name:"Contact Sensor",     driver:"HomeKit Contact Sensor"],      // ContactSensor
-    "85": [name:"Motion Sensor",      driver:"HomeKit Motion Sensor"],       // MotionSensor
-    "86": [name:"Occupancy Sensor",   driver:"HomeKit Occupancy Sensor"],    // OccupancySensor
-    "8A": [name:"Temperature Sensor", driver:"HomeKit Temperature Sensor"],  // TemperatureSensor
-    "82": [name:"Humidity Sensor",    driver:"HomeKit Humidity Sensor"],     // HumiditySensor
-    "84": [name:"Light Sensor",       driver:"HomeKit Light Sensor"],        // LightSensor
-    "8C": [name:"Window Shade",       driver:"HomeKit Window Shade"],        // WindowCovering
-    "40": [name:"Fan",                driver:"HomeKit Fan"],                 // Fan v1
-    "B7": [name:"Fan",                driver:"HomeKit Fan"],                 // Fan v2
-    "96": [name:"Battery",            driver:"HomeKit Battery"],             // BatteryService
-    "4A": [name:"Thermostat",         driver:"HomeKit Thermostat"],          // Thermostat (generic; ecobee has its own rich driver)
-    "41": [name:"Garage Door",        driver:"HomeKit Garage Door"],         // GarageDoorOpener
+    "49": [name:"Switch",             driver:"HomeKit HAP Switch"],              // Switch
+    "47": [name:"Outlet",             driver:"HomeKit HAP Switch"],              // Outlet (reuse Switch)
+    "43": [name:"Light",              driver:"HomeKit HAP Light"],               // Lightbulb
+    "45": [name:"Lock",               driver:"HomeKit HAP Lock"],                // LockMechanism
+    "80": [name:"Contact Sensor",     driver:"HomeKit HAP Contact Sensor"],      // ContactSensor
+    "85": [name:"Motion Sensor",      driver:"HomeKit HAP Motion Sensor"],       // MotionSensor
+    "86": [name:"Occupancy Sensor",   driver:"HomeKit HAP Occupancy Sensor"],    // OccupancySensor
+    "8A": [name:"Temperature Sensor", driver:"HomeKit HAP Temperature Sensor"],  // TemperatureSensor
+    "82": [name:"Humidity Sensor",    driver:"HomeKit HAP Humidity Sensor"],     // HumiditySensor
+    "84": [name:"Light Sensor",       driver:"HomeKit HAP Light Sensor"],        // LightSensor
+    "8C": [name:"Window Shade",       driver:"HomeKit HAP Window Shade"],        // WindowCovering
+    "40": [name:"Fan",                driver:"HomeKit HAP Fan"],                 // Fan v1
+    "B7": [name:"Fan",                driver:"HomeKit HAP Fan"],                 // Fan v2
+    "96": [name:"Battery",            driver:"HomeKit HAP Battery"],             // BatteryService
+    "4A": [name:"Thermostat",         driver:"HomeKit HAP Thermostat"],          // Thermostat (generic; ecobee has its own rich driver)
+    "41": [name:"Garage Door",        driver:"HomeKit HAP Garage Door"],         // GarageDoorOpener
 ]
 // per-service characteristic of interest: HAP char code -> logical key
 @Field static Map CHAR_MAP = [
@@ -214,7 +218,7 @@ void onAccessories(j){
                 sv.characteristics.each{ c-> def p=(c.perms?:[]); if(p.contains("pr")||p.contains("ev")) rawChars["iid${c.iid}(${hapCode(c.type)})"]=c.iid }
                 if(rawChars.isEmpty()) return
                 String label = nameOfService(acc, sv) ?: accName ?: "HomeKit ${stype} ${acc.aid}.${sv.iid}"
-                services << [aid:acc.aid, sIid:sv.iid, type:stype, driver:"HomeKit Generic", dni:dni, label:label, raw:true, chars:rawChars]
+                services << [aid:acc.aid, sIid:sv.iid, type:stype, driver:"HomeKit HAP Generic", dni:dni, label:label, raw:true, chars:rawChars]
             }
         }
     }
@@ -222,7 +226,7 @@ void onAccessories(j){
     batteryByAid.each{ aid, bc->
         def hosts = services.findAll{ it.aid==aid && BATTERY_HOSTS.contains(it.type) }
         if(hosts){ hosts.each{ it.chars.putAll(bc) } }
-        else { services << [aid:aid, sIid:0, type:"96", driver:"HomeKit Battery", dni:"hk-${device.id}-${aid}-batt", label:(infoByAid[aid]?.model ? "${infoByAid[aid].model} Battery" : "Battery ${aid}"), chars:bc] }
+        else { services << [aid:aid, sIid:0, type:"96", driver:"HomeKit HAP Battery", dni:"hk-${device.id}-${aid}-batt", label:(infoByAid[aid]?.model ? "${infoByAid[aid].model} Battery" : "Battery ${aid}"), chars:bc] }
     }
     state.services=services
     applyAccessoryInfo(infoByAid)
