@@ -1,11 +1,11 @@
 {
   "packageName": "Ecobee HAP Thermostat (Local)",
   "author": "RamSet",
-  "version": "0.14.2",
-  "releaseNotes": "0.14.2 - Debug logging auto-disables after 30 minutes (off by default). The debug trace writes state on every frame/event, so leaving it on raised the devices busy% and state size; auto-off keeps both down and clears the diag buffer.",
+  "version": "0.15.0",
+  "releaseNotes": "0.15.0 - The HomeKit/HAP engine (pairing, encrypted session, port discovery, reconnect) now lives in a shared library (hapCore) used by all of RamSet's HomeKit drivers, so the protocol is maintained and improved in one place. No setup change and NO re-pairing \u2014 existing pairings are preserved; you gain a sturdier reconnect. HPM installs the library automatically.",
   "category": "Thermostats",
   "tags": "Thermostat, ecobee, HomeKit, HAP, Local, Sensor",
-  "dateReleased": "2026-06-24",
+  "dateReleased": "2026-06-28",
   "drivers": [
     {
       "id": "511b25e3-4ca2-413e-a1f7-351ff50cd3b1",
@@ -24,6 +24,16 @@
       "required": true,
       "oauth": false,
       "description": "Child device for ecobee remote sensors (temperature, occupancy, motion, battery). Created automatically by the thermostat driver."
+    }
+  ],
+  "libraries": [
+    {
+      "id": "543ff3a6-44f6-4ff8-8240-ac693a309639",
+      "name": "hapCore",
+      "namespace": "RamSet",
+      "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/libraries/hap-core/hap-core.groovy",
+      "required": true,
+      "version": "0.8.0"
     }
   ]
 }
