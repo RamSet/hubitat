@@ -1,8 +1,8 @@
 {
   "packageName": "Ecobee HAP Thermostat (Local)",
   "author": "RamSet",
-  "version": "0.12.7",
-  "releaseNotes": "0.12.7 - Cosmetic: removed the stale hardcoded version from the Dump Accessories log header so it does not misreport the driver version in diagnostics.",
+  "version": "0.13.0",
+  "releaseNotes": "0.13.0 - Added Set Fan Run Time (minutes): emulates the ecobee per-hour fan minimum (not exposed over HomeKit) by running the blower N minutes then returning to Auto - drive it per-hour from a rule/webCoRE. Ceiling-fans-when-the-blower-runs is already handled by the fanState attribute.",
   "category": "Thermostats",
   "tags": "Thermostat, ecobee, HomeKit, HAP, Local, Sensor",
   "dateReleased": "2026-06-24",

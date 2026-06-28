@@ -12,10 +12,15 @@
  *   thermostat's HomeKit slots; resetting HomeKit on the device frees a slot.
  *
  * Author: RamSet
- * Version: 0.12.7
+ * Version: 0.13.0
  * Date: 2026-06-24
  *
  * Changelog:
+ *  v0.13.0 - Added Set Fan Run Time (minutes): the ecobee's per-hour fan minimum isn't exposed over HomeKit,
+ *           so this emulates it — runs the blower for N minutes then returns to Auto (driver-timed). Pair it
+ *           with a rule/webCoRE to set per-hour run time from temps. (Ceiling-fans-when-blower-runs is already
+ *           covered by the fanState attribute reading "blowing".)
+ *
  *  v0.12.7 - Dropped the hardcoded version from the Dump Accessories log header (it was stale, said v0.12.4
  *           regardless of the running version, which could mislead support). Cosmetic only.
  *
@@ -134,7 +139,7 @@
  *   "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/drivers/ecobee-hap-thermostat/ecobee-hap-thermostat.groovy",
  *   "description": "Local HAP controller for an ecobee thermostat: mode, setpoints, temperature, humidity, operating state, fan, and remote sensors.",
  *   "required": true,
- *   "version": "0.12.7"
+ *   "version": "0.13.0"
  * }
  *
  * Copyright 2026 RamSet
@@ -159,6 +164,7 @@ metadata {
         command "lowerSetpoint"
         command "resumeProgram"
         command "setComfortProfile", [[name:"profile*",type:"ENUM",constraints:["Home","Away","Sleep"]]]
+        command "setFanRunTime", [[name:"minutes*",type:"NUMBER",description:"run the blower this many minutes, then back to Auto (emulates fan min-runtime; drive per-hour from a rule)"]]
         command "setHumiditySetpoint", [[name:"humidity %*",type:"NUMBER",description:"target humidity, 20-50"]]
         command "setCharacteristic", [[name:"aid.iid*",type:"STRING",description:"HAP characteristic, e.g. 1.40"],[name:"value*",type:"STRING",description:"value to write (number or string)"]]
         command "dumpAccessories"   // debug: logs this thermostat's full HAP accessory/service/characteristic map
@@ -490,6 +496,10 @@ def setThermostatFanMode(String m){ boolean on=(m?.toLowerCase()=="on"); writeCh
 def fanOn(){ setThermostatFanMode("on") }
 def fanAuto(){ setThermostatFanMode("auto") }
 def fanCirculate(){ setThermostatFanMode("on") }
+// macgyver: the ecobee's per-hour fan minimum isn't exposed over HAP, so emulate a timed blower run —
+// turn the fan On, then back to Auto after N minutes (driver-timed). Drive it from a rule/webCoRE per hour.
+def setFanRunTime(minutes){ int n=(minutes as int); if(n<=0){ setThermostatFanMode("auto"); return }; setThermostatFanMode("on"); runIn(n*60, "fanRunTimeEnd") }
+def fanRunTimeEnd(){ setThermostatFanMode("auto") }
 def setSchedule(s){}
 
 BigDecimal round1(BigDecimal v){ return (v*10).setScale(0, java.math.RoundingMode.HALF_UP)/10 }
