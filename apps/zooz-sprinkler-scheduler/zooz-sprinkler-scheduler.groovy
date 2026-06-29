@@ -62,7 +62,7 @@ mappings {
     path("/calendar.ics")  { action: [GET: "apiCalendar"] }
 }
 
-String getAppVersion() { return "v0.13.0 (2026-06)" }
+String getAppVersion() { return "v0.13.1 (2026-06)" }
 
 // Simple vs Advanced interface. Simple shows only zones, schedule, weather and
 // hardware safety; Advanced exposes everything (moisture, learning, sensors,
@@ -1199,6 +1199,7 @@ def aboutPage() {
             paragraph "v0.12.4 — The Hardware-safety push won't set a relay auto-off timer shorter than the longest single watering cycle this schedule actually drives on that controller — it raises the value automatically so the hardware can't cut your own watering short. It also warns before lowering a timer the device already holds higher, which protects controllers shared between two app instances (a relay driven by the other instance may need the longer timer)."
             paragraph "v0.12.3 — Fixed false \"relay unreachable\" alerts right after a successful watering. The reachability watchdog judged the controller only by when its parent device last reported to the hub, which some Zooz drivers don't refresh when a child relay is toggled — so a controller the app had just driven could be flagged unreachable. The app now counts its own successful waterings as proof the controller is reachable, attributed to the specific controller that owns the relay so a run on one controller can't hide a genuine outage on another. The Hardware-safety page now shows, per controller, when the app last drove one of its relays and when the controller last reported to the hub — so you can confirm each controller is mapped correctly."
             paragraph "v0.12.2 — Fixed pause sensors reporting \"0s remaining\" and skipping ahead when they fired during a soak or the gap between zones. The schedule now tracks soak and between-zone phases as pausable too, so a pause that lands mid-soak reports the real soak time left and resumes that soak (valves stay off) instead of jumping to the next zone."
+            paragraph "v0.13.1 — Pause-sensor hold now applies on EVERY scheduled start regardless of the pause/stop mode (that setting only governs what happens mid-run). Previously a sensor set to 'stop' mode would still skip the cycle at the scheduled start instead of holding."
             paragraph "v0.13.0 — Pause sensors (water heater on, a door/contact open) now HOLD the scheduled run and start it automatically once they clear, instead of skipping the cycle — with a \"waiting for X to clear\" notification. Genuine skips (wet rain sensor, weather rain delay, quiet hours, mode/HSM) still skip the cycle and say why. Also: the completion summary's seasonal figure now shows the actual extra over the scheduled base, so \"watered X of Y · (+delta)\" always reconciles (previously the parenthetical was a theoretical seasonal estimate that didn't match the real watered total)."
             paragraph "v0.12.1 — The Hardware-Safety push no longer claims \"successful\" just because the commands were sent. It now reads the Auto-Off timers back off each controller ~15s later and reports the truth — \"✓ armed\" with the real values, or \"⚠ did NOT take\" with a prompt to flip the setParameter-order override and push again (and an error notification if any relay is left unprotected)."
             paragraph "v0.12.0 — IMPORTANT safety fix: the Hardware-Safety push was sending the relay Auto-Off timers in the wrong setParameter argument order, so they silently never took (the device's P6/P8/P10 stayed 0 — no hardware failsafe) even though the push reported success. The app can't read argument names from Hubitat, so it now defaults to the correct jtp10181/vendored-driver order (paramNumber, value, size), with a manual override on the Hardware-safety page. Re-push after updating, and confirm the Auto Turn-Off timers are non-zero on each relay."
@@ -1861,15 +1862,17 @@ def runSchedule(Map opts = [:]) {
     // reason to skip the cycle. Hold the run and start it automatically once every
     // pause sensor clears. Genuine skips (wet rain sensor, weather, quiet hours,
     // mode/HSM) were checked above and already returned, so they take precedence.
-    // STOP mode and a manual "Run now" instead treat an active sensor as a skip.
+    // This applies regardless of pause/stop mode — that setting governs MID-RUN
+    // behavior only; at a scheduled start there's no run to stop. A manual
+    // "Run now" still treats an active sensor as an immediate skip.
     if (externalPauseActive()) {
         String who = externalPauseReason()
-        if (!manual && (settings.pauseMode ?: "pause") != "stop") {
+        if (!manual) {
             log.info "${app.label}: pause sensor active (${who}) — holding run until it clears"
             state.deferredRunPending = true
             notify("schedule.defer", [sensor: who])
         } else {
-            log.info "${app.label}: pause sensor active (${who}) — skipping this cycle"
+            log.info "${app.label}: pause sensor active (${who}) — skipping this manual run"
             notify("skip.pause", [sensor: who])
             recordRunSkip("pause sensor active (${who})")
         }
