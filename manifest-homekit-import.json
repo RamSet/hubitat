@@ -1,11 +1,11 @@
 {
   "packageName": "HomeKit Import (Local)",
   "author": "RamSet",
-  "version": "0.9.1",
-  "releaseNotes": "0.9.1 - Packaging fix: the shared hapCore engine library now ships as a Hubitat BUNDLE so HPM installs it automatically before the drivers compile. HPM doesn't support a 'libraries' manifest section, which is why the install previously failed with 'library not found'. No functional change.",
+  "version": "0.9.2",
+  "releaseNotes": "0.9.2 - Pairing errors are now shown in plain English. Instead of cryptic codes like 'pair M2 06', hapStatus and the logs explain what to do, e.g. 'pair failed: accessory already paired or not in pairing mode — remove it from Apple Home (or reset its HomeKit), then retry', plus clear messages for wrong setup code, too-many-tries lockout, accessory full, and busy.",
   "category": "Integrations",
   "tags": "HomeKit, HAP, Local, Import, No Cloud",
-  "dateReleased": "2026-06-28",
+  "dateReleased": "2026-06-29",
   "minimumHEVersion": "2.3.0",
   "drivers": [
     {
