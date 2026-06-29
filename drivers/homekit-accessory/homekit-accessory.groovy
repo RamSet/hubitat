@@ -77,7 +77,7 @@
  *   "package": "HomeKit Import",
  *   "namespace": "RamSet",
  *   "author": "RamSet",
- *   "location": "https://raw.githubusercontent.com/RamSet/hubitat-homekit-import/main/drivers/homekit-accessory/homekit-accessory.groovy",
+ *   "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/drivers/homekit-accessory/homekit-accessory.groovy",
  *   "description": "Imports a LAN HomeKit accessory into Hubitat: pairs, discovers services, auto-creates child devices, live updates.",
  *   "required": true,
  *   "version": "0.10.1"
@@ -91,7 +91,7 @@
 import groovy.transform.Field
 
 metadata {
-    definition(name: "HomeKit HAP Accessory", namespace: "RamSet", author: "RamSet", importUrl: "http://10.33.47.84/api/v1/repos/RamSet/hubitat-homekit-import/raw/drivers/homekit-accessory/homekit-accessory.groovy?token=8813b22a89d3c96578b1eca8a56c2f8e6c2b3561") {
+    definition(name: "HomeKit HAP Accessory", namespace: "RamSet", author: "RamSet", importUrl: "https://raw.githubusercontent.com/RamSet/hubitat/main/drivers/homekit-accessory/homekit-accessory.groovy") {
         capability "Refresh"
         command "pair"
         command "unpair"            // HAP RemovePairing — cleanly release this accessory (like a Z-Wave exclude), then remove its children
