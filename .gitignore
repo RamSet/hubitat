@@ -2,5 +2,9 @@
 .playwright-mcp/
 
 # Local-only, intentionally not published
-FORUM-POST.md       # Discourse forum drafts
-spruce-original/    # reference copies of the original Spruce source
+
+# Discourse forum drafts
+FORUM-POST.md
+
+# reference copies of the original Spruce source
+spruce-original/
