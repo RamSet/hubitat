@@ -1,11 +1,11 @@
 {
   "packageName": "Ecobee HAP Thermostat (Local)",
   "author": "RamSet",
-  "version": "0.15.1",
-  "releaseNotes": "0.15.1 - Packaging fix: the shared hapCore engine library is now delivered as a Hubitat BUNDLE so HPM installs it automatically. HPM has no 'libraries' manifest support, which is why earlier installs/updates reported 'library not found: #include RamSet.hapCore' and needed a manual library import. No more manual step; no functional change to the driver.",
+  "version": "0.15.2",
+  "releaseNotes": "0.15.2 - Shared HAP engine update: HomeKit pairing errors are now reported in plain English (e.g. wrong setup code, accessory already paired / not in pairing mode, locked after too many tries — power-cycle it) instead of cryptic codes, in hapStatus and the logs. Engine-only change via the shared bundle; no thermostat behavior change.",
   "category": "Thermostats",
   "tags": "Thermostat, ecobee, HomeKit, HAP, Local, Sensor",
-  "dateReleased": "2026-06-28",
+  "dateReleased": "2026-06-29",
   "drivers": [
     {
       "id": "511b25e3-4ca2-413e-a1f7-351ff50cd3b1",
