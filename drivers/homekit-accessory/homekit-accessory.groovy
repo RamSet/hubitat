@@ -18,9 +18,13 @@
  *   Contact/Motion/Occupancy/Temperature/Humidity/Light sensors, Battery. Unmapped -> Dump Accessories.
  *
  * Author: RamSet
- * Version: 0.10.0
+ * Version: 0.10.1
  *
  * Changelog:
+ *  v0.10.1 - Generic (unmapped) children are now self-identifying: their name carries the HAP service
+ *           type, e.g. "<name> [HAP svc 8C]", so multiple unmapped services on one accessory are
+ *           distinct and the type to map is visible at a glance. The tag is also back-filled onto
+ *           already-created generic children on the next discovery.
  *  v0.10.0 - Renamed all device types to "HomeKit HAP ..." (e.g. HomeKit HAP Switch, HomeKit HAP
  *           Accessory) so they're clearly identifiable in the driver-type dropdown and don't blur into
  *           Hubitat's built-in HomeKit features. No functional change; existing devices keep working
@@ -76,7 +80,7 @@
  *   "location": "https://raw.githubusercontent.com/RamSet/hubitat-homekit-import/main/drivers/homekit-accessory/homekit-accessory.groovy",
  *   "description": "Imports a LAN HomeKit accessory into Hubitat: pairs, discovers services, auto-creates child devices, live updates.",
  *   "required": true,
- *   "version": "0.9.5"
+ *   "version": "0.10.1"
  * }
  *
  * Copyright 2026 RamSet — Apache License 2.0, provided as-is, no warranty.
@@ -217,7 +221,10 @@ void onAccessories(j){
                 def rawChars=[:]
                 sv.characteristics.each{ c-> def p=(c.perms?:[]); if(p.contains("pr")||p.contains("ev")) rawChars["iid${c.iid}(${hapCode(c.type)})"]=c.iid }
                 if(rawChars.isEmpty()) return
-                String label = nameOfService(acc, sv) ?: accName ?: "HomeKit ${stype} ${acc.aid}.${sv.iid}"
+                // tag the name with the HAP service type so unmapped children are self-identifying and
+                // distinct (an accessory often has several unmapped services that share one base name)
+                String base = nameOfService(acc, sv) ?: accName ?: "HomeKit ${acc.aid}.${sv.iid}"
+                String label = "${base} [HAP svc ${stype}]"
                 services << [aid:acc.aid, sIid:sv.iid, type:stype, driver:"HomeKit HAP Generic", dni:dni, label:label, raw:true, chars:rawChars]
             }
         }
@@ -235,7 +242,11 @@ void onAccessories(j){
     services.each{ s->
         def cd=getChildDevice(s.dni)
         if(!cd){ try{ cd=addChildDevice("RamSet", s.driver, s.dni, [name:s.label, label:s.label]) ; logInfo "HAP: created child '${s.label}' (${s.driver})" }catch(e){ log.warn "HAP: child create failed for ${s.dni}: ${e}" } }
-        if(cd && s.raw) cd.sendEvent(name:"serviceType", value: s.type)
+        if(cd && s.raw){
+            cd.sendEvent(name:"serviceType", value: s.type)
+            String cur = cd.getLabel() ?: ""   // back-fill the [HAP svc ..] tag onto pre-existing generic children (skip if user-renamed/already tagged)
+            if(!cur.contains("[HAP svc ")) cd.setLabel(s.label)
+        }
         def inf=infoByAid[s.aid]
         if(cd && inf){
             ["manufacturer","model","serialNumber","firmware","hardware"].each{ k-> if(inf[k]!=null) cd.updateDataValue(k, inf[k].toString()) }

@@ -1,8 +1,8 @@
 {
   "packageName": "HomeKit Import (Local)",
   "author": "RamSet",
-  "version": "0.9.2",
-  "releaseNotes": "0.9.2 - Pairing errors are now shown in plain English. Instead of cryptic codes like 'pair M2 06', hapStatus and the logs explain what to do, e.g. 'pair failed: accessory already paired or not in pairing mode — remove it from Apple Home (or reset its HomeKit), then retry', plus clear messages for wrong setup code, too-many-tries lockout, accessory full, and busy.",
+  "version": "0.9.3",
+  "releaseNotes": "0.9.3 - Unmapped HomeKit services now create self-identifying 'Generic' child devices: the name shows the HAP service type, e.g. \"<name> [HAP svc 8C]\", so several unmapped services on one accessory are distinct and the type to map is obvious. The tag back-fills onto existing generic children on the next discovery. Handy for reporting unknown devices.",
   "category": "Integrations",
   "tags": "HomeKit, HAP, Local, Import, No Cloud",
   "dateReleased": "2026-06-29",
