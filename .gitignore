@@ -1,0 +1,6 @@
+# Tooling scratch output (Playwright MCP browser captures: snapshots, console logs)
+.playwright-mcp/
+
+# Local-only, intentionally not published
+FORUM-POST.md       # Discourse forum drafts
+spruce-original/    # reference copies of the original Spruce source
