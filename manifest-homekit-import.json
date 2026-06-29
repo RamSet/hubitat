@@ -1,22 +1,12 @@
 {
   "packageName": "HomeKit Import (Local)",
   "author": "RamSet",
-  "version": "0.9.0",
-  "releaseNotes": "0.9.0 - Device types renamed to \"HomeKit HAP ...\" (HomeKit HAP Accessory, HomeKit HAP Switch, HomeKit HAP Thermostat, etc.) so they're easy to spot in the driver-type list and don't blur into Hubitat's built-in HomeKit features. No functional change; existing devices keep working.",
+  "version": "0.9.1",
+  "releaseNotes": "0.9.1 - Packaging fix: the shared hapCore engine library now ships as a Hubitat BUNDLE so HPM installs it automatically before the drivers compile. HPM doesn't support a 'libraries' manifest section, which is why the install previously failed with 'library not found'. No functional change.",
   "category": "Integrations",
   "tags": "HomeKit, HAP, Local, Import, No Cloud",
   "dateReleased": "2026-06-28",
   "minimumHEVersion": "2.3.0",
-  "libraries": [
-    {
-      "id": "137ede5d-617b-408a-b3e9-a7b941c322a5",
-      "name": "hapCore",
-      "namespace": "RamSet",
-      "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/libraries/hap-core/hap-core.groovy",
-      "required": true,
-      "version": "0.8.0"
-    }
-  ],
   "drivers": [
     {
       "id": "5c0663bb-47ab-4c59-953a-96c2e94d5ec5",
@@ -146,6 +136,14 @@
       "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/drivers/homekit-window-shade/homekit-window-shade.groovy",
       "required": true,
       "oauth": false
+    }
+  ],
+  "bundles": [
+    {
+      "id": "d72d39f0-cdb6-484d-b01f-008b1f0371dd",
+      "name": "RamSet HAP Core",
+      "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/bundles/hapCore.zip",
+      "required": true
     }
   ]
 }

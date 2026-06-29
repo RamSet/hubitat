@@ -1,8 +1,8 @@
 {
   "packageName": "Ecobee HAP Thermostat (Local)",
   "author": "RamSet",
-  "version": "0.15.0",
-  "releaseNotes": "0.15.0 - The HomeKit/HAP engine (pairing, encrypted session, port discovery, reconnect) now lives in a shared library (hapCore) used by all of RamSet's HomeKit drivers, so the protocol is maintained and improved in one place. No setup change and NO re-pairing \u2014 existing pairings are preserved; you gain a sturdier reconnect. HPM installs the library automatically.",
+  "version": "0.15.1",
+  "releaseNotes": "0.15.1 - Packaging fix: the shared hapCore engine library is now delivered as a Hubitat BUNDLE so HPM installs it automatically. HPM has no 'libraries' manifest support, which is why earlier installs/updates reported 'library not found: #include RamSet.hapCore' and needed a manual library import. No more manual step; no functional change to the driver.",
   "category": "Thermostats",
   "tags": "Thermostat, ecobee, HomeKit, HAP, Local, Sensor",
   "dateReleased": "2026-06-28",
@@ -26,14 +26,12 @@
       "description": "Child device for ecobee remote sensors (temperature, occupancy, motion, battery). Created automatically by the thermostat driver."
     }
   ],
-  "libraries": [
+  "bundles": [
     {
-      "id": "543ff3a6-44f6-4ff8-8240-ac693a309639",
-      "name": "hapCore",
-      "namespace": "RamSet",
-      "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/libraries/hap-core/hap-core.groovy",
-      "required": true,
-      "version": "0.8.0"
+      "id": "c124ffba-52e6-4619-8e29-050bb4a09612",
+      "name": "RamSet HAP Core",
+      "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/bundles/hapCore.zip",
+      "required": true
     }
   ]
 }
