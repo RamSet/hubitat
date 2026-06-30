@@ -62,7 +62,7 @@ mappings {
     path("/calendar.ics")  { action: [GET: "apiCalendar"] }
 }
 
-String getAppVersion() { return "v0.13.2 (2026-06)" }
+String getAppVersion() { return "v0.13.3 (2026-06)" }
 
 // Simple vs Advanced interface. Simple shows only zones, schedule, weather and
 // hardware safety; Advanced exposes everything (moisture, learning, sensors,
@@ -1199,6 +1199,7 @@ def aboutPage() {
             paragraph "v0.12.4 — The Hardware-safety push won't set a relay auto-off timer shorter than the longest single watering cycle this schedule actually drives on that controller — it raises the value automatically so the hardware can't cut your own watering short. It also warns before lowering a timer the device already holds higher, which protects controllers shared between two app instances (a relay driven by the other instance may need the longer timer)."
             paragraph "v0.12.3 — Fixed false \"relay unreachable\" alerts right after a successful watering. The reachability watchdog judged the controller only by when its parent device last reported to the hub, which some Zooz drivers don't refresh when a child relay is toggled — so a controller the app had just driven could be flagged unreachable. The app now counts its own successful waterings as proof the controller is reachable, attributed to the specific controller that owns the relay so a run on one controller can't hide a genuine outage on another. The Hardware-safety page now shows, per controller, when the app last drove one of its relays and when the controller last reported to the hub — so you can confirm each controller is mapped correctly."
             paragraph "v0.12.2 — Fixed pause sensors reporting \"0s remaining\" and skipping ahead when they fired during a soak or the gap between zones. The schedule now tracks soak and between-zone phases as pausable too, so a pause that lands mid-soak reports the real soak time left and resumes that soak (valves stay off) instead of jumping to the next zone."
+            paragraph "v0.13.3 — Fixes two scheduling problems. (1) Multiple start times now ALL work: each was scheduled on the same internal handler, so Hubitat overwrote all but the last — only your final start time ran. Each window now has its own handler. (2) A run can no longer start twice from a single trigger: a re-entrancy guard ignores a duplicate scheduled invocation within 15 seconds (and logs it), preventing the double \"starting\" / double watering seen after editing a program near its run time. Re-save each sprinkler app once after updating so the new per-window schedules register."
             paragraph "v0.13.2 — Pause sensors NEVER skip a run, even a manual one. Previously a manual run (the Run switch or \"Run schedule now\" button) with a pause sensor active (e.g. water heater on) reported \"skipped — pause sensor active\"; now it holds and auto-starts when the sensor clears, exactly like a scheduled run. (A wet rain sensor still skips.)"
             paragraph "v0.13.1 — Pause-sensor hold now applies on EVERY scheduled start regardless of the pause/stop mode (that setting only governs what happens mid-run). Previously a sensor set to 'stop' mode would still skip the cycle at the scheduled start instead of holding."
             paragraph "v0.13.0 — Pause sensors (water heater on, a door/contact open) now HOLD the scheduled run and start it automatically once they clear, instead of skipping the cycle — with a \"waiting for X to clear\" notification. Genuine skips (wet rain sensor, weather rain delay, quiet hours, mode/HSM) still skip the cycle and say why. Also: the completion summary's seasonal figure now shows the actual extra over the scheduled base, so \"watered X of Y · (+delta)\" always reconciles (previously the parenthetical was a theoretical seasonal estimate that didn't match the real watered total)."
@@ -1425,6 +1426,7 @@ def initialize() {
     state.currentZoneIdx = 0
     state.zonesPlan = []
     state.deferredRunPending = false   // never carry a held-defer across re-init/reboot
+    state.lastSchedEntryMs = 0L         // reset the double-start guard window
 
     if (settings.scheduleEnabled && settings.scheduleStartTime && (isIntervalMode() || settings.scheduleDays)) {
         // Interval mode fires the cron every day; runSchedule() gates on the
@@ -1437,14 +1439,19 @@ def initialize() {
             String t = settings[key]
             if (t) {
                 String cron = buildCron(t, cronDays)
-                if (descTextEnable) log.info "${app.label}: window ${i + 1} scheduled at cron='${cron}'"
-                schedule(cron, "runSchedule")
+                // Each window needs its OWN handler. Hubitat keys a schedule by its
+                // handler method name, so scheduling every window on "runSchedule"
+                // makes each call overwrite the last — only the final start time
+                // survives. Distinct per-window handlers keep all start times alive.
+                String runHandler = "runScheduleW${i + 1}"
+                if (descTextEnable) log.info "${app.label}: window ${i + 1} scheduled at cron='${cron}' (${runHandler})"
+                schedule(cron, runHandler)
                 // Pre-run lead notification (N minutes before the window)
                 Integer lead = (settings.preRunLeadMinutes ?: 0) as int
                 if (lead > 0) {
                     String leadCron = buildLeadCron(t, cronDays, lead)
                     if (leadCron) {
-                        schedule(leadCron, "preRunNotify")
+                        schedule(leadCron, "preRunNotifyW${i + 1}")
                     }
                 }
             }
@@ -1788,12 +1795,33 @@ private String buildCron(String timeStr, List daysList) {
     return "0 ${min} ${hour} ? * ${dowStr}"
 }
 
+// Per-window cron handlers — one per start time so their schedules don't
+// overwrite each other (Hubitat keys a schedule by its handler name). They all
+// funnel into the single runSchedule(), which carries the re-entrancy guard.
+def runScheduleW1() { runSchedule([:]) }
+def runScheduleW2() { runSchedule([:]) }
+def runScheduleW3() { runSchedule([:]) }
+def preRunNotifyW1() { preRunNotify() }
+def preRunNotifyW2() { preRunNotify() }
+def preRunNotifyW3() { preRunNotify() }
+
 // =========================================================================
 // Schedule entry — fires at the configured time
 // =========================================================================
 
 def runSchedule(Map opts = [:]) {
     boolean manual = (opts?.manual == true)
+    // Re-entrancy guard: two scheduled invocations seconds apart (e.g. a re-init
+    // race that briefly leaves a duplicate cron, or any double trigger) must never
+    // both start a run. Ignore a non-manual call landing within 15s of the last
+    // one and log it, so a recurrence is visible. Manual runs are never blocked.
+    Long nowMs = now()
+    Long lastMs = (state.lastSchedEntryMs ?: 0L) as long
+    if (!manual && (nowMs - lastMs) < 15000L) {
+        log.warn "${app.label}: ignoring duplicate runSchedule (${nowMs - lastMs}ms after the previous trigger) — suppressing a double-start"
+        return
+    }
+    if (!manual) state.lastSchedEntryMs = nowMs
     // Manual/on-demand runs bypass SCHEDULING holds (off-cycle day, quiet hours,
     // weather forecast, forced rain delay, pause-for-hours) but ALWAYS respect
     // ACTIVE SAFETY: pause sensors (wind/contacts), a wet rain sensor, mode/HSM.
