@@ -62,7 +62,7 @@ mappings {
     path("/calendar.ics")  { action: [GET: "apiCalendar"] }
 }
 
-String getAppVersion() { return "v0.13.3 (2026-06)" }
+String getAppVersion() { return "v0.13.4 (2026-06)" }
 
 // Simple vs Advanced interface. Simple shows only zones, schedule, weather and
 // hardware safety; Advanced exposes everything (moisture, learning, sensors,
@@ -111,6 +111,8 @@ private String  wApiUnit()  { return isMetric() ? "kmh"     : "mph" }
     "schedule.finish"  : [section: "Lifecycle",  default: '${app}: ■ complete — ran ${elapsed} · watered ${watered} of ${scheduled} scheduled across ${zones} zone(s) · soak ${soak} · seasonal ${seasonal} · paused ${paused}'],
     "schedule.defer"   : [section: "Lifecycle",  default: '${app}: ⏳ holding — waiting for ${sensor} to clear before starting'],
     "schedule.deferResume": [section: "Lifecycle", default: '${app}: pause sensor clear — starting the held run in ${delay}'],
+    "schedule.saved"   : [section: "Lifecycle",  default: '${app}: ✅ schedule saved — will start at ${times} (${days}), running ${zones} zone(s) for an estimated ${est} (water ${water} + soak ${soak}).'],
+    "schedule.savedOff": [section: "Lifecycle",  default: '${app}: schedule saved — automatic scheduling is OFF, no runs are scheduled.'],
     "zone.start"       : [section: "Lifecycle",  default: '${app}: ▶ ${zone} for ${duration} (cycle ${cycle}/${totalCycles})', defaultOff: true],
     "zone.finish"      : [section: "Lifecycle",  default: '${app}: ■ ${zone} done', defaultOff: true],
     "pre-run"          : [section: "Lifecycle",  default: '${app}: schedule starts in ${minutes} minute(s) — clear the yard'],
@@ -1199,6 +1201,7 @@ def aboutPage() {
             paragraph "v0.12.4 — The Hardware-safety push won't set a relay auto-off timer shorter than the longest single watering cycle this schedule actually drives on that controller — it raises the value automatically so the hardware can't cut your own watering short. It also warns before lowering a timer the device already holds higher, which protects controllers shared between two app instances (a relay driven by the other instance may need the longer timer)."
             paragraph "v0.12.3 — Fixed false \"relay unreachable\" alerts right after a successful watering. The reachability watchdog judged the controller only by when its parent device last reported to the hub, which some Zooz drivers don't refresh when a child relay is toggled — so a controller the app had just driven could be flagged unreachable. The app now counts its own successful waterings as proof the controller is reachable, attributed to the specific controller that owns the relay so a run on one controller can't hide a genuine outage on another. The Hardware-safety page now shows, per controller, when the app last drove one of its relays and when the controller last reported to the hub — so you can confirm each controller is mapped correctly."
             paragraph "v0.12.2 — Fixed pause sensors reporting \"0s remaining\" and skipping ahead when they fired during a soak or the gap between zones. The schedule now tracks soak and between-zone phases as pausable too, so a pause that lands mid-soak reports the real soak time left and resumes that soak (valves stay off) instead of jumping to the next zone."
+            paragraph "v0.13.4 — Saving the app now sends a confirmation notification summarizing the schedule: when it will start, how many zones, and the estimated total run time (water + soak). It also doubles as proof the new code is active — if you save and don't get it, the update didn't take."
             paragraph "v0.13.3 — Fixes two scheduling problems. (1) Multiple start times now ALL work: each was scheduled on the same internal handler, so Hubitat overwrote all but the last — only your final start time ran. Each window now has its own handler. (2) A run can no longer start twice from a single trigger: a re-entrancy guard ignores a duplicate scheduled invocation within 15 seconds (and logs it), preventing the double \"starting\" / double watering seen after editing a program near its run time. Re-save each sprinkler app once after updating so the new per-window schedules register."
             paragraph "v0.13.2 — Pause sensors NEVER skip a run, even a manual one. Previously a manual run (the Run switch or \"Run schedule now\" button) with a pause sensor active (e.g. water heater on) reported \"skipped — pause sensor active\"; now it holds and auto-starts when the sensor clears, exactly like a scheduled run. (A wet rain sensor still skips.)"
             paragraph "v0.13.1 — Pause-sensor hold now applies on EVERY scheduled start regardless of the pause/stop mode (that setting only governs what happens mid-run). Previously a sensor set to 'stop' mode would still skip the cycle at the scheduled start instead of holding."
@@ -1410,12 +1413,14 @@ def installed() {
     state.zones ?: (state.zones = [:])
     state.lastRunByZone ?: (state.lastRunByZone = [:])
     initialize()
+    notifyScheduleSaved()
 }
 
 def updated() {
     if (debugOutput) log.debug "Sprinkler scheduler updated"
     unschedule()
     initialize()
+    notifyScheduleSaved()   // confirm the save with a what-happens-next summary
     if (debugOutput) runIn(1800, "logsOff")
 }
 
@@ -2599,6 +2604,35 @@ private Map estimateRunSeconds(List plan, BigDecimal mult) {
     int betweenSec = Math.max(0, plan.size() - 1) * ((settings.scheduleBetweenZoneSec ?: 10) as int)
     int pumpSec = settings.pumpSwitch ? (((settings.pumpPreSec ?: 0) as int) + ((settings.pumpPostSec ?: 0) as int)) : 0
     return [water: waterSec, soak: soakSec, total: waterSec + soakSec + betweenSec + pumpSec]
+}
+
+// Summary notification sent on Save (updated/installed). Confirms the new code
+// ran and states when the schedule runs, how many zones, and the estimated time.
+private void notifyScheduleSaved() {
+    if (!settings.scheduleEnabled || !settings.scheduleStartTime) {
+        notify("schedule.savedOff")
+        return
+    }
+    def tz = location?.timeZone ?: TimeZone.getDefault()
+    List<String> times = ["scheduleStartTime", "scheduleStartTime2", "scheduleStartTime3"]
+        .collect { settings[it] }.findAll { it }
+        .collect { toDateTime(it as String).format("h:mm a", tz) }
+    String when = times.join(" & ")
+    String days = isIntervalMode() ? "every ${settings.scheduleIntervalDays ?: 2} days"
+                                   : ((settings.scheduleDays ?: []) as List).join(", ")
+    List<Integer> plan = []
+    Integer n = (settings.zoneCountPref ?: 0) as int
+    for (int i = 1; i <= n; i++) {
+        if (settings."zone${i}Enabled" != false && settings."zone${i}Switch") plan << i
+    }
+    BigDecimal mult = ((state.seasonalMult ?: "1.0") as String) as BigDecimal
+    Map est = estimateRunSeconds(plan, mult)
+    notify("schedule.saved", [
+        times: when, days: days, zones: plan.size(),
+        est:   fmtDuration(est.total as int),
+        water: fmtDuration(est.water as int),
+        soak:  fmtDuration(est.soak as int)
+    ])
 }
 
 private void recordRunStart(List plan, BigDecimal seasonalMult) {
