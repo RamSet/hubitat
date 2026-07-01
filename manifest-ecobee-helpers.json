@@ -1,8 +1,8 @@
 {
   "packageName": "Local Ecobee Helpers",
   "author": "RamSet",
-  "version": "1.1.0",
-  "releaseNotes": "1.1.0 - Open-Contact Pause: more reliable open detection. It now tracks each contact from its event value (instead of re-reading state, which could lag a just-opened contact and skip pausing), self-heals every 5 minutes if an event was ever missed, and shows a live per-contact open/closed status on the app page.",
+  "version": "1.1.1",
+  "releaseNotes": "1.1.1 - Open-Contact Pause: no more silent failures. If a contact is open but the app can't pause (no thermostat selected in the parent), it now says so on the Status page and logs a warning, instead of appearing 'not paused' with no explanation.",
   "category": "Thermostats",
   "tags": "Thermostat, ecobee, Vents, Humidity, Contacts, Local, HAP",
   "dateReleased": "2026-07-01",

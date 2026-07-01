@@ -9,8 +9,10 @@
  *  Child of: Local Ecobee Helpers (RamSet)
  *
  *  Author: RamSet
- *  Version: 1.1.0 (2026-07-01)
+ *  Version: 1.1.1 (2026-07-01)
  *  Version history:
+ *    1.1.1 - No more silent failures: if a contact is open but the app can't pause because no thermostat
+ *            is selected in the parent, it now says so on the Status page and logs a warning (was silent).
  *    1.1.0 - Reliability + visibility. Now tracks each contact's state from its EVENT value (authoritative)
  *            instead of re-reading currentValue inside the handler — that read can lag the just-fired event,
  *            so the app could miss an open and skip pausing (worst with a 0-minute delay). Added a 5-minute
@@ -52,12 +54,24 @@ def mainPage() {
         }
         section("Status") {
             def m = state.contactOpen ?: [:]
+            boolean anyO = false
             def lines = contacts?.collect { c ->
                 boolean open = m.containsKey(c.id as String) ? m[c.id as String] : (c.currentValue("contact") == "open")
+                if (open) anyO = true
                 (open ? "🔴 <b>OPEN</b>" : "🟢 closed") + " — ${c.displayName}"
             }
             paragraph (lines ? lines.join("<br>") : "No contacts selected yet.")
-            paragraph state.paused ? "<span style='color:#b36b00'><b>HVAC PAUSED</b> (was: ${state.priorMode}).</span>" : "HVAC running (not paused)."
+            if (state.paused) {
+                paragraph "<span style='color:#b36b00'><b>HVAC PAUSED</b> (was: ${state.priorMode}).</span>"
+            } else if (anyO) {
+                boolean haveT = (parent?.getThermostat() != null)
+                paragraph "<span style='color:red'><b>A contact is open but the HVAC is NOT paused.</b> " +
+                          (haveT ? "Press <b>Done</b> below to re-arm the app." :
+                                   "No thermostat is selected in the parent <b>Local Ecobee Helpers</b> app — select it there, then press Done.") +
+                          "</span>"
+            } else {
+                paragraph "HVAC running (not paused)."
+            }
         }
         section {
             paragraph "When any contact opens, the thermostat's current mode is remembered and it is set to <b>off</b>. " +
@@ -118,7 +132,7 @@ def doPause() {
     if (!anyOpen()) return
     if (state.paused) return
     def t = parent?.getThermostat()
-    if (!t) return
+    if (!t) { log.warn "Open-Contact Pause '${app.label}': ${openContactNames()} open but CANNOT pause — no thermostat is selected in the parent 'Local Ecobee Helpers' app"; return }
     state.priorMode = t.currentValue("thermostatMode")
     state.paused = true
     t.off()
