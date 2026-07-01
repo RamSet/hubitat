@@ -9,8 +9,12 @@
  *  Child of: Local Ecobee Helpers (RamSet)
  *
  *  Author: RamSet
- *  Version: 1.0.0 (2026-06-24)
+ *  Version: 1.1.0 (2026-07-01)
  *  Version history:
+ *    1.1.0 - Reliability + visibility. Now tracks each contact's state from its EVENT value (authoritative)
+ *            instead of re-reading currentValue inside the handler — that read can lag the just-fired event,
+ *            so the app could miss an open and skip pausing (worst with a 0-minute delay). Added a 5-minute
+ *            re-sync that recovers any missed event, and a live per-contact status list on the app page.
  *    1.0.0 - Initial release. Minute-based delays, humanized duration, optional pause/resume notifications.
  *
  *  DISCLAIMER: Provided as-is, without warranty of any kind. You are solely
@@ -46,10 +50,18 @@ def mainPage() {
         section("Notifications") {
             input "notifier", "capability.notification", title: "Send notifications to (optional)", multiple: true, required: false
         }
+        section("Status") {
+            def m = state.contactOpen ?: [:]
+            def lines = contacts?.collect { c ->
+                boolean open = m.containsKey(c.id as String) ? m[c.id as String] : (c.currentValue("contact") == "open")
+                (open ? "🔴 <b>OPEN</b>" : "🟢 closed") + " — ${c.displayName}"
+            }
+            paragraph (lines ? lines.join("<br>") : "No contacts selected yet.")
+            paragraph state.paused ? "<span style='color:#b36b00'><b>HVAC PAUSED</b> (was: ${state.priorMode}).</span>" : "HVAC running (not paused)."
+        }
         section {
             paragraph "When any contact opens, the thermostat's current mode is remembered and it is set to <b>off</b>. " +
                       "When all contacts close, the previous mode is restored. Any open contact anywhere pauses the entire HVAC."
-            if (state.paused) paragraph "<span style='color:#b36b00'>Currently PAUSED (was: ${state.priorMode}).</span>"
         }
     }
 }
@@ -59,14 +71,38 @@ def updated()   { unsubscribe(); unschedule(); initialize() }
 
 def initialize() {
     subscribe(contacts, "contact", contactHandler)
-    contactHandler(null)   // sync to current state on (re)install
+    seedContactStates()          // seed from live values on (re)install
+    runEvery5Minutes("resync")   // self-heal: recover if a contact event is ever missed
+    evaluatePause()              // sync to current state now
 }
 
-private boolean anyOpen() {
-    contacts?.any { it.currentValue("contact") == "open" }
+// Track each contact's open/closed from its EVENT value (authoritative). Re-reading currentValue inside
+// the handler can lag the just-fired event, which made the app miss an open and skip pausing.
+private void seedContactStates() {
+    def m = [:]
+    contacts?.each { m[it.id as String] = (it.currentValue("contact") == "open") }
+    state.contactOpen = m
 }
 
 def contactHandler(evt) {
+    if (evt?.deviceId != null) {
+        def m = state.contactOpen ?: [:]
+        m[evt.deviceId as String] = (evt.value == "open")
+        state.contactOpen = m
+    }
+    evaluatePause()
+}
+
+// periodic safety net: re-read live values and re-evaluate, so a missed event still gets corrected
+def resync() { seedContactStates(); evaluatePause() }
+
+private boolean anyOpen() {
+    def m = state.contactOpen ?: [:]
+    if (m.values().any { it }) return true                        // tracked state says something is open
+    return contacts?.any { it.currentValue("contact") == "open" } // safety net for any not-yet-tracked device
+}
+
+private void evaluatePause() {
     if (anyOpen()) {
         unschedule(doResume)
         int os = toSeconds(openDelay)
@@ -116,7 +152,8 @@ private String humanDelay(mins) {
 }
 
 private String openContactNames() {
-    def names = contacts?.findAll { it.currentValue("contact") == "open" }?.collect { it.displayName }
+    def m = state.contactOpen ?: [:]
+    def names = contacts?.findAll { m.containsKey(it.id as String) ? m[it.id as String] : (it.currentValue("contact") == "open") }?.collect { it.displayName }
     return names ? names.join(", ") : "contact(s)"
 }
 

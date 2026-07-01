@@ -1,11 +1,11 @@
 {
   "packageName": "Local Ecobee Helpers",
   "author": "RamSet",
-  "version": "1.0.0",
-  "releaseNotes": "1.0.0 - Initial release. Offline helper apps for the Ecobee HAP Thermostat (Local): a parent that hosts as many helpers as needed, plus three child types - Room Vent (proportional, sensor-driven vent control with an adjustable periodic re-evaluation and an airflow-safety minimum floor), Open-Contact Pause (pauses the entire HVAC while any monitored window/door is open, with minute-based delays and optional pause/resume notifications), and Humidity (runs a humidifier socket while the heater is on, up to a maximum desired humidity, with optional cold-weather frost control). No cloud. Requires the Ecobee HAP Thermostat (Local) driver.",
+  "version": "1.1.0",
+  "releaseNotes": "1.1.0 - Open-Contact Pause: more reliable open detection. It now tracks each contact from its event value (instead of re-reading state, which could lag a just-opened contact and skip pausing), self-heals every 5 minutes if an event was ever missed, and shows a live per-contact open/closed status on the app page.",
   "category": "Thermostats",
   "tags": "Thermostat, ecobee, Vents, Humidity, Contacts, Local, HAP",
-  "dateReleased": "2026-06-24",
+  "dateReleased": "2026-07-01",
   "minimumHEVersion": "2.3.0",
   "apps": [
     {
