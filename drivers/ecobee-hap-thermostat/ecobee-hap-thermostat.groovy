@@ -17,12 +17,21 @@
  *   this driver (HPM does it automatically).
  *
  * Author: RamSet
- * Version: 0.15.0
- * Date: 2026-06-28
+ * Version: 0.15.2
+ * Date: 2026-07-01
  *
  * REQUIRES library: RamSet.hapCore (installed automatically by Hubitat Package Manager).
  *
  * Changelog:
+ *  v0.15.2 - Fix stale readings for comfort profile, hold-end, per-profile setpoints and alert text. Those
+ *           characteristics are read-only with NO HomeKit event push, so they can't be subscribed to — they
+ *           must be polled. The shared engine is "pure listen" (no polling), so after 0.15.0 they only updated
+ *           on a manual Refresh. Restored a 5-minute background refresh so they self-heal again, like pre-0.15.
+ *
+ *  v0.15.1 - Packaging: the shared hapCore engine library now ships as a Hubitat bundle so HPM installs it
+ *           automatically (HPM has no 'libraries' manifest support). Fixes "library not found" on install/
+ *           update; no manual library import needed. No functional change to the driver.
+ *
  *  v0.15.0 - The HomeKit/HAP engine (pairing, encrypted session, port discovery, reconnect) moved into a
  *           shared library (hapCore) used by all of RamSet's HomeKit drivers, so the protocol is fixed and
  *           improved in one place. No setup change and no re-pairing — existing pairings are preserved. You
@@ -154,7 +163,7 @@ def updated(){
     ["srpK","srpA","srpM1","psSeed","psEncKey","psPid","psstage"].each{ state.remove(it) }   // shed stale pair-setup temporaries (re-created if pairing; ~1.2KB reclaimed on already-paired hubs)
     if(settings.debugLog) runIn(1800,"logsOff")   // debug is off by default and auto-disables after 30 min (it writes state on every frame — keeps the device's busy% + state size down)
     if(settings.setupCode && !isPaired()){ logInfo "HAP: setup code entered — pairing"; runIn(1,"pair") }
-    else if(isPaired()){ runIn(2,"startSession"); runEvery10Minutes("ensureUp") }   // live event mode is the default once paired; ensureUp is a reconnect backstop
+    else if(isPaired()){ runIn(2,"startSession"); runEvery10Minutes("ensureUp"); runEvery5Minutes("refresh") }   // live event mode is the default once paired; ensureUp is a reconnect backstop; refresh re-reads the no-event chars (comfort profile/hold-end/per-profile setpoints/alert) the pure-listen engine won't poll
 }
 def logsOff(){ device.updateSetting("debugLog",[value:"false",type:"bool"]); state.diag=[]; sendEvent(name:"diag", value:""); log.info "HAP: debug logging auto-disabled" }
 
