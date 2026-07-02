@@ -17,12 +17,15 @@
  *   this driver (HPM does it automatically).
  *
  * Author: RamSet
- * Version: 0.15.5
+ * Version: 0.15.6
  * Date: 2026-07-01
  *
  * REQUIRES library: RamSet.hapCore (installed automatically by Hubitat Package Manager).
  *
  * Changelog:
+ *  v0.15.6 - Housekeeping only: the driver's displayed version now matches the package version after an
+ *           update (previous packaging/engine fixes didn't touch the driver file, so its header lagged). No
+ *           functional change from 0.15.5.
  *  v0.15.5 - Engine update (hapCore 0.9.1): the shared library now generates randomness without the
  *           java.security.KeyPairGenerator class, which some hub firmware blocks in the sandbox (that block
  *           stopped the driver from saving on those hubs). Now uses UUID-based entropy, so it installs on

@@ -1,8 +1,8 @@
 {
   "packageName": "Ecobee HAP Thermostat (Local)",
   "author": "RamSet",
-  "version": "0.15.5",
-  "releaseNotes": "0.15.5 - Fixes a driver SAVE failure on some hub firmware ('Expression not allowed: java.security.KeyPairGenerator'). The shared engine now generates randomness without that class (uses UUID.randomUUID + mixing), so it installs on every hub. No functional change; existing pairings unaffected.",
+  "version": "0.15.6",
+  "releaseNotes": "0.15.6 - Housekeeping: the driver version now matches the package version after an update (earlier packaging/engine fixes did not change the driver file, so its header lagged). No functional change from 0.15.5.",
   "category": "Thermostats",
   "tags": "Thermostat, ecobee, HomeKit, HAP, Local, Sensor",
   "dateReleased": "2026-07-01",
