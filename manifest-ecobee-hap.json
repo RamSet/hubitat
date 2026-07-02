@@ -1,8 +1,8 @@
 {
   "packageName": "Ecobee HAP Thermostat (Local)",
   "author": "RamSet",
-  "version": "0.15.6",
-  "releaseNotes": "0.15.6 - Housekeeping: the driver version now matches the package version after an update (earlier packaging/engine fixes did not change the driver file, so its header lagged). No functional change from 0.15.5.",
+  "version": "0.16.0",
+  "releaseNotes": "0.16.0 - Surfaces more HAP detail: thermostat now reports manufacturer/model/firmware/serial, and each sensor child gains secondsSinceMotion/secondsSinceOccupancy (an ecobee per-sensor activity timer; inferred, polled ~5 min). The Thermostat Sensor child temperature is the thermostat controlling temp (HAP has no separate individual built-in reading).",
   "category": "Thermostats",
   "tags": "Thermostat, ecobee, HomeKit, HAP, Local, Sensor",
   "dateReleased": "2026-07-01",

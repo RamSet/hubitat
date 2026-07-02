@@ -8,10 +8,13 @@
  *   on its own.
  *
  * Author: RamSet
- * Version: 0.9.0
- * Date: 2026-06-24
+ * Version: 0.10.0
+ * Date: 2026-07-01
  *
  * Changelog:
+ *  v0.10.0 - Added secondsSinceMotion / secondsSinceOccupancy attributes (an ecobee per-sensor activity
+ *           timer read over HAP; the exact semantics are inferred and the value is polled, so it updates
+ *           on roughly a 5-minute cadence).
  *  v0.3.0 - Initial release.
  *
  * HPM Metadata:
@@ -22,7 +25,7 @@
  *   "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/drivers/ecobee-hap-sensor/ecobee-hap-sensor.groovy",
  *   "description": "Child device for ecobee remote sensors (temperature, occupancy, motion, battery).",
  *   "required": true,
- *   "version": "0.9.0"
+ *   "version": "0.10.0"
  * }
  *
  * Copyright 2026 RamSet
@@ -37,6 +40,8 @@ metadata {
         capability "Battery"
         attribute "lowBattery", "string"
         attribute "ecobeeId", "string"
+        attribute "secondsSinceMotion", "number"      // ecobee vendor timer (inferred): seconds since last motion; polled ~5-min
+        attribute "secondsSinceOccupancy", "number"   // ecobee vendor timer (inferred): seconds since last occupancy; polled ~5-min
     }
 }
 // Values are pushed by the parent thermostat device on refresh; nothing to do here.

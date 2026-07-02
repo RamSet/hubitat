@@ -17,12 +17,17 @@
  *   this driver (HPM does it automatically).
  *
  * Author: RamSet
- * Version: 0.15.6
+ * Version: 0.16.0
  * Date: 2026-07-01
  *
  * REQUIRES library: RamSet.hapCore (installed automatically by Hubitat Package Manager).
  *
  * Changelog:
+ *  v0.16.0 - More detail surfaced from HAP: the thermostat now reports manufacturer, model, firmware and
+ *           serial as attributes, and each sensor child gains secondsSinceMotion / secondsSinceOccupancy
+ *           (an ecobee per-sensor activity timer; semantics inferred, polled on ~5-min cadence). Note the
+ *           "Thermostat Sensor" child's temperature is the thermostat's own controlling temperature — HAP
+ *           doesn't expose a separate individual built-in-sensor reading.
  *  v0.15.6 - Housekeeping only: the driver's displayed version now matches the package version after an
  *           update (previous packaging/engine fixes didn't touch the driver file, so its header lagged). No
  *           functional change from 0.15.5.
@@ -142,6 +147,10 @@ metadata {
         attribute "customParams", "string"
         attribute "hapStatus", "string"
         attribute "diag", "string"
+        attribute "manufacturer", "string"   // from the thermostat's HAP AccessoryInformation service
+        attribute "model", "string"          // e.g. ecobee4 / EB-STATE5
+        attribute "firmware", "string"
+        attribute "serial", "string"
     }
     preferences {
         input "ip", "string", title: "Thermostat IP address", required: true
@@ -253,7 +262,7 @@ def dumpAccessories(){
 // CSV of "aid.iid" to GET on connect / refresh / keepalive
 String readIds(){
     def ids=[]; TCHARS.keySet().each{ ids << "${TAID}.${it}" }
-    (state.sensors ?: []).each{ s-> [s.temp,s.occ,s.motion,s.batt,s.lowbatt,s.serial,s.name].each{ if(it!=null) ids << "${s.aid}.${it}" } }
+    (state.sensors ?: []).each{ s-> [s.temp,s.occ,s.motion,s.batt,s.lowbatt,s.serial,s.name,s.motionSince,s.occSince].each{ if(it!=null) ids << "${s.aid}.${it}" } }
     return ids.join(",")
 }
 // build the sensor topology from /accessories and create one child per sensor (the thermostat's own sensor + remotes)
@@ -265,11 +274,20 @@ void onAccessories(j){
         if(acc.aid==TAID){
             // the thermostat's OWN built-in motion/occupancy -> its own child sensor device, so the parent
             // stays a pure Thermostat (a Thermostat + MotionSensor/PresenceSensor can't be exported to HomeKit)
+            // surface the thermostat's HAP AccessoryInformation as attributes (values arrive with /accessories)
+            acc.services.each{ sv-> if(code(sv.type)=="3E") sv.characteristics.each{ c-> def cc=code(c.type)
+                if(cc=="20") sendEvent(name:"manufacturer", value: c.value)
+                else if(cc=="21") sendEvent(name:"model", value: c.value)
+                else if(cc=="30") sendEvent(name:"serial", value: c.value)
+                else if(cc=="52") sendEvent(name:"firmware", value: c.value)
+            } }
             def ts=[aid:TAID, isMain:true, temp:19]   // temp 19 = the thermostat's reading, gives the child a valid temp
             acc.services.each{ sv-> def sc=code(sv.type)
                 sv.characteristics.each{ c-> def cc=code(c.type)
                     if(sc=="85" && cc=="22") ts.motion=c.iid
                     else if(sc=="86" && cc=="71") ts.occ=c.iid
+                    else if(sc=="85" && cc=="BFE61C704A4011E6BDF40800200C9A66") ts.motionSince=c.iid   // ecobee vendor: seconds since last motion (inferred)
+                    else if(sc=="86" && cc=="A8F798E04A4011E6BDF40800200C9A66") ts.occSince=c.iid       // ecobee vendor: seconds since last occupancy (inferred)
                 }
             }
             if(ts.motion || ts.occ) sensors << ts
@@ -286,6 +304,8 @@ void onAccessories(j){
                 else if(sc=="96" && cc=="79") s.lowbatt=c.iid
                 else if(sc=="3E" && cc=="30") s.serial=c.iid
                 else if(sc=="3E" && cc=="23") s.name=c.iid
+                else if(sc=="85" && cc=="BFE61C704A4011E6BDF40800200C9A66") s.motionSince=c.iid   // ecobee vendor: seconds since last motion (inferred)
+                else if(sc=="86" && cc=="A8F798E04A4011E6BDF40800200C9A66") s.occSince=c.iid       // ecobee vendor: seconds since last occupancy (inferred)
             }
         }
         sensors << s
@@ -381,5 +401,7 @@ void onCharacteristics(j){
         if(val(s.batt)!=null) cd.sendEvent(name:"battery", value: val(s.batt) as int, unit:"%")
         else if(s.isMain) cd.sendEvent(name:"battery", value: 100, unit:"%")   // thermostat is wired — report full
         if(val(s.lowbatt)!=null) cd.sendEvent(name:"lowBattery", value: ((val(s.lowbatt) as int)==1?"true":"false"))
+        if(val(s.motionSince)!=null) cd.sendEvent(name:"secondsSinceMotion", value: val(s.motionSince) as int, unit:"s")   // ecobee vendor timer (inferred); polled, ~5-min granularity
+        if(val(s.occSince)!=null) cd.sendEvent(name:"secondsSinceOccupancy", value: val(s.occSince) as int, unit:"s")
     }
 }
