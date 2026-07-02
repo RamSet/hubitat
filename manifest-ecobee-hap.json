@@ -1,8 +1,8 @@
 {
   "packageName": "Ecobee HAP Thermostat (Local)",
   "author": "RamSet",
-  "version": "0.15.2",
-  "releaseNotes": "0.15.2 - Fixes stale readings for comfort profile, hold-end, per-profile setpoints and alert text. Those values are read-only with no HomeKit event push, so they must be polled; the shared engine is pure-listen, so since 0.15.0 they only refreshed on a manual Refresh. Restored a 5-minute background refresh so they self-heal.",
+  "version": "0.15.3",
+  "releaseNotes": "0.15.3 - Comfort profile reporting corrected: HomeKit numbers only Home/Sleep/Away, so holds/vacation/custom comfort settings all shared one value; now shows Hold vs Custom correctly and onHold reflects a genuine hold. Plus faster recovery when the thermostat reboots/re-keys the session.",
   "category": "Thermostats",
   "tags": "Thermostat, ecobee, HomeKit, HAP, Local, Sensor",
   "dateReleased": "2026-07-01",

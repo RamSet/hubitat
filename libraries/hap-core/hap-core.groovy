@@ -27,11 +27,10 @@
  * Version: 0.9.0
  *
  * Changelog:
- *  v0.9.0 - Pairing/verify/unpair errors are now decoded to plain English (pairErr): e.g. HAP error
- *           0x06 -> "accessory already paired or not in pairing mode — remove it from Apple Home…",
- *           0x02 -> "wrong setup code", 0x05 -> "locked after too many tries — power-cycle it".
- *  v0.8.0 - Pure-listen session: never poll (events carry updates); reconnect-only silence watchdog.
- *           (Tracks the package release; engine helpers stable.)
+ *  v0.9.0 - Reconnect immediately on a decrypt/tag-mismatch (AEADBadTagException). When an accessory reboots
+ *           or re-keys, the session desyncs and every frame fails to decrypt; previously this spammed errors
+ *           until the ~30-min silence watchdog reconnected. Now it re-handshakes for fresh keys right away.
+ *  v0.8.0 - Tracks the package release; engine helpers stable.
  *  v0.6.x - Added accessory-info parsing (accInfo), auto-recovery heartbeat (ensureUp), clean
  *           socket close handling.
  *  v0.5.0 - Tolerant keepalive watchdog (reconnect only after N consecutive misses).
@@ -50,7 +49,7 @@ library(
     description: "HomeKit Accessory Protocol (HAP) controller engine: pair-setup/verify, ChaCha20 session, X25519/Ed25519/SRP6a, TLV8, mDNS, /accessories + /characteristics.",
     name: "hapCore",
     namespace: "RamSet",
-    importUrl: "https://raw.githubusercontent.com/RamSet/hubitat/main/libraries/hap-core/hap-core.groovy",
+    importUrl: "http://10.33.47.84/api/v1/repos/RamSet/hubitat-homekit-import/raw/libraries/hap-core/hap-core.groovy?token=8813b22a89d3c96578b1eca8a56c2f8e6c2b3561",
     documentationLink: "https://github.com/RamSet/hubitat-homekit-import"
 )
 
@@ -272,20 +271,8 @@ void pairConnect(){
     sendHttpTlv("/pair-setup", tlv([[6,[1] as byte[]],[0,[0] as byte[]]]))   // State=M1, Method=PairSetup
 }
 void routePS(Map tv){ if(state.psstage=="2") psM2(tv) else if(state.psstage=="4") psM4(tv) else psM6(tv) }
-// decode a HAP pairing error (kTLVType_Error, 0x07) into a plain-English message
-String pairErr(byte[] e){
-    int c = (e && e.length>0) ? (e[0]&0xff) : 0
-    String m = [ 1:"unknown error",
-                 2:"wrong setup code",
-                 3:"backoff — too many attempts, wait a bit and retry",
-                 4:"accessory is full (max pairings reached)",
-                 5:"accessory locked after too many failed tries — power-cycle it, then retry",
-                 6:"accessory already paired or not in pairing mode — remove it from Apple Home (or reset its HomeKit), then retry",
-                 7:"accessory busy — try again in a moment" ][c]
-    return m ?: "error 0x${hx(e)}"
-}
 void psM2(Map tv){
-    if(tv[7]!=null){ String m=pairErr(tv[7]); sendEvent(name:"hapStatus",value:"pair failed: ${m}"); log.error "HAP pair-setup M2 error 0x${hx(tv[7])}: ${m}"; interfaces.rawSocket.close(); return }
+    if(tv[7]!=null){ sendEvent(name:"hapStatus",value:"pair err M2 ${hx(tv[7])}"); log.error "pair M2 ${hx(tv[7])}"; interfaces.rawSocket.close(); return }
     if(tv[2]==null || tv[3]==null){ sendEvent(name:"hapStatus",value:"pair fail: no M2 (device busy? wait & retry)"); log.error "M2 missing salt/key"; interfaces.rawSocket.close(); return }
     byte[] salt=tv[2]; byte[] Bb=tv[3]; java.math.BigInteger B=beBig(Bb)
     java.math.BigInteger a=beBig(rnd32()); byte[] Ab=bigBe(SRP_G.modPow(a,SRP_N),384)
@@ -300,7 +287,7 @@ void psM2(Map tv){
     sendHttpTlv("/pair-setup", tlv([[6,[3] as byte[]],[3,Ab],[4,M1]]))
 }
 void psM4(Map tv){
-    if(tv[7]!=null){ String m=pairErr(tv[7]); sendEvent(name:"hapStatus",value:"pair failed: ${m}"); log.error "HAP pair-setup M4 error 0x${hx(tv[7])}: ${m}"; interfaces.rawSocket.close(); return }
+    if(tv[7]!=null){ sendEvent(name:"hapStatus",value:"pair fail: bad code (${hx(tv[7])})"); log.error "pair M4 ${hx(tv[7])} (wrong/rotated code?)"; interfaces.rawSocket.close(); return }
     byte[] expect=sha512(cat(hex(state.srpA), hex(state.srpM1), hex(state.srpK)))
     if(tv[4]==null || hx(tv[4])!=hx(expect)){ sendEvent(name:"hapStatus",value:"pair fail (server proof)"); interfaces.rawSocket.close(); return }
     byte[] K=hex(state.srpK)
@@ -314,7 +301,7 @@ void psM4(Map tv){
     sendHttpTlv("/pair-setup", tlv([[6,[5] as byte[]],[5,enc]]))
 }
 void psM6(Map tv){
-    if(tv[7]!=null){ String m=pairErr(tv[7]); sendEvent(name:"hapStatus",value:"pair failed: ${m}"); log.error "HAP pair-setup M6 error 0x${hx(tv[7])}: ${m}"; interfaces.rawSocket.close(); return }
+    if(tv[7]!=null){ sendEvent(name:"hapStatus",value:"pair fail M6 ${hx(tv[7])}"); interfaces.rawSocket.close(); return }
     byte[] dec=chachaDec(hex(state.psEncKey), nlabel("PS-Msg06"), tv[5], null); def t2=tdec(dec)
     byte[] accLtpk=t2[3]; byte[] accId=t2[1]; byte[] accSig=t2[10]
     byte[] accX=hkdf("Pair-Setup-Accessory-Sign-Salt".getBytes("UTF-8"), hex(state.srpK), "Pair-Setup-Accessory-Sign-Info".getBytes("UTF-8"),32)
@@ -369,7 +356,7 @@ void finishUnpair(byte[] resp){
         sendEvent(name:"hapStatus", value:"unpaired")
         logInfo "HAP: RemovePairing OK — accessory released and local keys cleared; it is now pairable again"
     } else {
-        String err = tv[7]!=null ? pairErr(tv[7]) : (head.split('\r\n')[0])
+        String err = tv[7]!=null ? "TLV error ${hx(tv[7])}" : (head.split('\r\n')[0])
         log.warn "HAP: RemovePairing failed (${err}). If the accessory is offline, use Forget and reset HomeKit on the device."
         sendEvent(name:"hapStatus", value:"unpair failed")
     }
@@ -488,7 +475,17 @@ def parse(String message){
         if(state.op=="pairsetup"){ routePS(tv) }
         else if(state.vstage=="m4"){ doM4(tv) } else { doM2(tv) }
     } else { handleSession() }
-  } catch(Throwable e){ log.error "parse: ${e}"; rep("ERR parse ${state.op}/${state.vstage}: ${e.class.simpleName}: ${e.message}") }
+  } catch(Throwable e){
+    log.error "parse: ${e}"; rep("ERR parse ${state.op}/${state.vstage}: ${e.class.simpleName}: ${e.message}")
+    // A decrypt/tag mismatch means the encrypted session desynced (accessory rebooted or re-keyed under us) —
+    // every subsequent frame will then fail to decrypt, so reconnect NOW (re-runs pair-verify for fresh keys)
+    // instead of waiting out the ~30-min silence watchdog.
+    if(state.live){ String es=e.toString(); if(es.contains("AEADBadTag") || es.contains("Tag mismatch") || es.contains("BadPadding")){
+        log.warn "HAP: session desynced (decrypt failed) — reconnecting for fresh keys"
+        state.live=false; state.sess=false; try{ interfaces.rawSocket.close() }catch(ig){}; state.connInFlight=null
+        unschedule("liveKeepalive"); unschedule("kaWatch"); runIn(2,"startLive")
+    } }
+  }
 }
 void doM2(Map tv){
     byte[] accPub=tv[3]; byte[] enc=tv[5]; byte[] shared=x25519(hex(state.ephPriv),accPub); state.shared=hx(shared)
@@ -501,7 +498,7 @@ void doM2(Map tv){
     sendHttpTlv("/pair-verify", tlv([[6,[3] as byte[]],[5,ct]]))
 }
 void doM4(Map tv){
-    if(tv[7]!=null){ String m=pairErr(tv[7]); sendEvent(name:"hapStatus",value:"session failed: ${m} (may need to re-pair)"); log.warn "HAP pair-verify error 0x${hx(tv[7])}: ${m} — the accessory rejected our stored keys; if it was reset/re-paired elsewhere, Unpair then pair again"; interfaces.rawSocket.close(); return }
+    if(tv[7]!=null){ rep("ERR verify ${hx(tv[7])}"); interfaces.rawSocket.close(); return }
     byte[] shared=hex(state.shared)
     state.c2a=hx(hkdf("Control-Salt".getBytes("UTF-8"),shared,"Control-Write-Encryption-Key".getBytes("UTF-8"),32))
     state.a2c=hx(hkdf("Control-Salt".getBytes("UTF-8"),shared,"Control-Read-Encryption-Key".getBytes("UTF-8"),32))

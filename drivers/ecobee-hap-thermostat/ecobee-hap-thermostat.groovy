@@ -17,12 +17,19 @@
  *   this driver (HPM does it automatically).
  *
  * Author: RamSet
- * Version: 0.15.2
+ * Version: 0.15.3
  * Date: 2026-07-01
  *
  * REQUIRES library: RamSet.hapCore (installed automatically by Hubitat Package Manager).
  *
  * Changelog:
+ *  v0.15.3 - Comfort profile reporting corrected. HomeKit numbers only the three built-in comfort settings
+ *           (Home/Sleep/Away); anything else (a hold, vacation, or a custom comfort setting like "Night")
+ *           all report the same value, so the driver now shows those as "Hold" when a hold is actually
+ *           active and "Custom" when you're on a non-standard scheduled comfort setting, and onHold now
+ *           reflects a genuine hold instead of assuming every non-standard state is a hold. HomeKit doesn't
+ *           expose custom comfort-setting names, so those show as "Custom". Also picks up the shared engine's
+ *           faster recovery when the thermostat reboots/re-keys the session (via hapCore 0.9.0).
  *  v0.15.2 - Fix stale readings for comfort profile, hold-end, per-profile setpoints and alert text. Those
  *           characteristics are read-only with NO HomeKit event push, so they can't be subscribed to — they
  *           must be polled. The shared engine is "pure listen" (no polling), so after 0.15.0 they only updated
@@ -314,7 +321,18 @@ void onCharacteristics(j){
     }
     if(g(17)!=null) sendEvent(name:"thermostatOperatingState", value: [0:"idle",1:"heating",2:"cooling"][g(17) as int])
     if(g(75)!=null) sendEvent(name:"thermostatFanMode", value: (g(75) as int)==1?"auto":"on")
-    if(g(33)!=null){ String cp=[0:"Home",1:"Sleep",2:"Away",3:"Hold"][g(33) as int] ?: "Hold"; sendEvent(name:"comfortProfile", value: cp); sendEvent(name:"onHold", value: (cp=="Hold")) }
+    // HAP comfort enum (iid33): 0=Home, 1=Sleep, 2=Away, 3=everything-else (a hold, vacation, OR a custom
+    // climate — ecobee only numbers the 3 built-ins; the custom's NAME isn't on HAP). Disambiguate 3 using
+    // the hold-end char (iid41): a real hold has a future end date; a scheduled non-standard/custom climate
+    // uses the 2014-01-03 "no hold" sentinel. onHold keys off the actual hold, NOT off iid33==3.
+    if(g(33)!=null){
+        int ci = g(33) as int
+        def he = g(41)?.toString()
+        boolean held = (he != null) ? !he.startsWith("2014-01-03") : ((device.currentValue("holdEndsAt") ?: "") != "")
+        String cp = [0:"Home",1:"Sleep",2:"Away"][ci] ?: (held ? "Hold" : "Custom")
+        sendEvent(name:"comfortProfile", value: cp)
+        sendEvent(name:"onHold", value: held)
+    }
     if(g(41)!=null){ String h=g(41).toString().replaceAll(/S$/,""); sendEvent(name:"holdEndsAt", value: h.startsWith("2014-01-03")?"":h) }
     if(g(25)!=null) sendEvent(name:"humiditySetpoint", value: g(25) as int, unit:"%")
     if(g(76)!=null) sendEvent(name:"fanState", value: [0:"inactive",1:"idle",2:"blowing"][g(76) as int] ?: "unknown")

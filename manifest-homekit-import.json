@@ -1,11 +1,11 @@
 {
   "packageName": "HomeKit Import (Local)",
   "author": "RamSet",
-  "version": "0.9.3",
-  "releaseNotes": "0.9.3 - Unmapped HomeKit services now create self-identifying 'Generic' child devices: the name shows the HAP service type, e.g. \"<name> [HAP svc 8C]\", so several unmapped services on one accessory are distinct and the type to map is obvious. The tag back-fills onto existing generic children on the next discovery. Handy for reporting unknown devices.",
+  "version": "0.9.2",
+  "releaseNotes": "0.9.2 - Shared engine (hapCore 0.9.0): reconnect immediately when an accessory reboots/re-keys and the encrypted session desyncs (decrypt/tag mismatch), instead of waiting out the silence watchdog. Reliability only.",
   "category": "Integrations",
   "tags": "HomeKit, HAP, Local, Import, No Cloud",
-  "dateReleased": "2026-06-29",
+  "dateReleased": "2026-07-01",
   "minimumHEVersion": "2.3.0",
   "drivers": [
     {
