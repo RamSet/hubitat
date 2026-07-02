@@ -1,8 +1,8 @@
 {
   "packageName": "Ecobee HAP Thermostat (Local)",
   "author": "RamSet",
-  "version": "0.17.0",
-  "releaseNotes": "0.17.0 - thermostatSetpoint is now dynamic and always meaningful: it shows the desired temperature for the current mode (heat target in heat, cool target in cool; in auto it follows the threshold actually being regulated instead of HomeKit midpoint). New setpointDetail attribute labels what the number currently represents.",
+  "version": "0.17.1",
+  "releaseNotes": "0.17.1 - Shared engine: auto-recovers if the thermostat's DHCP IP changes (finds it by HomeKit id), and restored plain-English pairing errors. No thermostat behavior change.",
   "category": "Thermostats",
   "tags": "Thermostat, ecobee, HomeKit, HAP, Local, Sensor",
   "dateReleased": "2026-07-02",

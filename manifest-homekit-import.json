@@ -1,11 +1,11 @@
 {
   "packageName": "HomeKit Import (Local)",
   "author": "RamSet",
-  "version": "0.9.4",
-  "releaseNotes": "0.9.4 - Fixes a driver SAVE failure on some hub firmware ('java.security.KeyPairGenerator not allowed'). The shared engine now generates entropy without that class (UUID.randomUUID + mixing), so drivers compile on every hub.",
+  "version": "0.9.5",
+  "releaseNotes": "0.9.5 - Auto-recover from IP changes: if a HomeKit accessory gets a new DHCP address, the driver finds it on the network by its HomeKit id and updates the IP automatically (a DHCP reservation is still recommended). Also restores plain-English pairing error messages.",
   "category": "Integrations",
   "tags": "HomeKit, HAP, Local, Import, No Cloud",
-  "dateReleased": "2026-07-01",
+  "dateReleased": "2026-07-02",
   "minimumHEVersion": "2.3.0",
   "drivers": [
     {

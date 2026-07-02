@@ -24,9 +24,14 @@
  * Include in a driver with:  #include RamSet.hapCore
  *
  * Author: RamSet
- * Version: 0.9.1
+ * Version: 0.10.0
  *
  * Changelog:
+ *  v0.10.0 - Auto-follow IP: if the accessory stops answering at its saved IP (DHCP reassigned it), browse
+ *            the subnet via multicast mDNS, match by the accessory's HomeKit id (accPairingId), update the IP,
+ *            and reconnect — best-effort; a DHCP reservation is still the reliable fix. Also RESTORED pairErr
+ *            (plain-English pairing errors), lost when the lib was overwritten from the dev copy. NOTE: hapCore
+ *            is maintained ONLY in RamSet/hubitat — do not copy the dev repo over this or features drop again.
  *  v0.9.1 - Portability: generate entropy without java.security.KeyPairGenerator (and without SecureRandom).
  *           Both are blocked by the Groovy sandbox on some hub firmware versions, which failed the driver SAVE
  *           ("Expression not allowed: java.security.KeyPairGenerator.getInstance"). Now uses UUID.randomUUID()
@@ -55,8 +60,8 @@ library(
     description: "HomeKit Accessory Protocol (HAP) controller engine: pair-setup/verify, ChaCha20 session, X25519/Ed25519/SRP6a, TLV8, mDNS, /accessories + /characteristics.",
     name: "hapCore",
     namespace: "RamSet",
-    importUrl: "http://10.33.47.84/api/v1/repos/RamSet/hubitat-homekit-import/raw/libraries/hap-core/hap-core.groovy?token=8813b22a89d3c96578b1eca8a56c2f8e6c2b3561",
-    documentationLink: "https://github.com/RamSet/hubitat-homekit-import"
+    importUrl: "https://raw.githubusercontent.com/RamSet/hubitat/main/libraries/hap-core/hap-core.groovy",
+    documentationLink: "https://github.com/RamSet/hubitat"
 )
 
 import groovy.transform.Field
@@ -219,7 +224,43 @@ def mdnsTimeout(){
         mdnsThen(op); return
     }
     state.mdnsTries=0
+    // no reply at the pinned IP — the accessory may have a new DHCP address. Try to relocate it by its id.
+    if(settings.accPairingId){ log.warn "HAP: no mDNS reply at ${settings.ip} — searching the subnet for the accessory (IP may have changed)…"; relocate(op); return }
     log.warn "HAP: mDNS port detect timed out; using last-known port"; dispatchOp(op)
+}
+// Accessory not answering at its saved IP? Browse the whole subnet (multicast mDNS) and match OUR accessory
+// by its HomeKit id (accPairingId) to pick up a new DHCP-assigned IP, then reconnect. Best-effort — a DHCP
+// reservation is the reliable fix, but this recovers automatically when the address drifts.
+def relocate(String op){
+    state.afterRelocate = op
+    String q="000000000001000000000000045f686170045f746370056c6f63616c00000c8001"
+    sendHubCommand(new hubitat.device.HubAction(q, hubitat.device.Protocol.LAN,
+        [destinationAddress:"224.0.0.251:5353",
+         type:hubitat.device.HubAction.Type.LAN_TYPE_UDPCLIENT,
+         encoding:hubitat.device.HubAction.Encoding.HEX_STRING,
+         timeout:6, callback:"relocateCallback"]))
+    runIn(8,"relocateTimeout")
+}
+def relocateTimeout(){
+    def op=state.afterRelocate; state.afterRelocate=null; if(!op) return
+    log.warn "HAP: couldn't find the accessory on the network (it may be offline — a DHCP reservation is recommended); trying last-known IP"
+    dispatchOp(op)
+}
+def relocateCallback(message){
+    try{
+        if(!state.afterRelocate) return
+        def m=null; try{ m=parseLanMessage(message.toString()) }catch(ig){}
+        String h=((m?.payload ?: m?.body ?: message.toString()) ?: "").toString().toLowerCase().replaceAll("[^0-9a-f]","")
+        def r=parseMdns(h)
+        String want=(settings.accPairingId ?: "").toString().toUpperCase()
+        if(want && r.id && r.id==want){
+            if(r.ip && r.ip != settings.ip){ device.updateSetting("ip",[value:r.ip,type:"string"]); logInfo "HAP: accessory moved — IP updated to ${r.ip}"; sendEvent(name:"hapStatus", value:"IP updated to ${r.ip}") }
+            if(r.port){ device.updateSetting("port",[value:r.port,type:"number"]); state.discoveredPort=r.port }
+            unschedule("relocateTimeout")
+            def op=state.afterRelocate; state.afterRelocate=null; if(op) dispatchOp(op)
+        }
+        // else a different HAP accessory answered — ignore and keep waiting (relocateTimeout gives up)
+    }catch(e){ log.error "relocateCallback: ${e}" }
 }
 def mdnsCallback(message){
     try {
@@ -233,10 +274,10 @@ def mdnsCallback(message){
         def op=state.afterMdns; state.afterMdns=null; if(op) dispatchOp(op)
     } catch(e){ log.error "mdnsCallback: ${e}" }
 }
-// minimal mDNS/DNS answer walker -> [ip, port, sf]
+// minimal mDNS/DNS answer walker -> [ip, port, sf, id]
 Map parseMdns(String h){
     byte[] b; try { b=hex(h) } catch(e){ return [:] }
-    def res=[ip:null, port:null, sf:-1]
+    def res=[ip:null, port:null, sf:-1, id:null]
     if(b==null || b.length<12) return res
     int qd=((b[4]&0xff)<<8)|(b[5]&0xff)
     int tot=(((b[6]&0xff)<<8)|(b[7]&0xff))+(((b[8]&0xff)<<8)|(b[9]&0xff))+(((b[10]&0xff)<<8)|(b[11]&0xff))
@@ -251,6 +292,7 @@ Map parseMdns(String h){
         else if(type==0x10){
             String t=""; int e=Math.min(rd+rdlen,b.length); for(int k=rd;k<e;k++) t+=(char)(b[k]&0xff); t=t.toLowerCase()
             int si=t.indexOf("sf="); if(si>=0 && si+3<t.length()){ try{ res.sf=Integer.parseInt(t.substring(si+3,si+4)) }catch(ig){} }
+            int ii=t.indexOf("id="); if(ii>=0){ int j=ii+3; StringBuilder sb=new StringBuilder(); while(j<t.length()){ char ch=t.charAt(j); if((ch>='0'&&ch<='9')||(ch>='a'&&ch<='f')||ch==':'){ sb.append(ch); j++ } else break }; if(sb.length()>0) res.id=sb.toString().toUpperCase() }
         }
         p=rd+rdlen
     }
@@ -285,8 +327,20 @@ void pairConnect(){
     sendHttpTlv("/pair-setup", tlv([[6,[1] as byte[]],[0,[0] as byte[]]]))   // State=M1, Method=PairSetup
 }
 void routePS(Map tv){ if(state.psstage=="2") psM2(tv) else if(state.psstage=="4") psM4(tv) else psM6(tv) }
+// decode a HAP pairing error (kTLVType_Error, 0x07) into a plain-English message
+String pairErr(byte[] e){
+    int c = (e && e.length>0) ? (e[0]&0xff) : 0
+    String m = [ 1:"unknown error",
+                 2:"wrong setup code",
+                 3:"backoff — too many attempts, wait a bit and retry",
+                 4:"accessory is full (max pairings reached)",
+                 5:"accessory locked after too many failed tries — power-cycle it, then retry",
+                 6:"accessory already paired or not in pairing mode — remove it from Apple Home (or reset its HomeKit), then retry",
+                 7:"accessory busy — try again in a moment" ][c]
+    return m ?: "error 0x${hx(e)}"
+}
 void psM2(Map tv){
-    if(tv[7]!=null){ sendEvent(name:"hapStatus",value:"pair err M2 ${hx(tv[7])}"); log.error "pair M2 ${hx(tv[7])}"; interfaces.rawSocket.close(); return }
+    if(tv[7]!=null){ String m=pairErr(tv[7]); sendEvent(name:"hapStatus",value:"pair failed: ${m}"); log.error "HAP pair-setup M2 error 0x${hx(tv[7])}: ${m}"; interfaces.rawSocket.close(); return }
     if(tv[2]==null || tv[3]==null){ sendEvent(name:"hapStatus",value:"pair fail: no M2 (device busy? wait & retry)"); log.error "M2 missing salt/key"; interfaces.rawSocket.close(); return }
     byte[] salt=tv[2]; byte[] Bb=tv[3]; java.math.BigInteger B=beBig(Bb)
     java.math.BigInteger a=beBig(rnd32()); byte[] Ab=bigBe(SRP_G.modPow(a,SRP_N),384)
@@ -301,7 +355,7 @@ void psM2(Map tv){
     sendHttpTlv("/pair-setup", tlv([[6,[3] as byte[]],[3,Ab],[4,M1]]))
 }
 void psM4(Map tv){
-    if(tv[7]!=null){ sendEvent(name:"hapStatus",value:"pair fail: bad code (${hx(tv[7])})"); log.error "pair M4 ${hx(tv[7])} (wrong/rotated code?)"; interfaces.rawSocket.close(); return }
+    if(tv[7]!=null){ String m=pairErr(tv[7]); sendEvent(name:"hapStatus",value:"pair failed: ${m}"); log.error "HAP pair-setup M4 error 0x${hx(tv[7])}: ${m}"; interfaces.rawSocket.close(); return }
     byte[] expect=sha512(cat(hex(state.srpA), hex(state.srpM1), hex(state.srpK)))
     if(tv[4]==null || hx(tv[4])!=hx(expect)){ sendEvent(name:"hapStatus",value:"pair fail (server proof)"); interfaces.rawSocket.close(); return }
     byte[] K=hex(state.srpK)
@@ -315,7 +369,7 @@ void psM4(Map tv){
     sendHttpTlv("/pair-setup", tlv([[6,[5] as byte[]],[5,enc]]))
 }
 void psM6(Map tv){
-    if(tv[7]!=null){ sendEvent(name:"hapStatus",value:"pair fail M6 ${hx(tv[7])}"); interfaces.rawSocket.close(); return }
+    if(tv[7]!=null){ String m=pairErr(tv[7]); sendEvent(name:"hapStatus",value:"pair failed: ${m}"); log.error "HAP pair-setup M6 error 0x${hx(tv[7])}: ${m}"; interfaces.rawSocket.close(); return }
     byte[] dec=chachaDec(hex(state.psEncKey), nlabel("PS-Msg06"), tv[5], null); def t2=tdec(dec)
     byte[] accLtpk=t2[3]; byte[] accId=t2[1]; byte[] accSig=t2[10]
     byte[] accX=hkdf("Pair-Setup-Accessory-Sign-Salt".getBytes("UTF-8"), hex(state.srpK), "Pair-Setup-Accessory-Sign-Info".getBytes("UTF-8"),32)
@@ -370,7 +424,7 @@ void finishUnpair(byte[] resp){
         sendEvent(name:"hapStatus", value:"unpaired")
         logInfo "HAP: RemovePairing OK — accessory released and local keys cleared; it is now pairable again"
     } else {
-        String err = tv[7]!=null ? "TLV error ${hx(tv[7])}" : (head.split('\r\n')[0])
+        String err = tv[7]!=null ? pairErr(tv[7]) : (head.split("\r\n")[0])
         log.warn "HAP: RemovePairing failed (${err}). If the accessory is offline, use Forget and reset HomeKit on the device."
         sendEvent(name:"hapStatus", value:"unpair failed")
     }
@@ -512,7 +566,7 @@ void doM2(Map tv){
     sendHttpTlv("/pair-verify", tlv([[6,[3] as byte[]],[5,ct]]))
 }
 void doM4(Map tv){
-    if(tv[7]!=null){ rep("ERR verify ${hx(tv[7])}"); interfaces.rawSocket.close(); return }
+    if(tv[7]!=null){ String m=pairErr(tv[7]); sendEvent(name:"hapStatus",value:"session failed: ${m} (may need to re-pair)"); log.warn "HAP pair-verify error 0x${hx(tv[7])}: ${m}"; interfaces.rawSocket.close(); return }
     byte[] shared=hex(state.shared)
     state.c2a=hx(hkdf("Control-Salt".getBytes("UTF-8"),shared,"Control-Write-Encryption-Key".getBytes("UTF-8"),32))
     state.a2c=hx(hkdf("Control-Salt".getBytes("UTF-8"),shared,"Control-Read-Encryption-Key".getBytes("UTF-8"),32))
