@@ -1,8 +1,8 @@
 {
   "packageName": "Ecobee HAP Thermostat (Local)",
   "author": "RamSet",
-  "version": "0.15.4",
-  "releaseNotes": "0.15.4 - Fixes HPM install failure ('Fatal error, rolling back'): the shared-library bundle used the same namespace as the library itself, which made Hubitat's bundle importer fail so the library never installed and the driver couldn't compile. Rebuilt the bundle with a distinct namespace. No code change.",
+  "version": "0.15.5",
+  "releaseNotes": "0.15.5 - Fixes a driver SAVE failure on some hub firmware ('Expression not allowed: java.security.KeyPairGenerator'). The shared engine now generates randomness without that class (uses UUID.randomUUID + mixing), so it installs on every hub. No functional change; existing pairings unaffected.",
   "category": "Thermostats",
   "tags": "Thermostat, ecobee, HomeKit, HAP, Local, Sensor",
   "dateReleased": "2026-07-01",

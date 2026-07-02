@@ -1,8 +1,8 @@
 {
   "packageName": "HomeKit Import (Local)",
   "author": "RamSet",
-  "version": "0.9.3",
-  "releaseNotes": "0.9.3 - Fixes HPM install failure: the shared-library bundle used the same namespace as the library, which made Hubitat's bundle importer fail (library never installed -> drivers couldn't compile). Rebuilt the bundle with a distinct namespace.",
+  "version": "0.9.4",
+  "releaseNotes": "0.9.4 - Fixes a driver SAVE failure on some hub firmware ('java.security.KeyPairGenerator not allowed'). The shared engine now generates entropy without that class (UUID.randomUUID + mixing), so drivers compile on every hub.",
   "category": "Integrations",
   "tags": "HomeKit, HAP, Local, Import, No Cloud",
   "dateReleased": "2026-07-01",

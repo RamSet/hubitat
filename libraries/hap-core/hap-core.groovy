@@ -24,9 +24,15 @@
  * Include in a driver with:  #include RamSet.hapCore
  *
  * Author: RamSet
- * Version: 0.9.0
+ * Version: 0.9.1
  *
  * Changelog:
+ *  v0.9.1 - Portability: generate entropy without java.security.KeyPairGenerator (and without SecureRandom).
+ *           Both are blocked by the Groovy sandbox on some hub firmware versions, which failed the driver SAVE
+ *           ("Expression not allowed: java.security.KeyPairGenerator.getInstance"). Now uses UUID.randomUUID()
+ *           (SecureRandom-backed, but not a blocked class reference) mixed with time/counter/chain, so it saves
+ *           on every hub. Existing pairings are unaffected (long-term keys are stored; this only makes new
+ *           random bytes).
  *  v0.9.0 - Reconnect immediately on a decrypt/tag-mismatch (AEADBadTagException). When an accessory reboots
  *           or re-keys, the session desyncs and every frame fails to decrypt; previously this spammed errors
  *           until the ~30-min silence watchdog reconnected. Now it re-handshakes for fresh keys right away.
@@ -149,10 +155,18 @@ boolean edVerify(byte[] A, byte[] M, byte[] sig){ byte[] R=new byte[32],Sb=new b
     return hx(edEnc(edMul(S,edBase())))==hx(edEnc(edAdd(edDecode(R),edMul(k,edDecode(A))))) }
 byte[] tlv(List items){ def o=new java.io.ByteArrayOutputStream(); items.each{ int t=it[0]; byte[] v=it[1]; int i=0; while(true){ int n=Math.min(255,v.length-i); o.write(t); o.write(n); for(int j=0;j<n;j++) o.write(v[i+j]); i+=n; if(i>=v.length) break; if(n<255) break } }; return o.toByteArray() }
 Map tdec(byte[] b){ def d=[:]; int i=0; while(i<b.length){ int t=b[i]&0xff; int l=b[i+1]&0xff; byte[] v=new byte[l]; for(int j=0;j<l;j++) v[j]=b[i+2+j]; i+=2+l; d[t]=(d[t]!=null)?cat(d[t],v):v }; return d }
-byte[] rnd32(){ byte[] raw=new byte[32]
-    try{ def kp=java.security.KeyPairGenerator.getInstance("X25519").generateKeyPair(); byte[] enc=kp.getPrivate().getEncoded(); for(int i=0;i<32;i++) raw[i]=enc[enc.length-32+i] }
-    catch(Throwable e){ state.entc=(state.entc?:0)+1; byte[] hh=sha512((""+now()+":"+state.entc+":"+(settings?.iosLtsk?:'x')).getBytes("UTF-8")); for(int i=0;i<32;i++) raw[i]=hh[i] }
-    return raw }
+byte[] rnd32(){
+    // Entropy WITHOUT SecureRandom or KeyPairGenerator — both are AST-blocked on some hub firmware versions,
+    // and a blocked class reference fails the driver SAVE (compile-time check, so a try/catch can't guard it).
+    // UUID.randomUUID() is SecureRandom-backed internally but doesn't reference a blocked class, so it passes
+    // the sandbox on every version; mixed with time, a persistent counter, an object hash, and a rolling chain.
+    state.entc = ((state.entc ?: 0) as long) + 1
+    String seed = "" + now() + ":" + state.entc + ":" + java.util.UUID.randomUUID().toString() + ":" + java.util.UUID.randomUUID().toString() + ":" + (new Object().hashCode()) + ":" + (state.rndChain ?: "")
+    byte[] h = sha512(seed.getBytes("UTF-8"))
+    byte[] raw = new byte[32]; for(int i=0;i<32;i++) raw[i]=h[i]
+    state.rndChain = hx(raw)   // chain forward so back-to-back calls don't repeat even within the same millisecond
+    return raw
+}
 Map genEph(){ byte[] raw=rnd32(); byte[] pub=x25519(raw, hex("0900000000000000000000000000000000000000000000000000000000000000")); return [priv:hx(raw),pub:hx(pub)] }
 String uuidStr(){ String h=hx(rnd32()); return "${h[0..7]}-${h[8..11]}-${h[12..15]}-${h[16..19]}-${h[20..31]}" }
 
