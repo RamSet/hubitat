@@ -1,8 +1,8 @@
 {
   "packageName": "Ecobee HAP Thermostat (Local)",
   "author": "RamSet",
-  "version": "0.16.2",
-  "releaseNotes": "0.16.2 - Reliability: background refresh now uses a self-rescheduling timer instead of a cron (more dependable; fixes the 30s/2m options). IMPORTANT: after updating via HPM, open the device and click Save Preferences once \u2014 Hubitat does not re-run a driver setup on a package update, so the background poll only arms after a Save.",
+  "version": "0.16.3",
+  "releaseNotes": "0.16.3 - Fixes a compile/save error in 0.16.2 (a helper name collided with the shared library). 0.16.2 introduced the reliable self-rescheduling background refresh (fixes the 30s/2m interval options). After updating, open the device and click Save Preferences once to arm the background poll.",
   "category": "Thermostats",
   "tags": "Thermostat, ecobee, HomeKit, HAP, Local, Sensor",
   "dateReleased": "2026-07-02",

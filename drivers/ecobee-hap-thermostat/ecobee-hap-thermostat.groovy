@@ -17,12 +17,15 @@
  *   this driver (HPM does it automatically).
  *
  * Author: RamSet
- * Version: 0.16.2
+ * Version: 0.16.3
  * Date: 2026-07-02
  *
  * REQUIRES library: RamSet.hapCore (installed automatically by Hubitat Package Manager).
  *
  * Changelog:
+ *  v0.16.3 - Fix a compile error in 0.16.2: the helper I added (pollSecs) collided with a method of the same
+ *           name in the shared library, so the driver wouldn't save. Renamed to refreshSecs. (0.16.2 also
+ *           replaced the cron-based background refresh with a self-rescheduling timer — see below.)
  *  v0.16.2 - Reliability: the background refresh now uses a self-rescheduling timer instead of a cron, which
  *           is more dependable (and fixes the 30-second/2-minute options). NOTE: after updating via HPM you
  *           must open the device and click "Save Preferences" once — Hubitat doesn't re-run a driver's setup
@@ -204,10 +207,10 @@ def updated(){
 // schedule the background re-read of the no-event characteristics; interval is user-configurable (default 5 min, floor 30 s)
 def scheduleRefresh(){
     unschedule("refresh"); unschedule("pollRefresh")
-    runIn(pollSecs(), "pollRefresh")
-    logInfo "HAP: background refresh every ${settings?.refreshInterval ?: '5 minutes'} (${pollSecs()}s)"
+    runIn(refreshSecs(), "pollRefresh")
+    logInfo "HAP: background refresh every ${settings?.refreshInterval ?: '5 minutes'} (${refreshSecs()}s)"
 }
-Integer pollSecs(){
+Integer refreshSecs(){
     switch(settings?.refreshInterval ?: "5 minutes"){
         case "30 seconds": return 30
         case "1 minute":   return 60
@@ -220,7 +223,7 @@ Integer pollSecs(){
 }
 // self-rescheduling poll — runIn is more reliable than a custom cron and handles 30s/2m intervals runEveryX can't.
 // Re-arm FIRST so a refresh hiccup can't break the chain.
-def pollRefresh(){ runIn(pollSecs(), "pollRefresh"); refresh() }
+def pollRefresh(){ runIn(refreshSecs(), "pollRefresh"); refresh() }
 def logsOff(){ device.updateSetting("debugLog",[value:"false",type:"bool"]); state.diag=[]; sendEvent(name:"diag", value:""); log.info "HAP: debug logging auto-disabled" }
 
 // ===== thermostat commands (write over the library's HAP session via writeChar/writeChars) =====
