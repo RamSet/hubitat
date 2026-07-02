@@ -1,8 +1,8 @@
 {
   "packageName": "Ecobee HAP Thermostat (Local)",
   "author": "RamSet",
-  "version": "0.16.4",
-  "releaseNotes": "0.16.4 - Fix: holdEndsAt now clears (shows \"none\") after you resume the schedule, instead of leaving the old hold-end date showing. Onhold already cleared correctly; this fixes the lingering date.",
+  "version": "0.17.0",
+  "releaseNotes": "0.17.0 - thermostatSetpoint is now dynamic and always meaningful: it shows the desired temperature for the current mode (heat target in heat, cool target in cool; in auto it follows the threshold actually being regulated instead of HomeKit midpoint). New setpointDetail attribute labels what the number currently represents.",
   "category": "Thermostats",
   "tags": "Thermostat, ecobee, HomeKit, HAP, Local, Sensor",
   "dateReleased": "2026-07-02",

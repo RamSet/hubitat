@@ -17,12 +17,18 @@
  *   this driver (HPM does it automatically).
  *
  * Author: RamSet
- * Version: 0.16.4
+ * Version: 0.17.0
  * Date: 2026-07-02
  *
  * REQUIRES library: RamSet.hapCore (installed automatically by Hubitat Package Manager).
  *
  * Changelog:
+ *  v0.17.0 - thermostatSetpoint is now dynamic and always meaningful: it reflects the desired temperature for
+ *           the current mode — the heat target in heat, the cool target in cool, and in auto the threshold
+ *           actually being regulated (cooling->cool setpoint, heating->heat setpoint, idle->the threshold
+ *           nearest the current temp). Previously in auto it showed HomeKit's single value, which is just the
+ *           midpoint of the two thresholds (a number that appears nowhere on the thermostat). Added a
+ *           setpointDetail attribute that labels what thermostatSetpoint currently represents.
  *  v0.16.4 - Fix holdEndsAt not clearing after a resume: it now reports "none" when there's no hold instead
  *           of an empty string (Hubitat drops empty-string events, which left the old hold-end date showing).
  *  v0.16.3 - Fix a compile error in 0.16.2: the helper I added (pollSecs) collided with a method of the same
@@ -151,6 +157,7 @@ metadata {
         attribute "humiditySetpoint", "number"
         attribute "fanState", "string"          // actual fan running state: inactive / idle / blowing (HAP iid76)
         attribute "thermostatAlert", "string"   // ecobee alerts/reminders text (HAP iid54)
+        attribute "setpointDetail", "string"     // what thermostatSetpoint currently reflects (heating/cooling target + mode)
         attribute "homeHeatSetpoint", "number"  // per-comfort-profile targets (HAP iid34-39, Home/Away/Sleep)
         attribute "homeCoolSetpoint", "number"
         attribute "awayHeatSetpoint", "number"
@@ -373,16 +380,36 @@ void onCharacteristics(j){
     // (TargetTemperature); iid22/iid23 (thresholds) only apply in Auto. Reporting iid22/23 in cool/heat
     // shows a stale Auto threshold instead of the actual target.
     String tmode = (g(18)!=null) ? [0:"off",1:"heat",2:"cool",3:"auto"][g(18) as int] : device.currentValue("thermostatMode")
-    if(g(20)!=null) sendEvent(name:"thermostatSetpoint", value: cToHub(g(20)))
+    // thermostatSetpoint tracks the ACTIVE desired temperature for the current mode, so it's always meaningful:
+    // heat -> heat target; cool -> cool target; auto -> the threshold actually being regulated (by operating
+    // state; when idle, whichever threshold is nearer the current temp). In auto HAP's single iid20 is just the
+    // midpoint of the two thresholds, so we do NOT use it there.
     if(tmode=="cool"){
-        if(g(20)!=null) sendEvent(name:"coolingSetpoint", value: cToHub(g(20)))
+        if(g(20)!=null){ sendEvent(name:"coolingSetpoint", value: cToHub(g(20))); sendEvent(name:"thermostatSetpoint", value: cToHub(g(20))) }
         if(g(23)!=null) sendEvent(name:"heatingSetpoint", value: cToHub(g(23)))
+        sendEvent(name:"setpointDetail", value:"cooling setpoint")
     } else if(tmode=="heat"){
-        if(g(20)!=null) sendEvent(name:"heatingSetpoint", value: cToHub(g(20)))
+        if(g(20)!=null){ sendEvent(name:"heatingSetpoint", value: cToHub(g(20))); sendEvent(name:"thermostatSetpoint", value: cToHub(g(20))) }
         if(g(22)!=null) sendEvent(name:"coolingSetpoint", value: cToHub(g(22)))
-    } else {   // auto / off -> the two thresholds are the active setpoints
+        sendEvent(name:"setpointDetail", value:"heating setpoint")
+    } else if(tmode=="auto"){
+        def cThr=g(22), hThr=g(23)
+        if(cThr!=null) sendEvent(name:"coolingSetpoint", value: cToHub(cThr))
+        if(hThr!=null) sendEvent(name:"heatingSetpoint", value: cToHub(hThr))
+        int op = (g(17)!=null) ? (g(17) as int) : -1
+        def active = (op==2) ? cThr : (op==1) ? hThr : null   // cooling -> cool threshold, heating -> heat threshold
+        String detail = (op==2) ? "cooling setpoint (auto)" : (op==1) ? "heating setpoint (auto)" : "auto — nearest target (idle)"
+        if(active==null && cThr!=null && hThr!=null && g(19)!=null){   // idle -> threshold nearer the current temp
+            BigDecimal t=g(19) as BigDecimal; active = ((cThr as BigDecimal)-t) <= (t-(hThr as BigDecimal)) ? cThr : hThr
+        }
+        if(active==null) active = (cThr!=null ? cThr : hThr)
+        if(active!=null) sendEvent(name:"thermostatSetpoint", value: cToHub(active))
+        sendEvent(name:"setpointDetail", value: detail)
+    } else {   // off -> no active target; surface both thresholds, leave thermostatSetpoint at HAP's single value
         if(g(22)!=null) sendEvent(name:"coolingSetpoint", value: cToHub(g(22)))
         if(g(23)!=null) sendEvent(name:"heatingSetpoint", value: cToHub(g(23)))
+        if(g(20)!=null) sendEvent(name:"thermostatSetpoint", value: cToHub(g(20)))
+        sendEvent(name:"setpointDetail", value:"off — no active setpoint")
     }
     if(g(17)!=null) sendEvent(name:"thermostatOperatingState", value: [0:"idle",1:"heating",2:"cooling"][g(17) as int])
     if(g(75)!=null) sendEvent(name:"thermostatFanMode", value: (g(75) as int)==1?"auto":"on")
