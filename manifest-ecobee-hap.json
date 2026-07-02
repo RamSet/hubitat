@@ -1,8 +1,8 @@
 {
   "packageName": "Ecobee HAP Thermostat (Local)",
   "author": "RamSet",
-  "version": "0.15.3",
-  "releaseNotes": "0.15.3 - Comfort profile reporting corrected: HomeKit numbers only Home/Sleep/Away, so holds/vacation/custom comfort settings all shared one value; now shows Hold vs Custom correctly and onHold reflects a genuine hold. Plus faster recovery when the thermostat reboots/re-keys the session.",
+  "version": "0.15.4",
+  "releaseNotes": "0.15.4 - Fixes HPM install failure ('Fatal error, rolling back'): the shared-library bundle used the same namespace as the library itself, which made Hubitat's bundle importer fail so the library never installed and the driver couldn't compile. Rebuilt the bundle with a distinct namespace. No code change.",
   "category": "Thermostats",
   "tags": "Thermostat, ecobee, HomeKit, HAP, Local, Sensor",
   "dateReleased": "2026-07-01",
