@@ -17,12 +17,18 @@
  *   this driver (HPM does it automatically).
  *
  * Author: RamSet
- * Version: 0.15.3
+ * Version: 0.15.5
  * Date: 2026-07-01
  *
  * REQUIRES library: RamSet.hapCore (installed automatically by Hubitat Package Manager).
  *
  * Changelog:
+ *  v0.15.5 - Engine update (hapCore 0.9.1): the shared library now generates randomness without the
+ *           java.security.KeyPairGenerator class, which some hub firmware blocks in the sandbox (that block
+ *           stopped the driver from saving on those hubs). Now uses UUID-based entropy, so it installs on
+ *           every hub. No driver-code or behavior change; existing pairings are unaffected.
+ *  v0.15.4 - Packaging: rebuilt the shared hapCore library bundle with a distinct namespace so Hubitat
+ *           Package Manager installs it reliably (the earlier bundle failed to install). No code change.
  *  v0.15.3 - Comfort profile reporting corrected. HomeKit numbers only the three built-in comfort settings
  *           (Home/Sleep/Away); anything else (a hold, vacation, or a custom comfort setting like "Night")
  *           all report the same value, so the driver now shows those as "Hold" when a hold is actually
