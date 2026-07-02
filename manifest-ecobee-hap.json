@@ -1,8 +1,8 @@
 {
   "packageName": "Ecobee HAP Thermostat (Local)",
   "author": "RamSet",
-  "version": "0.16.3",
-  "releaseNotes": "0.16.3 - Fixes a compile/save error in 0.16.2 (a helper name collided with the shared library). 0.16.2 introduced the reliable self-rescheduling background refresh (fixes the 30s/2m interval options). After updating, open the device and click Save Preferences once to arm the background poll.",
+  "version": "0.16.4",
+  "releaseNotes": "0.16.4 - Fix: holdEndsAt now clears (shows \"none\") after you resume the schedule, instead of leaving the old hold-end date showing. Onhold already cleared correctly; this fixes the lingering date.",
   "category": "Thermostats",
   "tags": "Thermostat, ecobee, HomeKit, HAP, Local, Sensor",
   "dateReleased": "2026-07-02",

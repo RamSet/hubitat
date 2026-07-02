@@ -17,12 +17,14 @@
  *   this driver (HPM does it automatically).
  *
  * Author: RamSet
- * Version: 0.16.3
+ * Version: 0.16.4
  * Date: 2026-07-02
  *
  * REQUIRES library: RamSet.hapCore (installed automatically by Hubitat Package Manager).
  *
  * Changelog:
+ *  v0.16.4 - Fix holdEndsAt not clearing after a resume: it now reports "none" when there's no hold instead
+ *           of an empty string (Hubitat drops empty-string events, which left the old hold-end date showing).
  *  v0.16.3 - Fix a compile error in 0.16.2: the helper I added (pollSecs) collided with a method of the same
  *           name in the shared library, so the driver wouldn't save. Renamed to refreshSecs. (0.16.2 also
  *           replaced the cron-based background refresh with a self-rescheduling timer — see below.)
@@ -391,12 +393,13 @@ void onCharacteristics(j){
     if(g(33)!=null){
         int ci = g(33) as int
         def he = g(41)?.toString()
-        boolean held = (he != null) ? !he.startsWith("2014-01-03") : ((device.currentValue("holdEndsAt") ?: "") != "")
+        boolean held = (he != null) ? !he.startsWith("2014-01-03") : !((device.currentValue("holdEndsAt") ?: "none") in ["none",""])
         String cp = [0:"Home",1:"Sleep",2:"Away"][ci] ?: (held ? "Hold" : "Custom")
         sendEvent(name:"comfortProfile", value: cp)
         sendEvent(name:"onHold", value: held)
     }
-    if(g(41)!=null){ String h=g(41).toString().replaceAll(/S$/,""); sendEvent(name:"holdEndsAt", value: h.startsWith("2014-01-03")?"":h) }
+    // Report "none" (not "") when there's no hold — Hubitat drops empty-string events, so "" left a stale date lingering after a resume.
+    if(g(41)!=null){ String h=g(41).toString().replaceAll(/S$/,""); sendEvent(name:"holdEndsAt", value: h.startsWith("2014-01-03")?"none":h) }
     if(g(25)!=null) sendEvent(name:"humiditySetpoint", value: g(25) as int, unit:"%")
     if(g(76)!=null) sendEvent(name:"fanState", value: [0:"inactive",1:"idle",2:"blowing"][g(76) as int] ?: "unknown")
     if(g(54)!=null){ String a=g(54).toString(); sendEvent(name:"thermostatAlert", value: a); sendEvent(name:"alertActive", value: !(a.toLowerCase().contains("no pending alert"))) }
