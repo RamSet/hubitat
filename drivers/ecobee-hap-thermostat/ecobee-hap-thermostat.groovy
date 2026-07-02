@@ -17,12 +17,16 @@
  *   this driver (HPM does it automatically).
  *
  * Author: RamSet
- * Version: 0.16.1
- * Date: 2026-07-01
+ * Version: 0.16.2
+ * Date: 2026-07-02
  *
  * REQUIRES library: RamSet.hapCore (installed automatically by Hubitat Package Manager).
  *
  * Changelog:
+ *  v0.16.2 - Reliability: the background refresh now uses a self-rescheduling timer instead of a cron, which
+ *           is more dependable (and fixes the 30-second/2-minute options). NOTE: after updating via HPM you
+ *           must open the device and click "Save Preferences" once — Hubitat doesn't re-run a driver's setup
+ *           on a package update, so the background poll only arms after a Save.
  *  v0.16.1 - The background refresh interval is now configurable (preference): 30 seconds up to 30 minutes,
  *           default 5 minutes. This controls how quickly the values HomeKit can't push — comfort profile,
  *           on-hold, hold-end, per-profile setpoints, alert, sensor activity timers — catch up. Faster is
@@ -199,18 +203,24 @@ def updated(){
 }
 // schedule the background re-read of the no-event characteristics; interval is user-configurable (default 5 min, floor 30 s)
 def scheduleRefresh(){
-    unschedule("refresh")
-    switch(settings?.refreshInterval ?: "5 minutes"){
-        case "30 seconds": schedule("7/30 * * * * ?", "refresh"); break   // Quartz: seconds 7 & 37 => every 30 s
-        case "1 minute":   runEvery1Minute("refresh"); break
-        case "2 minutes":  schedule("7 0/2 * * * ?", "refresh"); break
-        case "10 minutes": runEvery10Minutes("refresh"); break
-        case "15 minutes": runEvery15Minutes("refresh"); break
-        case "30 minutes": runEvery30Minutes("refresh"); break
-        default:           runEvery5Minutes("refresh")   // "5 minutes"
-    }
-    logInfo "HAP: background refresh every ${settings?.refreshInterval ?: '5 minutes'}"
+    unschedule("refresh"); unschedule("pollRefresh")
+    runIn(pollSecs(), "pollRefresh")
+    logInfo "HAP: background refresh every ${settings?.refreshInterval ?: '5 minutes'} (${pollSecs()}s)"
 }
+Integer pollSecs(){
+    switch(settings?.refreshInterval ?: "5 minutes"){
+        case "30 seconds": return 30
+        case "1 minute":   return 60
+        case "2 minutes":  return 120
+        case "10 minutes": return 600
+        case "15 minutes": return 900
+        case "30 minutes": return 1800
+        default:           return 300   // "5 minutes"
+    }
+}
+// self-rescheduling poll — runIn is more reliable than a custom cron and handles 30s/2m intervals runEveryX can't.
+// Re-arm FIRST so a refresh hiccup can't break the chain.
+def pollRefresh(){ runIn(pollSecs(), "pollRefresh"); refresh() }
 def logsOff(){ device.updateSetting("debugLog",[value:"false",type:"bool"]); state.diag=[]; sendEvent(name:"diag", value:""); log.info "HAP: debug logging auto-disabled" }
 
 // ===== thermostat commands (write over the library's HAP session via writeChar/writeChars) =====
