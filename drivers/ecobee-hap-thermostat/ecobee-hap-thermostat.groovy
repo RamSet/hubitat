@@ -17,12 +17,16 @@
  *   this driver (HPM does it automatically).
  *
  * Author: RamSet
- * Version: 0.16.0
+ * Version: 0.16.1
  * Date: 2026-07-01
  *
  * REQUIRES library: RamSet.hapCore (installed automatically by Hubitat Package Manager).
  *
  * Changelog:
+ *  v0.16.1 - The background refresh interval is now configurable (preference): 30 seconds up to 30 minutes,
+ *           default 5 minutes. This controls how quickly the values HomeKit can't push — comfort profile,
+ *           on-hold, hold-end, per-profile setpoints, alert, sensor activity timers — catch up. Faster is
+ *           fresher but adds local traffic; 5 minutes is recommended, 30 seconds is the floor.
  *  v0.16.0 - More detail surfaced from HAP: the thermostat now reports manufacturer, model, firmware and
  *           serial as attributes, and each sensor child gains secondsSinceMotion / secondsSinceOccupancy
  *           (an ecobee per-sensor activity timer; semantics inferred, polled on ~5-min cadence). Note the
@@ -159,6 +163,9 @@ metadata {
         }
         input "infoLog", "bool", title: "Enable info logging", defaultValue: true
         input "debugLog", "bool", title: "Enable debug logging", defaultValue: false
+        input "refreshInterval", "enum", title: "Background refresh interval",
+            description: "How often to re-read the values HomeKit can't push (comfort profile, on-hold, hold-end, per-profile setpoints, alert, sensor activity timers). Faster = fresher but more local traffic; 5 minutes is recommended. If the session ever gets flaky, back it off.",
+            options: ["30 seconds","1 minute","2 minutes","5 minutes","10 minutes","15 minutes","30 minutes"], defaultValue: "5 minutes"
     }
 }
 
@@ -188,7 +195,21 @@ def updated(){
     ["srpK","srpA","srpM1","psSeed","psEncKey","psPid","psstage"].each{ state.remove(it) }   // shed stale pair-setup temporaries (re-created if pairing; ~1.2KB reclaimed on already-paired hubs)
     if(settings.debugLog) runIn(1800,"logsOff")   // debug is off by default and auto-disables after 30 min (it writes state on every frame — keeps the device's busy% + state size down)
     if(settings.setupCode && !isPaired()){ logInfo "HAP: setup code entered — pairing"; runIn(1,"pair") }
-    else if(isPaired()){ runIn(2,"startSession"); runEvery10Minutes("ensureUp"); runEvery5Minutes("refresh") }   // live event mode is the default once paired; ensureUp is a reconnect backstop; refresh re-reads the no-event chars (comfort profile/hold-end/per-profile setpoints/alert) the pure-listen engine won't poll
+    else if(isPaired()){ runIn(2,"startSession"); runEvery10Minutes("ensureUp"); scheduleRefresh() }   // live event mode is the default once paired; ensureUp is a reconnect backstop; scheduleRefresh polls the no-event chars (comfort profile/hold-end/per-profile setpoints/alert/sensor timers) the pure-listen engine won't push
+}
+// schedule the background re-read of the no-event characteristics; interval is user-configurable (default 5 min, floor 30 s)
+def scheduleRefresh(){
+    unschedule("refresh")
+    switch(settings?.refreshInterval ?: "5 minutes"){
+        case "30 seconds": schedule("7/30 * * * * ?", "refresh"); break   // Quartz: seconds 7 & 37 => every 30 s
+        case "1 minute":   runEvery1Minute("refresh"); break
+        case "2 minutes":  schedule("7 0/2 * * * ?", "refresh"); break
+        case "10 minutes": runEvery10Minutes("refresh"); break
+        case "15 minutes": runEvery15Minutes("refresh"); break
+        case "30 minutes": runEvery30Minutes("refresh"); break
+        default:           runEvery5Minutes("refresh")   // "5 minutes"
+    }
+    logInfo "HAP: background refresh every ${settings?.refreshInterval ?: '5 minutes'}"
 }
 def logsOff(){ device.updateSetting("debugLog",[value:"false",type:"bool"]); state.diag=[]; sendEvent(name:"diag", value:""); log.info "HAP: debug logging auto-disabled" }
 

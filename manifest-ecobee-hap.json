@@ -1,8 +1,8 @@
 {
   "packageName": "Ecobee HAP Thermostat (Local)",
   "author": "RamSet",
-  "version": "0.16.0",
-  "releaseNotes": "0.16.0 - Surfaces more HAP detail: thermostat now reports manufacturer/model/firmware/serial, and each sensor child gains secondsSinceMotion/secondsSinceOccupancy (an ecobee per-sensor activity timer; inferred, polled ~5 min). The Thermostat Sensor child temperature is the thermostat controlling temp (HAP has no separate individual built-in reading).",
+  "version": "0.16.1",
+  "releaseNotes": "0.16.1 - Background refresh interval is now a preference (30 seconds to 30 minutes, default 5 minutes). Controls how fast the values HomeKit cannot push (comfort profile, on-hold, hold-end, per-profile setpoints, alert, sensor timers) catch up. Faster = fresher but more local traffic; 5 min recommended, 30 s floor.",
   "category": "Thermostats",
   "tags": "Thermostat, ecobee, HomeKit, HAP, Local, Sensor",
   "dateReleased": "2026-07-01",
