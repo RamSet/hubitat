@@ -17,12 +17,16 @@
  *   this driver (HPM does it automatically).
  *
  * Author: RamSet
- * Version: 0.17.0
- * Date: 2026-07-02
+ * Version: 0.17.1
+ * Date: 2026-07-04
  *
  * REQUIRES library: RamSet.hapCore (installed automatically by Hubitat Package Manager).
  *
  * Changelog:
+ *  v0.17.1 - Setpoints now show whole °F (for °F users) instead of a stray tenth. The ecobee is whole-°F-
+ *           native, but HomeKit only exposes the value in Celsius, so the °F->°C->°F round-trip could add
+ *           ~0.1° (e.g. 80°F read back as 80.1). Setpoints are rounded to recover the intended whole number;
+ *           the live temperature keeps its decimal (it's a real reading). °C users keep 0.5° resolution.
  *  v0.17.0 - thermostatSetpoint is now dynamic and always meaningful: it reflects the desired temperature for
  *           the current mode — the heat target in heat, the cool target in cool, and in auto the threshold
  *           actually being regulated (cooling->cool setpoint, heating->heat setpoint, idle->the threshold
@@ -294,6 +298,10 @@ BigDecimal round1(BigDecimal v){ return (v*10).setScale(0, java.math.RoundingMod
 boolean isF(){ return (location?.temperatureScale ?: "F") == "F" }
 def hubToC(BigDecimal t){ isF()? ((t-32)*5/9) : t }
 def cToHub(v){ if(v==null) return null; def c=(v as BigDecimal); return isF()? round1(c*9/5+32) : round1(c) }
+// Setpoints: round to a WHOLE °F for °F users. The ecobee is whole-°F-native, but HomeKit only exposes the
+// value in Celsius, so the °F->°C->°F round-trip adds up to ~0.1° of noise (e.g. 80°F reads back as 80.1).
+// Rounding recovers the intended whole number; the arrows stay clean. (°C users keep 0.5° resolution.)
+def cToHubSet(v){ if(v==null) return null; def c=(v as BigDecimal); return isF()? (c*9/5+32).setScale(0, java.math.RoundingMode.HALF_UP) : round1(c) }
 
 // debug: fetch /accessories over the live session and log a compact structural map (for diagnosing unknown models)
 def dumpAccessories(){
@@ -385,17 +393,17 @@ void onCharacteristics(j){
     // state; when idle, whichever threshold is nearer the current temp). In auto HAP's single iid20 is just the
     // midpoint of the two thresholds, so we do NOT use it there.
     if(tmode=="cool"){
-        if(g(20)!=null){ sendEvent(name:"coolingSetpoint", value: cToHub(g(20))); sendEvent(name:"thermostatSetpoint", value: cToHub(g(20))) }
-        if(g(23)!=null) sendEvent(name:"heatingSetpoint", value: cToHub(g(23)))
+        if(g(20)!=null){ sendEvent(name:"coolingSetpoint", value: cToHubSet(g(20))); sendEvent(name:"thermostatSetpoint", value: cToHubSet(g(20))) }
+        if(g(23)!=null) sendEvent(name:"heatingSetpoint", value: cToHubSet(g(23)))
         sendEvent(name:"setpointDetail", value:"cooling setpoint")
     } else if(tmode=="heat"){
-        if(g(20)!=null){ sendEvent(name:"heatingSetpoint", value: cToHub(g(20))); sendEvent(name:"thermostatSetpoint", value: cToHub(g(20))) }
-        if(g(22)!=null) sendEvent(name:"coolingSetpoint", value: cToHub(g(22)))
+        if(g(20)!=null){ sendEvent(name:"heatingSetpoint", value: cToHubSet(g(20))); sendEvent(name:"thermostatSetpoint", value: cToHubSet(g(20))) }
+        if(g(22)!=null) sendEvent(name:"coolingSetpoint", value: cToHubSet(g(22)))
         sendEvent(name:"setpointDetail", value:"heating setpoint")
     } else if(tmode=="auto"){
         def cThr=g(22), hThr=g(23)
-        if(cThr!=null) sendEvent(name:"coolingSetpoint", value: cToHub(cThr))
-        if(hThr!=null) sendEvent(name:"heatingSetpoint", value: cToHub(hThr))
+        if(cThr!=null) sendEvent(name:"coolingSetpoint", value: cToHubSet(cThr))
+        if(hThr!=null) sendEvent(name:"heatingSetpoint", value: cToHubSet(hThr))
         int op = (g(17)!=null) ? (g(17) as int) : -1
         def active = (op==2) ? cThr : (op==1) ? hThr : null   // cooling -> cool threshold, heating -> heat threshold
         String detail = (op==2) ? "cooling setpoint (auto)" : (op==1) ? "heating setpoint (auto)" : "auto — nearest target (idle)"
@@ -403,12 +411,12 @@ void onCharacteristics(j){
             BigDecimal t=g(19) as BigDecimal; active = ((cThr as BigDecimal)-t) <= (t-(hThr as BigDecimal)) ? cThr : hThr
         }
         if(active==null) active = (cThr!=null ? cThr : hThr)
-        if(active!=null) sendEvent(name:"thermostatSetpoint", value: cToHub(active))
+        if(active!=null) sendEvent(name:"thermostatSetpoint", value: cToHubSet(active))
         sendEvent(name:"setpointDetail", value: detail)
     } else {   // off -> no active target; surface both thresholds, leave thermostatSetpoint at HAP's single value
-        if(g(22)!=null) sendEvent(name:"coolingSetpoint", value: cToHub(g(22)))
-        if(g(23)!=null) sendEvent(name:"heatingSetpoint", value: cToHub(g(23)))
-        if(g(20)!=null) sendEvent(name:"thermostatSetpoint", value: cToHub(g(20)))
+        if(g(22)!=null) sendEvent(name:"coolingSetpoint", value: cToHubSet(g(22)))
+        if(g(23)!=null) sendEvent(name:"heatingSetpoint", value: cToHubSet(g(23)))
+        if(g(20)!=null) sendEvent(name:"thermostatSetpoint", value: cToHubSet(g(20)))
         sendEvent(name:"setpointDetail", value:"off — no active setpoint")
     }
     if(g(17)!=null) sendEvent(name:"thermostatOperatingState", value: [0:"idle",1:"heating",2:"cooling"][g(17) as int])
@@ -431,12 +439,12 @@ void onCharacteristics(j){
     if(g(76)!=null) sendEvent(name:"fanState", value: [0:"inactive",1:"idle",2:"blowing"][g(76) as int] ?: "unknown")
     if(g(54)!=null){ String a=g(54).toString(); sendEvent(name:"thermostatAlert", value: a); sendEvent(name:"alertActive", value: !(a.toLowerCase().contains("no pending alert"))) }
     // per-profile setpoints (HAP iid34-39 follow ecobee's fixed Home/Away/Sleep climate order)
-    if(g(34)!=null) sendEvent(name:"homeHeatSetpoint",  value: cToHub(g(34)))
-    if(g(35)!=null) sendEvent(name:"homeCoolSetpoint",  value: cToHub(g(35)))
-    if(g(36)!=null) sendEvent(name:"awayHeatSetpoint",  value: cToHub(g(36)))
-    if(g(37)!=null) sendEvent(name:"awayCoolSetpoint",  value: cToHub(g(37)))
-    if(g(38)!=null) sendEvent(name:"sleepHeatSetpoint", value: cToHub(g(38)))
-    if(g(39)!=null) sendEvent(name:"sleepCoolSetpoint", value: cToHub(g(39)))
+    if(g(34)!=null) sendEvent(name:"homeHeatSetpoint",  value: cToHubSet(g(34)))
+    if(g(35)!=null) sendEvent(name:"homeCoolSetpoint",  value: cToHubSet(g(35)))
+    if(g(36)!=null) sendEvent(name:"awayHeatSetpoint",  value: cToHubSet(g(36)))
+    if(g(37)!=null) sendEvent(name:"awayCoolSetpoint",  value: cToHubSet(g(37)))
+    if(g(38)!=null) sendEvent(name:"sleepHeatSetpoint", value: cToHubSet(g(38)))
+    if(g(39)!=null) sendEvent(name:"sleepCoolSetpoint", value: cToHubSet(g(39)))
     // thermostat's own motion (iid66) / occupancy (iid65) are routed to a child sensor device (see the
     // sensor loop below + onAccessories), NOT to parent capabilities — keeps the parent exportable to HomeKit.
     sendEvent(name:"supportedThermostatModes", value: '["off","heat","cool","auto"]')

@@ -2,10 +2,10 @@
   "packageName": "Ecobee HAP Thermostat (Local)",
   "author": "RamSet",
   "version": "0.17.1",
-  "releaseNotes": "0.17.1 - Shared engine: auto-recovers if the thermostat's DHCP IP changes (finds it by HomeKit id), and restored plain-English pairing errors. No thermostat behavior change.",
+  "releaseNotes": "0.17.1 - Setpoints now display as whole degrees F (was showing a stray tenth like 80.1 for 80). The ecobee is whole-F native but HomeKit only exposes Celsius, so the F->C->F round-trip added ~0.1; setpoints are rounded to recover the intended value. Live temperature keeps its decimal. C users unaffected (0.5 resolution).",
   "category": "Thermostats",
   "tags": "Thermostat, ecobee, HomeKit, HAP, Local, Sensor",
-  "dateReleased": "2026-07-02",
+  "dateReleased": "2026-07-04",
   "drivers": [
     {
       "id": "511b25e3-4ca2-413e-a1f7-351ff50cd3b1",
