@@ -17,12 +17,15 @@
  *   this driver (HPM does it automatically).
  *
  * Author: RamSet
- * Version: 0.17.2
+ * Version: 0.17.3
  * Date: 2026-07-05
  *
  * REQUIRES library: RamSet.hapCore (installed automatically by Hubitat Package Manager).
  *
  * Changelog:
+ *  v0.17.3 - The diag state is now hidden when debug logging is off: it's removed from the device's Current
+ *           States entirely (not just blanked), so it no longer clutters the device page. Turn on debug
+ *           logging to see it again; it clears itself when debug turns off (or after the 30-min auto-off).
  *  v0.17.2 - Setpoint rounding is now conditional on the ecobee's own units. A °F-native ecobee uses whole-°F
  *           setpoints whose Celsius value picks up ~0.1° of round-trip noise, so those are rounded to the whole
  *           °F. A °C-native ecobee steps in 0.5°C, and 0.5°C = 0.9°F exactly — those tenths are real, so they're
@@ -215,7 +218,7 @@ def installed(){ updated() }
 def updated(){
     unschedule(); try{ interfaces.rawSocket.close() }catch(e){}   // drop any prior socket cleanly so the thermostat frees its slot before we reconnect
     state.live=false; state.diag=[]; state.connTry=0; state.mdnsTries=0; state.connInFlight=null; state.vtry=0; state.wretry=0
-    if(settings.debugLog) sendEvent(name:"diag", value:"")
+    if(settings.debugLog) sendEvent(name:"diag", value:"") else device.deleteCurrentState("diag")   // hide the diag state entirely when debug logging is off
     state.remove("sensors"); state.remove("services")   // force a fresh /accessories discovery on Save so sensor topology (incl. the thermostat's own sensor) rebuilds
     ["srpK","srpA","srpM1","psSeed","psEncKey","psPid","psstage"].each{ state.remove(it) }   // shed stale pair-setup temporaries (re-created if pairing; ~1.2KB reclaimed on already-paired hubs)
     if(settings.debugLog) runIn(1800,"logsOff")   // debug is off by default and auto-disables after 30 min (it writes state on every frame — keeps the device's busy% + state size down)
@@ -242,7 +245,7 @@ Integer refreshSecs(){
 // self-rescheduling poll — runIn is more reliable than a custom cron and handles 30s/2m intervals runEveryX can't.
 // Re-arm FIRST so a refresh hiccup can't break the chain.
 def pollRefresh(){ runIn(refreshSecs(), "pollRefresh"); refresh() }
-def logsOff(){ device.updateSetting("debugLog",[value:"false",type:"bool"]); state.diag=[]; sendEvent(name:"diag", value:""); log.info "HAP: debug logging auto-disabled" }
+def logsOff(){ device.updateSetting("debugLog",[value:"false",type:"bool"]); state.diag=[]; device.deleteCurrentState("diag"); log.info "HAP: debug logging auto-disabled" }
 
 // ===== thermostat commands (write over the library's HAP session via writeChar/writeChars) =====
 def setThermostatMode(String m){ String lm=m?.toLowerCase(); def v=[off:0,heat:1,cool:2,auto:3][lm]; if(v!=null){ writeChar(TAID,18,v); sendEvent(name:"thermostatMode", value:lm) } else log.warn "bad mode $m" }
