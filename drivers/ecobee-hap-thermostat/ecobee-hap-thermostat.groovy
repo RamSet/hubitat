@@ -17,12 +17,17 @@
  *   this driver (HPM does it automatically).
  *
  * Author: RamSet
- * Version: 0.17.1
- * Date: 2026-07-04
+ * Version: 0.17.2
+ * Date: 2026-07-05
  *
  * REQUIRES library: RamSet.hapCore (installed automatically by Hubitat Package Manager).
  *
  * Changelog:
+ *  v0.17.2 - Setpoint rounding is now conditional on the ecobee's own units. A °F-native ecobee uses whole-°F
+ *           setpoints whose Celsius value picks up ~0.1° of round-trip noise, so those are rounded to the whole
+ *           °F. A °C-native ecobee steps in 0.5°C, and 0.5°C = 0.9°F exactly — those tenths are real, so they're
+ *           now shown as-is instead of being rounded away (thanks to a forum note pointing that out). Detected
+ *           via HAP TemperatureDisplayUnits (iid21).
  *  v0.17.1 - Setpoints now show whole °F (for °F users) instead of a stray tenth. The ecobee is whole-°F-
  *           native, but HomeKit only exposes the value in Celsius, so the °F->°C->°F round-trip could add
  *           ~0.1° (e.g. 80°F read back as 80.1). Setpoints are rounded to recover the intended whole number;
@@ -301,7 +306,13 @@ def cToHub(v){ if(v==null) return null; def c=(v as BigDecimal); return isF()? r
 // Setpoints: round to a WHOLE °F for °F users. The ecobee is whole-°F-native, but HomeKit only exposes the
 // value in Celsius, so the °F->°C->°F round-trip adds up to ~0.1° of noise (e.g. 80°F reads back as 80.1).
 // Rounding recovers the intended whole number; the arrows stay clean. (°C users keep 0.5° resolution.)
-def cToHubSet(v){ if(v==null) return null; def c=(v as BigDecimal); return isF()? (c*9/5+32).setScale(0, java.math.RoundingMode.HALF_UP) : round1(c) }
+def cToHubSet(v){ if(v==null) return null; def c=(v as BigDecimal)
+    // Round to a WHOLE °F only when the hub shows °F AND the ecobee itself is °F-native. A °F-native ecobee uses
+    // whole-°F setpoints whose °C value gets quantized to a tenth, so the °C->°F round-trip adds ~0.1 noise
+    // (80°F -> 26.7°C -> 80.1) — rounding recovers the intended whole number. A °C-native ecobee steps in 0.5°C,
+    // and 0.5°C = 0.9°F EXACTLY, so those tenths (79.7, 72.5) are real, not noise — show them as-is, don't round.
+    if(isF() && state.ecobeeF != false) return (c*9/5+32).setScale(0, java.math.RoundingMode.HALF_UP)
+    return isF()? round1(c*9/5+32) : round1(c) }
 
 // debug: fetch /accessories over the live session and log a compact structural map (for diagnosing unknown models)
 def dumpAccessories(){
@@ -381,6 +392,7 @@ void onCharacteristics(j){
     j.characteristics.each{ vmap["${it.aid}.${it.iid}"]= it.value }
     // ---- thermostat ----
     def g={ iid-> vmap["${TAID}.${iid}"] }
+    if(g(21)!=null) state.ecobeeF = ((g(21) as int)==1)   // ecobee's own display unit (iid21): 1=°F (whole-°F native), 0=°C (0.5°C native) — governs setpoint rounding
     if(g(19)!=null) sendEvent(name:"temperature", value: cToHub(g(19)), unit:"°${isF()?'F':'C'}")
     if(g(24)!=null) sendEvent(name:"humidity", value: g(24) as int, unit:"%")
     if(g(18)!=null) sendEvent(name:"thermostatMode", value: [0:"off",1:"heat",2:"cool",3:"auto"][g(18) as int])

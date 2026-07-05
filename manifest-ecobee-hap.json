@@ -1,11 +1,11 @@
 {
   "packageName": "Ecobee HAP Thermostat (Local)",
   "author": "RamSet",
-  "version": "0.17.1",
-  "releaseNotes": "0.17.1 - Setpoints now display as whole degrees F (was showing a stray tenth like 80.1 for 80). The ecobee is whole-F native but HomeKit only exposes Celsius, so the F->C->F round-trip added ~0.1; setpoints are rounded to recover the intended value. Live temperature keeps its decimal. C users unaffected (0.5 resolution).",
+  "version": "0.17.2",
+  "releaseNotes": "0.17.2 - Setpoint rounding now depends on the ecobee units: a Fahrenheit-native ecobee (whole-F setpoints) still rounds to whole F to remove C round-trip noise, but a Celsius-native ecobee (0.5C steps, which map exactly to .9/.5 tenths of F) now shows those exact tenths instead of rounding them away. Detected via HAP TemperatureDisplayUnits.",
   "category": "Thermostats",
   "tags": "Thermostat, ecobee, HomeKit, HAP, Local, Sensor",
-  "dateReleased": "2026-07-04",
+  "dateReleased": "2026-07-05",
   "drivers": [
     {
       "id": "511b25e3-4ca2-413e-a1f7-351ff50cd3b1",
