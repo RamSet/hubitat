@@ -1,8 +1,8 @@
 {
   "packageName": "Ecobee HAP Thermostat (Local)",
   "author": "RamSet",
-  "version": "0.17.3",
-  "releaseNotes": "0.17.3 - The diag state is hidden when debug logging is off (removed from Current States, not just blanked) so it no longer clutters the device page. Turn on debug logging to see it; it clears when debug turns off or after the 30-min auto-off.",
+  "version": "0.17.4",
+  "releaseNotes": "0.17.4 - customParams (the raw undecoded HAP characteristics diagnostic dump) is now hidden unless debug logging is on, like diag. Everything useful in it is already shown as normal attributes; this de-clutters the device page. Save Preferences with debug off to drop the row.",
   "category": "Thermostats",
   "tags": "Thermostat, ecobee, HomeKit, HAP, Local, Sensor",
   "dateReleased": "2026-07-05",
