@@ -17,12 +17,16 @@
  *   this driver (HPM does it automatically).
  *
  * Author: RamSet
- * Version: 0.17.4
- * Date: 2026-07-05
+ * Version: 0.18.0
+ * Date: 2026-07-06
  *
  * REQUIRES library: RamSet.hapCore (installed automatically by Hubitat Package Manager).
  *
  * Changelog:
+ *  v0.18.0 - Support ecobee door/window SmartSensors (model EBDWC01): they expose contact + motion +
+ *           occupancy + battery, and now get a child device reporting open/closed. Previously only sensors
+ *           with a temperature reading got a child, so these were discovered but never created. (Requires the
+ *           Ecobee HAP Remote Sensor child driver 0.11.0+, which adds the ContactSensor capability.)
  *  v0.17.4 - customParams (the raw undecoded HAP characteristics — a diagnostic dump) is now also hidden
  *           unless debug logging is on, alongside diag. Everything useful in it is already surfaced as
  *           proper attributes; this just de-clutters the device page. Save Preferences with debug off to
@@ -331,7 +335,7 @@ def dumpAccessories(){
 // CSV of "aid.iid" to GET on connect / refresh / keepalive
 String readIds(){
     def ids=[]; TCHARS.keySet().each{ ids << "${TAID}.${it}" }
-    (state.sensors ?: []).each{ s-> [s.temp,s.occ,s.motion,s.batt,s.lowbatt,s.serial,s.name,s.motionSince,s.occSince].each{ if(it!=null) ids << "${s.aid}.${it}" } }
+    (state.sensors ?: []).each{ s-> [s.temp,s.occ,s.motion,s.contact,s.batt,s.lowbatt,s.serial,s.name,s.motionSince,s.occSince].each{ if(it!=null) ids << "${s.aid}.${it}" } }
     return ids.join(",")
 }
 // build the sensor topology from /accessories and create one child per sensor (the thermostat's own sensor + remotes)
@@ -362,13 +366,14 @@ void onAccessories(j){
             if(ts.motion || ts.occ) sensors << ts
             return
         }
-        if(!acc.services.any{ code(it.type)=="8A" }) return   // remote sensor = has TemperatureSensor service
+        if(!acc.services.any{ code(it.type) in ["8A","80","85","86"] }) return   // a sensor = has a temperature, contact, motion, or occupancy service
         def s=[aid:acc.aid]
         acc.services.each{ sv-> def sc=code(sv.type)
             sv.characteristics.each{ c-> def cc=code(c.type)
                 if(sc=="8A" && cc=="11") s.temp=c.iid
                 else if(sc=="86" && cc=="71") s.occ=c.iid
                 else if(sc=="85" && cc=="22") s.motion=c.iid
+                else if(sc=="80" && cc=="6A") s.contact=c.iid   // ContactSensor (door/window SmartSensor EBDWC01): 0=closed, 1=open
                 else if(sc=="96" && cc=="68") s.batt=c.iid
                 else if(sc=="96" && cc=="79") s.lowbatt=c.iid
                 else if(sc=="3E" && cc=="30") s.serial=c.iid
@@ -389,7 +394,7 @@ void onAccessories(j){
 // the event-subscription PUT body (which aid.iid pairs to subscribe to)
 String subscribeBody(){
     def ev=[]; [17,18,19,20,22,23,24,25,65,66,75,76].each{ ev << "{\"aid\":${TAID},\"iid\":${it},\"ev\":true}" }
-    (state.sensors ?: []).each{ s-> [s.temp,s.occ,s.motion,s.batt,s.lowbatt].each{ if(it!=null) ev << "{\"aid\":${s.aid},\"iid\":${it},\"ev\":true}" } }
+    (state.sensors ?: []).each{ s-> [s.temp,s.occ,s.motion,s.contact,s.batt,s.lowbatt].each{ if(it!=null) ev << "{\"aid\":${s.aid},\"iid\":${it},\"ev\":true}" } }
     String b="{\"characteristics\":[${ev.join(',')}]}"
     return "PUT /characteristics HTTP/1.1\r\nHost: ${settings.ip}\r\nContent-Type: application/hap+json\r\nContent-Length: ${b.getBytes('UTF-8').length}\r\nConnection: keep-alive\r\n\r\n"+b
 }
@@ -481,7 +486,7 @@ void onCharacteristics(j){
         String dni="hap-${device.id}-${s.aid}"
         def cd=getChildDevice(dni) ?: getChildDevice("hap-${s.aid}")
         if(!cd){
-            if(val(s.temp)==null && val(s.occ)==null && val(s.motion)==null) return   // need some initial data to create
+            if(val(s.temp)==null && val(s.occ)==null && val(s.motion)==null && val(s.contact)==null) return   // need some initial data to create
             String nm = s.isMain ? "${device.displayName} Sensor" : (val(s.name) ?: "Ecobee Sensor ${s.aid}")
             try{ cd=addChildDevice("RamSet","Ecobee HAP Remote Sensor",dni,[name:nm,label:nm]) }catch(e){ log.warn "child ${s.aid}: ${e}"; return }
         }
@@ -489,6 +494,7 @@ void onCharacteristics(j){
         if(val(s.temp)!=null) cd.sendEvent(name:"temperature", value: cToHub(val(s.temp)), unit:"°${isF()?'F':'C'}")
         if(val(s.occ)!=null) cd.sendEvent(name:"presence", value: ((val(s.occ) as int)>0?"present":"not present"))
         if(val(s.motion)!=null) cd.sendEvent(name:"motion", value: (val(s.motion)?"active":"inactive"))
+        if(val(s.contact)!=null) cd.sendEvent(name:"contact", value: (val(s.contact) as int)==0 ? "closed" : "open")   // HAP ContactSensorState: 0=contact detected (closed), 1=not detected (open)
         if(val(s.batt)!=null) cd.sendEvent(name:"battery", value: val(s.batt) as int, unit:"%")
         else if(s.isMain) cd.sendEvent(name:"battery", value: 100, unit:"%")   // thermostat is wired — report full
         if(val(s.lowbatt)!=null) cd.sendEvent(name:"lowBattery", value: ((val(s.lowbatt) as int)==1?"true":"false"))

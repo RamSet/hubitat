@@ -1,11 +1,11 @@
 {
   "packageName": "Ecobee HAP Thermostat (Local)",
   "author": "RamSet",
-  "version": "0.17.4",
-  "releaseNotes": "0.17.4 - customParams (the raw undecoded HAP characteristics diagnostic dump) is now hidden unless debug logging is on, like diag. Everything useful in it is already shown as normal attributes; this de-clutters the device page. Save Preferences with debug off to drop the row.",
+  "version": "0.18.0",
+  "releaseNotes": "0.18.0 - Support ecobee door/window SmartSensors (EBDWC01): they now get a child device reporting open/closed (contact) plus motion, occupancy and battery. Previously only sensors with a temperature reading got a child. The remote-sensor child also gains the generic Sensor capability so apps that filter by it can select these devices.",
   "category": "Thermostats",
   "tags": "Thermostat, ecobee, HomeKit, HAP, Local, Sensor",
-  "dateReleased": "2026-07-05",
+  "dateReleased": "2026-07-06",
   "drivers": [
     {
       "id": "511b25e3-4ca2-413e-a1f7-351ff50cd3b1",

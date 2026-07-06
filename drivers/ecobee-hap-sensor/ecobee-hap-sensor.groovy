@@ -8,10 +8,14 @@
  *   on its own.
  *
  * Author: RamSet
- * Version: 0.10.0
- * Date: 2026-07-01
+ * Version: 0.11.0
+ * Date: 2026-07-06
  *
  * Changelog:
+ *  v0.11.0 - Added ContactSensor capability so ecobee door/window SmartSensors (model EBDWC01) report
+ *           open/closed. These expose contact + motion + occupancy + battery; the parent now creates a child
+ *           for them (previously only temperature-bearing sensors got a child). Also added the generic
+ *           "Sensor" capability so apps that filter device selection by it can pick these up.
  *  v0.10.0 - Added secondsSinceMotion / secondsSinceOccupancy attributes (an ecobee per-sensor activity
  *           timer read over HAP; the exact semantics are inferred and the value is polled, so it updates
  *           on roughly a 5-minute cadence).
@@ -25,7 +29,7 @@
  *   "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/drivers/ecobee-hap-sensor/ecobee-hap-sensor.groovy",
  *   "description": "Child device for ecobee remote sensors (temperature, occupancy, motion, battery).",
  *   "required": true,
- *   "version": "0.10.0"
+ *   "version": "0.11.0"
  * }
  *
  * Copyright 2026 RamSet
@@ -37,7 +41,9 @@ metadata {
         capability "TemperatureMeasurement"
         capability "MotionSensor"
         capability "PresenceSensor"
+        capability "ContactSensor"
         capability "Battery"
+        capability "Sensor"   // generic tag so apps that filter device selection by "Sensor" can pick these
         attribute "lowBattery", "string"
         attribute "ecobeeId", "string"
         attribute "secondsSinceMotion", "number"      // ecobee vendor timer (inferred): seconds since last motion; polled ~5-min
