@@ -8,10 +8,13 @@
  *   on its own.
  *
  * Author: RamSet
- * Version: 0.11.0
- * Date: 2026-07-06
+ * Version: 0.12.0
+ * Date: 2026-07-07
  *
  * Changelog:
+ *  v0.12.0 - Removed the Battery capability + lowBattery attribute. ecobee SmartSensor battery over HomeKit
+ *           reads 100% / not-low until the sensor dies (confirmed on multiple ecobees) — misleading, not useful.
+ *           The thermostat's alert flags a low/lost sensor reliably. Commented out (not deleted) for easy restore.
  *  v0.11.0 - Added ContactSensor capability so ecobee door/window SmartSensors (model EBDWC01) report
  *           open/closed. These expose contact + motion + occupancy + battery; the parent now creates a child
  *           for them (previously only temperature-bearing sensors got a child). Also added the generic
@@ -29,7 +32,7 @@
  *   "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/drivers/ecobee-hap-sensor/ecobee-hap-sensor.groovy",
  *   "description": "Child device for ecobee remote sensors (temperature, occupancy, motion, battery).",
  *   "required": true,
- *   "version": "0.11.0"
+ *   "version": "0.12.0"
  * }
  *
  * Copyright 2026 RamSet
@@ -42,9 +45,9 @@ metadata {
         capability "MotionSensor"
         capability "PresenceSensor"
         capability "ContactSensor"
-        capability "Battery"
+        // capability "Battery"   // REMOVED (0.12.0): ecobee SmartSensor battery over HAP reads 100% right up until the sensor dies (confirmed on multiple ecobees) — misleading, not informative. The thermostat's alert flags a low/lost sensor reliably. Uncomment (with the parent's battery emits) if a future ecobee firmware reports battery accurately.
         capability "Sensor"   // generic tag so apps that filter device selection by "Sensor" can pick these
-        attribute "lowBattery", "string"
+        // attribute "lowBattery", "string"   // REMOVED with Battery: StatusLowBattery over HAP is also stuck at "not low" until death, same unreliability. Use the thermostat's alert.
         attribute "ecobeeId", "string"
         attribute "secondsSinceMotion", "number"      // ecobee vendor timer (inferred): seconds since last motion; polled ~5-min
         attribute "secondsSinceOccupancy", "number"   // ecobee vendor timer (inferred): seconds since last occupancy; polled ~5-min

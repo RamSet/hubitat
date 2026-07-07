@@ -17,12 +17,16 @@
  *   this driver (HPM does it automatically).
  *
  * Author: RamSet
- * Version: 0.18.0
- * Date: 2026-07-06
+ * Version: 0.18.1
+ * Date: 2026-07-07
  *
  * REQUIRES library: RamSet.hapCore (installed automatically by Hubitat Package Manager).
  *
  * Changelog:
+ *  v0.18.1 - Removed battery reporting from the sensor children. The ecobee reports every SmartSensor's battery
+ *           as 100% (and "not low") over HomeKit right up until it dies — confirmed across multiple ecobees — so
+ *           it was misleading, not useful. Use the thermostat's alert, which reliably flags a low/lost sensor.
+ *           (Commented out, not deleted — easy to restore if a future firmware reports battery accurately.)
  *  v0.18.0 - Support ecobee door/window SmartSensors (model EBDWC01): they expose contact + motion +
  *           occupancy + battery, and now get a child device reporting open/closed. Previously only sensors
  *           with a temperature reading got a child, so these were discovered but never created. (Requires the
@@ -495,9 +499,13 @@ void onCharacteristics(j){
         if(val(s.occ)!=null) cd.sendEvent(name:"presence", value: ((val(s.occ) as int)>0?"present":"not present"))
         if(val(s.motion)!=null) cd.sendEvent(name:"motion", value: (val(s.motion)?"active":"inactive"))
         if(val(s.contact)!=null) cd.sendEvent(name:"contact", value: (val(s.contact) as int)==0 ? "closed" : "open")   // HAP ContactSensorState: 0=contact detected (closed), 1=not detected (open)
-        if(val(s.batt)!=null) cd.sendEvent(name:"battery", value: val(s.batt) as int, unit:"%")
-        else if(s.isMain) cd.sendEvent(name:"battery", value: 100, unit:"%")   // thermostat is wired — report full
-        if(val(s.lowbatt)!=null) cd.sendEvent(name:"lowBattery", value: ((val(s.lowbatt) as int)==1?"true":"false"))
+        // Battery reporting REMOVED (0.18.1): ecobee SmartSensors report BatteryLevel=100 / StatusLowBattery=not-low
+        // over HAP right up until the sensor dies — confirmed on multiple ecobees — so the value is misleading, not
+        // informative. The thermostat's alert (thermostatAlert/alertActive) flags a low/lost sensor reliably instead.
+        // Re-enable these three emits together with the child's Battery capability if a future firmware reports it accurately.
+        // if(val(s.batt)!=null) cd.sendEvent(name:"battery", value: val(s.batt) as int, unit:"%")
+        // else if(s.isMain) cd.sendEvent(name:"battery", value: 100, unit:"%")   // thermostat is wired — report full
+        // if(val(s.lowbatt)!=null) cd.sendEvent(name:"lowBattery", value: ((val(s.lowbatt) as int)==1?"true":"false"))
         if(val(s.motionSince)!=null) cd.sendEvent(name:"secondsSinceMotion", value: val(s.motionSince) as int, unit:"s")   // ecobee vendor timer (inferred); polled, ~5-min granularity
         if(val(s.occSince)!=null) cd.sendEvent(name:"secondsSinceOccupancy", value: val(s.occSince) as int, unit:"s")
     }

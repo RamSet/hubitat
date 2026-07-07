@@ -1,11 +1,11 @@
 {
   "packageName": "Ecobee HAP Thermostat (Local)",
   "author": "RamSet",
-  "version": "0.18.0",
-  "releaseNotes": "0.18.0 - Support ecobee door/window SmartSensors (EBDWC01): they now get a child device reporting open/closed (contact) plus motion, occupancy and battery. Previously only sensors with a temperature reading got a child. The remote-sensor child also gains the generic Sensor capability so apps that filter by it can select these devices.",
+  "version": "0.18.1",
+  "releaseNotes": "0.18.1 - Removed battery reporting from the sensor children. ecobee reports every SmartSensor battery as 100%/not-low over HomeKit right up until it dies (confirmed on multiple ecobees), so it was misleading. Use the thermostat alert, which reliably flags a low/lost sensor. Commented out, not deleted.",
   "category": "Thermostats",
   "tags": "Thermostat, ecobee, HomeKit, HAP, Local, Sensor",
-  "dateReleased": "2026-07-06",
+  "dateReleased": "2026-07-07",
   "drivers": [
     {
       "id": "511b25e3-4ca2-413e-a1f7-351ff50cd3b1",
