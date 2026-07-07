@@ -1,8 +1,8 @@
 {
   "packageName": "Ecobee HAP Thermostat (Local)",
   "author": "RamSet",
-  "version": "0.18.1",
-  "releaseNotes": "0.18.1 - Removed battery reporting from the sensor children. ecobee reports every SmartSensor battery as 100%/not-low over HomeKit right up until it dies (confirmed on multiple ecobees), so it was misleading. Use the thermostat alert, which reliably flags a low/lost sensor. Commented out, not deleted.",
+  "version": "0.18.2",
+  "releaseNotes": "0.18.2 - Clears the removed battery/lowBattery readings off existing sensor children on the next discovery (Save Preferences), so the stale 100% from older versions does not linger. Pairs with 0.18.1, which removed the unreliable battery reporting.",
   "category": "Thermostats",
   "tags": "Thermostat, ecobee, HomeKit, HAP, Local, Sensor",
   "dateReleased": "2026-07-07",

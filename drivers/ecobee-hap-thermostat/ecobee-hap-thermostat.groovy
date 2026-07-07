@@ -17,12 +17,14 @@
  *   this driver (HPM does it automatically).
  *
  * Author: RamSet
- * Version: 0.18.1
+ * Version: 0.18.2
  * Date: 2026-07-07
  *
  * REQUIRES library: RamSet.hapCore (installed automatically by Hubitat Package Manager).
  *
  * Changelog:
+ *  v0.18.2 - Clears the now-removed battery/lowBattery readings off existing sensor children on the next
+ *           discovery (Save Preferences), so the stale value from older versions doesn't linger.
  *  v0.18.1 - Removed battery reporting from the sensor children. The ecobee reports every SmartSensor's battery
  *           as 100% (and "not low") over HomeKit right up until it dies — confirmed across multiple ecobees — so
  *           it was misleading, not useful. Use the thermostat's alert, which reliably flags a low/lost sensor.
@@ -390,6 +392,8 @@ void onAccessories(j){
     }
     state.sensors=sensors
     state.services=true   // mark discovery complete so the library goes straight to the live session on reconnect (its gate is state.services==null ? discover : live)
+    // battery reporting was removed (unreliable on ecobee SmartSensors) — clear any stale battery/lowBattery readings left on existing children by older versions
+    getChildDevices()?.each{ cd-> cd.deleteCurrentState("battery"); cd.deleteCurrentState("lowBattery") }
     if(sensors.isEmpty())
         logInfo "HAP: this thermostat has no built-in occupancy/motion sensor and no remote sensors — no sensor child device is created (this is normal, e.g. ecobee3 lite)"
     else
