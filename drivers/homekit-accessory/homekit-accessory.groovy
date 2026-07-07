@@ -18,9 +18,11 @@
  *   Contact/Motion/Occupancy/Temperature/Humidity/Light sensors, Battery. Unmapped -> Dump Accessories.
  *
  * Author: RamSet
- * Version: 0.11.0
+ * Version: 0.12.0
  *
  * Changelog:
+ *  v0.12.0 - SecuritySystem (HAP type 7E) support: a "HomeKit HAP Security System" child exposing arm state
+ *           (disarmed/home/away/night/triggered) with armHome/armAway/armNight/disarm — e.g. a Eufy Homebase.
  *  v0.11.0 - Pair accessories that have NO printed setup code (dynamic / QR-only codes — Eufy Homebase,
  *           Nanoleaf, etc.): paste the HomeKit QR payload (X-HM://…) in the new field and the 8-digit setup
  *           code is decoded from it automatically. (The code is a shared secret and can't be read off the
@@ -84,7 +86,7 @@
  *   "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/drivers/homekit-accessory/homekit-accessory.groovy",
  *   "description": "Imports a LAN HomeKit accessory into Hubitat: pairs, discovers services, auto-creates child devices, live updates.",
  *   "required": true,
- *   "version": "0.11.0"
+ *   "version": "0.12.0"
  * }
  *
  * Copyright 2026 RamSet — Apache License 2.0, provided as-is, no warranty.
@@ -142,6 +144,7 @@ metadata {
     "B7": [name:"Fan",                driver:"HomeKit HAP Fan"],                 // Fan v2
     "96": [name:"Battery",            driver:"HomeKit HAP Battery"],             // BatteryService
     "4A": [name:"Thermostat",         driver:"HomeKit HAP Thermostat"],          // Thermostat (generic; ecobee has its own rich driver)
+    "7E": [name:"Security System",    driver:"HomeKit HAP Security System"],     // SecuritySystem (home/away/night arm state)
     "41": [name:"Garage Door",        driver:"HomeKit HAP Garage Door"],         // GarageDoorOpener
 ]
 // per-service characteristic of interest: HAP char code -> logical key
@@ -161,6 +164,7 @@ metadata {
     "B7": ["B0":"active","29":"fanSpeed"],                                  // Active, RotationSpeed
     "96": ["68":"batteryLevel","79":"lowBattery"],                         // BatteryLevel, StatusLowBattery
     "4A": ["33":"tMode","F":"tOpState","35":"tSetpoint","D":"tCoolSet","12":"tHeatSet","11":"temperature","10":"humidity"], // Target/CurrentHeatingCoolingState, Target/Cooling/HeatingThreshold temps, temp, humidity
+    "7E": ["66":"secCurrent","67":"secTarget"],                            // SecuritySystemCurrentState (RO), SecuritySystemTargetState (RW)
     "41": ["E":"doorCurrent","32":"doorTarget","24":"obstruction"],        // CurrentDoorState, TargetDoorState, ObstructionDetected
 ]
 @Field static String NAME_SVC = "3E"   // AccessoryInformation
@@ -334,6 +338,8 @@ void onCharacteristics(j){
                 case "tHeatSet":    cd.sendEvent(name:"heatingSetpoint", value: cToHub(v)); break
                 case "doorCurrent": cd.sendEvent(name:"door",        value: ([0:"open",1:"closed",2:"opening",3:"closing",4:"unknown"][v as int] ?: "unknown")); break
                 case "doorTarget":  break   // CurrentDoorState is authoritative; TargetDoorState is only used for write-back
+                case "secCurrent":  cd.sendEvent(name:"securitySystem", value: ([0:"armed home",1:"armed away",2:"armed night",3:"disarmed",4:"triggered"][v as int] ?: "unknown")); cd.sendEvent(name:"alarmState", value: ((v as int)==4 ? "triggered":"clear")); break
+                case "secTarget":   break   // CurrentState is authoritative; TargetState is only used for write-back
                 case "obstruction": cd.sendEvent(name:"obstruction", value: (v ? "obstructed":"clear")); break
             }
         }
@@ -387,6 +393,11 @@ def componentUnlock(cd){ writeKey(cd,"lockTarget",0); cd.sendEvent(name:"lock", 
 def componentSetPosition(cd, pos){ int p=Math.max(0,Math.min(100,pos as int)); writeKey(cd,"posTarget",p); cd.sendEvent(name:"position", value:p) }
 // FanControl named speed
 def componentSetSpeed(cd, speed){ String sp=speed?.toString(); int p=speedToPct(sp); writeKey(cd,"fanSpeed",p); cd.sendEvent(name:"speed", value:sp); cd.sendEvent(name:"level", value:p) }
+// SecuritySystem: TargetState 0=StayArm(home), 1=AwayArm(away), 2=NightArm, 3=Disarm
+def componentArmHome(cd){  writeKey(cd,"secTarget",0); cd.sendEvent(name:"securitySystem", value:"armed home") }
+def componentArmAway(cd){  writeKey(cd,"secTarget",1); cd.sendEvent(name:"securitySystem", value:"armed away") }
+def componentArmNight(cd){ writeKey(cd,"secTarget",2); cd.sendEvent(name:"securitySystem", value:"armed night") }
+def componentDisarm(cd){   writeKey(cd,"secTarget",3); cd.sendEvent(name:"securitySystem", value:"disarmed") }
 // open/close is shared: GarageDoorOpener writes TargetDoorState (0=open,1=closed); WindowShade writes TargetPosition (100=open,0=closed)
 def componentOpen(cd){ def s=svcOf(cd)
     if(s?.chars?.doorTarget!=null){ writeChar(s.aid, s.chars.doorTarget as int, 0); cd.sendEvent(name:"door", value:"opening") }

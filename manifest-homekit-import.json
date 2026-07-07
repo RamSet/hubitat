@@ -1,8 +1,8 @@
 {
   "packageName": "HomeKit Import (Local)",
   "author": "RamSet",
-  "version": "0.9.6",
-  "releaseNotes": "0.9.6 - Pair accessories that have no printed setup code (dynamic / QR-only codes like Eufy Homebase or Nanoleaf): paste the HomeKit QR payload (X-HM://\u2026) into the new field on the device and the 8-digit setup code is decoded from it automatically. Scan the maker app's HomeKit QR with a generic QR reader to get the X-HM://\u2026 text.",
+  "version": "0.9.7",
+  "releaseNotes": "0.9.7 - Adds SecuritySystem support: a HomeKit accessory's home/away/night arm state (e.g. a Eufy Homebase security bridge) now imports as a 'HomeKit HAP Security System' device with armHome/armAway/armNight/disarm and a live securitySystem status. Import the new child driver (or reinstall the package) to use it.",
   "category": "Integrations",
   "tags": "HomeKit, HAP, Local, Import, No Cloud",
   "dateReleased": "2026-07-07",
@@ -134,6 +134,14 @@
       "name": "HomeKit HAP Window Shade",
       "namespace": "RamSet",
       "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/drivers/homekit-window-shade/homekit-window-shade.groovy",
+      "required": true,
+      "oauth": false
+    },
+    {
+      "id": "f01e3bb2-430f-4723-883b-3846d73afa53",
+      "name": "HomeKit HAP Security System",
+      "namespace": "RamSet",
+      "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/drivers/homekit-security-system/homekit-security-system.groovy",
       "required": true,
       "oauth": false
     }
