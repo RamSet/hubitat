@@ -1,11 +1,11 @@
 {
   "packageName": "HomeKit Import (Local)",
   "author": "RamSet",
-  "version": "0.9.5",
-  "releaseNotes": "0.9.5 - Auto-recover from IP changes: if a HomeKit accessory gets a new DHCP address, the driver finds it on the network by its HomeKit id and updates the IP automatically (a DHCP reservation is still recommended). Also restores plain-English pairing error messages.",
+  "version": "0.9.6",
+  "releaseNotes": "0.9.6 - Pair accessories that have no printed setup code (dynamic / QR-only codes like Eufy Homebase or Nanoleaf): paste the HomeKit QR payload (X-HM://\u2026) into the new field on the device and the 8-digit setup code is decoded from it automatically. Scan the maker app's HomeKit QR with a generic QR reader to get the X-HM://\u2026 text.",
   "category": "Integrations",
   "tags": "HomeKit, HAP, Local, Import, No Cloud",
-  "dateReleased": "2026-07-02",
+  "dateReleased": "2026-07-07",
   "minimumHEVersion": "2.3.0",
   "drivers": [
     {

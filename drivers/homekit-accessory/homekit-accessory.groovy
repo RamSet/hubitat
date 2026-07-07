@@ -18,9 +18,13 @@
  *   Contact/Motion/Occupancy/Temperature/Humidity/Light sensors, Battery. Unmapped -> Dump Accessories.
  *
  * Author: RamSet
- * Version: 0.10.1
+ * Version: 0.11.0
  *
  * Changelog:
+ *  v0.11.0 - Pair accessories that have NO printed setup code (dynamic / QR-only codes — Eufy Homebase,
+ *           Nanoleaf, etc.): paste the HomeKit QR payload (X-HM://…) in the new field and the 8-digit setup
+ *           code is decoded from it automatically. (The code is a shared secret and can't be read off the
+ *           network; scanning the maker app's HomeKit QR with a generic QR reader gives the X-HM://… text.)
  *  v0.10.1 - Generic (unmapped) children are now self-identifying: their name carries the HAP service
  *           type, e.g. "<name> [HAP svc 8C]", so multiple unmapped services on one accessory are
  *           distinct and the type to map is visible at a glance. The tag is also back-filled onto
@@ -80,7 +84,7 @@
  *   "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/drivers/homekit-accessory/homekit-accessory.groovy",
  *   "description": "Imports a LAN HomeKit accessory into Hubitat: pairs, discovers services, auto-creates child devices, live updates.",
  *   "required": true,
- *   "version": "0.10.1"
+ *   "version": "0.11.0"
  * }
  *
  * Copyright 2026 RamSet — Apache License 2.0, provided as-is, no warranty.
@@ -110,6 +114,7 @@ metadata {
         input "ip", "string", title: "Accessory IP address", required: true
         if (!(state.paired==true || settings?.iosLtsk)) {   // settings is null at code-save time -> MUST use safe-nav
             input "setupCode", "string", title: "HomeKit setup code — 8 digits, no dashes (e.g. 12345678). Enter and Save to pair.", required: false
+            input "setupPayload", "string", title: "…or paste the HomeKit QR payload (X-HM://…). For accessories with no printed code / a dynamic code (Eufy Homebase, Nanoleaf, etc.): open the maker app's 'Add to HomeKit' screen, scan the QR with any generic QR reader to get the X-HM://… text, and paste it here — the setup code is decoded from it automatically.", required: false
         }
         input "sessionMode", "enum", title: "Connection mode", options: ["Persistent (event push)","On-demand (poll)"], defaultValue: "Persistent (event push)",
               description: "Persistent = instant updates via a held session (best for well-behaved accessories). On-demand = connect only to read/write + poll (use for flaky accessories like Meross that hard-close the connection)."
@@ -171,8 +176,27 @@ def updated(){
     state.live=false; state.diag=[]; state.connTry=0; state.mdnsTries=0; state.connInFlight=null; state.vtry=0; state.wretry=0
     if(settings.debugLog) sendEvent(name:"diag", value:"")
     state.remove("services")   // force fresh /accessories discovery on Save so the child topology rebuilds
+    // If a HomeKit QR payload (X-HM://…) was pasted instead of an 8-digit code, decode it to the setup code.
+    if(settings.setupPayload && !isPaired()){
+        String c = decodeSetupPayload(settings.setupPayload)
+        if(c){ device.updateSetting("setupCode",[value:c,type:"string"]); device.updateSetting("setupPayload",[value:"",type:"string"]); logInfo "HAP: decoded HomeKit QR → setup code ${c[0..2]}-${c[3..4]}-${c[5..7]}" }
+        else log.warn "HAP: couldn't decode that payload — paste the full X-HM://… string from the accessory's HomeKit QR"
+    }
     if(settings.setupCode && !isPaired()){ logInfo "HAP: setup code entered — pairing"; runIn(1,"pair") }
     else if(isPaired()){ runIn(2,"startSession"); runEvery10Minutes("ensureUp") }   // backstop only; verifyWatch backoff is the primary retry
+}
+// Decode a HomeKit setup QR payload (X-HM://<9 base36 chars><setup id>) to the 8-digit setup code. The
+// low 27 bits of the base36 payload are the code. Lets you pair accessories that only expose a QR / a
+// dynamically-generated code (Eufy Homebase, Nanoleaf, etc.) with no printed 8-digit code.
+String decodeSetupPayload(String s){
+    if(!s) return null
+    String p = s.trim().toUpperCase()
+    int i = p.indexOf("X-HM://"); if(i>=0) p = p.substring(i+7)
+    p = p.replaceAll("[^0-9A-Z]","")
+    if(p.length() < 9) return null
+    long v = 0
+    for(int k=0;k<9;k++){ char ch=p.charAt(k); int d = (ch>='0'&&ch<='9') ? (ch-'0') : ((ch>='A'&&ch<='Z') ? (ch-'A'+10) : -1); if(d<0) return null; v = v*36 + d }
+    return String.format("%08d", (v & 0x7FFFFFFL))
 }
 def rediscover(){ state.remove("services"); if(isPaired()) startSession() else log.warn "HAP: not paired" }
 // local-only forget: the accessory is NOT notified (use when it's offline). The slot stays used on the
