@@ -53,7 +53,7 @@
     {
       "name": "HomeKit Import (Local)",
       "category": "Integrations",
-      "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/manifest-homekit-import.json",
+      "location": "https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/manifest-homekit-import.json",
       "description": "Import any LAN/Wi-Fi HomeKit (HAP) accessory into Hubitat \u2014 pair with a setup code and the driver auto-maps the accessory to a Hubitat device. No cloud, no Apple hardware, no Homebridge. Runs on any hub (C5/C7/C8)."
     }
   ]

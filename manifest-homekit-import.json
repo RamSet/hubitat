@@ -12,7 +12,7 @@
       "id": "5c0663bb-47ab-4c59-953a-96c2e94d5ec5",
       "name": "HomeKit HAP Accessory",
       "namespace": "RamSet",
-      "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/drivers/homekit-accessory/homekit-accessory.groovy",
+      "location": "https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/drivers/homekit-accessory/homekit-accessory.groovy",
       "required": true,
       "oauth": false,
       "primary": true
@@ -21,7 +21,7 @@
       "id": "d11b412e-6c1f-4d23-95ce-8089f1152be3",
       "name": "HomeKit HAP Battery",
       "namespace": "RamSet",
-      "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/drivers/homekit-battery/homekit-battery.groovy",
+      "location": "https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/drivers/homekit-battery/homekit-battery.groovy",
       "required": true,
       "oauth": false
     },
@@ -29,7 +29,7 @@
       "id": "d2086a69-cb53-4ecc-96e4-059213eabd17",
       "name": "HomeKit HAP Contact Sensor",
       "namespace": "RamSet",
-      "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/drivers/homekit-contact-sensor/homekit-contact-sensor.groovy",
+      "location": "https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/drivers/homekit-contact-sensor/homekit-contact-sensor.groovy",
       "required": true,
       "oauth": false
     },
@@ -37,7 +37,7 @@
       "id": "3c0540a1-8d02-414e-89f0-2ab59e6195d6",
       "name": "HomeKit HAP Fan",
       "namespace": "RamSet",
-      "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/drivers/homekit-fan/homekit-fan.groovy",
+      "location": "https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/drivers/homekit-fan/homekit-fan.groovy",
       "required": true,
       "oauth": false
     },
@@ -45,7 +45,7 @@
       "id": "d3bc5214-4b7f-44f5-9697-1f028d3edcbc",
       "name": "HomeKit HAP Garage Door",
       "namespace": "RamSet",
-      "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/drivers/homekit-garage-door/homekit-garage-door.groovy",
+      "location": "https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/drivers/homekit-garage-door/homekit-garage-door.groovy",
       "required": true,
       "oauth": false
     },
@@ -53,7 +53,7 @@
       "id": "e00ec420-6548-4e99-a569-883af0941cc8",
       "name": "HomeKit HAP Generic",
       "namespace": "RamSet",
-      "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/drivers/homekit-generic/homekit-generic.groovy",
+      "location": "https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/drivers/homekit-generic/homekit-generic.groovy",
       "required": true,
       "oauth": false
     },
@@ -61,7 +61,7 @@
       "id": "fccf7ced-a1c0-4246-81d1-ebb6ba9db5be",
       "name": "HomeKit HAP Humidity Sensor",
       "namespace": "RamSet",
-      "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/drivers/homekit-humidity-sensor/homekit-humidity-sensor.groovy",
+      "location": "https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/drivers/homekit-humidity-sensor/homekit-humidity-sensor.groovy",
       "required": true,
       "oauth": false
     },
@@ -69,7 +69,7 @@
       "id": "055e350b-f5d3-4a04-acc0-a1fcd85d524c",
       "name": "HomeKit HAP Light",
       "namespace": "RamSet",
-      "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/drivers/homekit-light/homekit-light.groovy",
+      "location": "https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/drivers/homekit-light/homekit-light.groovy",
       "required": true,
       "oauth": false
     },
@@ -77,7 +77,7 @@
       "id": "cf9d5cbb-0177-4e5b-90b5-898e4f486365",
       "name": "HomeKit HAP Light Sensor",
       "namespace": "RamSet",
-      "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/drivers/homekit-light-sensor/homekit-light-sensor.groovy",
+      "location": "https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/drivers/homekit-light-sensor/homekit-light-sensor.groovy",
       "required": true,
       "oauth": false
     },
@@ -85,7 +85,7 @@
       "id": "48d0f33c-0800-4b42-a41d-1a470e4a121d",
       "name": "HomeKit HAP Lock",
       "namespace": "RamSet",
-      "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/drivers/homekit-lock/homekit-lock.groovy",
+      "location": "https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/drivers/homekit-lock/homekit-lock.groovy",
       "required": true,
       "oauth": false
     },
@@ -93,7 +93,7 @@
       "id": "9d6ae549-b97b-477d-9762-468424952106",
       "name": "HomeKit HAP Motion Sensor",
       "namespace": "RamSet",
-      "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/drivers/homekit-motion-sensor/homekit-motion-sensor.groovy",
+      "location": "https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/drivers/homekit-motion-sensor/homekit-motion-sensor.groovy",
       "required": true,
       "oauth": false
     },
@@ -101,7 +101,7 @@
       "id": "861da76f-4cac-4ae0-a0b5-be1610ae0cf0",
       "name": "HomeKit HAP Occupancy Sensor",
       "namespace": "RamSet",
-      "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/drivers/homekit-occupancy-sensor/homekit-occupancy-sensor.groovy",
+      "location": "https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/drivers/homekit-occupancy-sensor/homekit-occupancy-sensor.groovy",
       "required": true,
       "oauth": false
     },
@@ -109,7 +109,7 @@
       "id": "cd49f120-e397-4c1e-849d-9bcaabc63fb3",
       "name": "HomeKit HAP Switch",
       "namespace": "RamSet",
-      "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/drivers/homekit-switch/homekit-switch.groovy",
+      "location": "https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/drivers/homekit-switch/homekit-switch.groovy",
       "required": true,
       "oauth": false
     },
@@ -117,7 +117,7 @@
       "id": "1204f446-6168-41c9-a2b7-4eeab8597ec5",
       "name": "HomeKit HAP Temperature Sensor",
       "namespace": "RamSet",
-      "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/drivers/homekit-temperature-sensor/homekit-temperature-sensor.groovy",
+      "location": "https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/drivers/homekit-temperature-sensor/homekit-temperature-sensor.groovy",
       "required": true,
       "oauth": false
     },
@@ -125,7 +125,7 @@
       "id": "0b6c8cef-60f6-4913-84b7-1574aeb3d70f",
       "name": "HomeKit HAP Thermostat",
       "namespace": "RamSet",
-      "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/drivers/homekit-thermostat/homekit-thermostat.groovy",
+      "location": "https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/drivers/homekit-thermostat/homekit-thermostat.groovy",
       "required": true,
       "oauth": false
     },
@@ -133,7 +133,7 @@
       "id": "02326ee2-54d6-43a5-bf24-a6d2c59f20a4",
       "name": "HomeKit HAP Window Shade",
       "namespace": "RamSet",
-      "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/drivers/homekit-window-shade/homekit-window-shade.groovy",
+      "location": "https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/drivers/homekit-window-shade/homekit-window-shade.groovy",
       "required": true,
       "oauth": false
     },
@@ -141,7 +141,7 @@
       "id": "f01e3bb2-430f-4723-883b-3846d73afa53",
       "name": "HomeKit HAP Security System",
       "namespace": "RamSet",
-      "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/drivers/homekit-security-system/homekit-security-system.groovy",
+      "location": "https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/drivers/homekit-security-system/homekit-security-system.groovy",
       "required": true,
       "oauth": false
     }
@@ -150,7 +150,7 @@
     {
       "id": "d72d39f0-cdb6-484d-b01f-008b1f0371dd",
       "name": "RamSet HAP Core",
-      "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/bundles/hapCore.zip",
+      "location": "https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/bundles/hapCore.zip",
       "required": true
     }
   ]
