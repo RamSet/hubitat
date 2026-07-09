@@ -18,9 +18,14 @@
  *   Contact/Motion/Occupancy/Temperature/Humidity/Light sensors, Battery. Unmapped -> Dump Accessories.
  *
  * Author: RamSet
- * Version: 0.12.0
+ * Version: 0.13.0
  *
  * Changelog:
+ *  v0.13.0 - Persistent-mode safety refresh (new "Safety refresh (seconds)" preference, default 120s): if the
+ *           held event session goes silent for the window, the driver reconnects and re-reads every
+ *           characteristic, so state no longer goes stale when the session silently dies overnight. Set it
+ *           to e.g. 30 for a near-real-time auto-refresh, or 0 to disable. Recovery is a reconnect, never a
+ *           bare GET (which is what drops cheap chips like Meross). Requires hapCore ≥ 0.10.1.
  *  v0.12.0 - SecuritySystem (HAP type 7E) support: a "HomeKit HAP Security System" child exposing arm state
  *           (disarmed/home/away/night/triggered) with armHome/armAway/armNight/disarm — e.g. a Eufy Homebase.
  *  v0.11.0 - Pair accessories that have NO printed setup code (dynamic / QR-only codes — Eufy Homebase,
@@ -83,10 +88,10 @@
  *   "package": "HomeKit Import",
  *   "namespace": "RamSet",
  *   "author": "RamSet",
- *   "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/drivers/homekit-accessory/homekit-accessory.groovy",
+ *   "location": "https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/drivers/homekit-accessory/homekit-accessory.groovy",
  *   "description": "Imports a LAN HomeKit accessory into Hubitat: pairs, discovers services, auto-creates child devices, live updates.",
  *   "required": true,
- *   "version": "0.12.0"
+ *   "version": "0.13.0"
  * }
  *
  * Copyright 2026 RamSet — Apache License 2.0, provided as-is, no warranty.
@@ -97,7 +102,7 @@
 import groovy.transform.Field
 
 metadata {
-    definition(name: "HomeKit HAP Accessory", namespace: "RamSet", author: "RamSet", importUrl: "https://raw.githubusercontent.com/RamSet/hubitat/main/drivers/homekit-accessory/homekit-accessory.groovy") {
+    definition(name: "HomeKit HAP Accessory", namespace: "RamSet", author: "RamSet", importUrl: "https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/drivers/homekit-accessory/homekit-accessory.groovy") {
         capability "Refresh"
         command "pair"
         command "unpair"            // HAP RemovePairing — cleanly release this accessory (like a Z-Wave exclude), then remove its children
@@ -121,6 +126,7 @@ metadata {
         input "sessionMode", "enum", title: "Connection mode", options: ["Persistent (event push)","On-demand (poll)"], defaultValue: "Persistent (event push)",
               description: "Persistent = instant updates via a held session (best for well-behaved accessories). On-demand = connect only to read/write + poll (use for flaky accessories like Meross that hard-close the connection)."
         input "pollMins", "number", title: "Poll interval (minutes) — On-demand mode only", defaultValue: 5
+        input "safetyRefreshSecs", "number", title: "Safety refresh (seconds) — Persistent mode only: reconnect & re-read every characteristic if no update arrives within this window (0 = off, min 20). Keeps state fresh when the event session silently dies (e.g. overnight).", defaultValue: 120
         input "infoLog", "bool", title: "Enable info logging", defaultValue: true
         input "debugLog", "bool", title: "Enable debug logging", defaultValue: false
     }
