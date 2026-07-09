@@ -66,7 +66,7 @@ library(
     description: "HomeKit Accessory Protocol (HAP) controller engine: pair-setup/verify, ChaCha20 session, X25519/Ed25519/SRP6a, TLV8, mDNS, /accessories + /characteristics.",
     name: "hapCore",
     namespace: "RamSet",
-    importUrl: "https://raw.githubusercontent.com/RamSet/hubitat/main/libraries/hap-core/hap-core.groovy",
+    importUrl: "https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/libraries/hap-core/hap-core.groovy",
     documentationLink: "https://github.com/RamSet/hubitat"
 )
 
