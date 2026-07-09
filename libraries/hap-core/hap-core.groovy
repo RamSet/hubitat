@@ -24,9 +24,15 @@
  * Include in a driver with:  #include RamSet.hapCore
  *
  * Author: RamSet
- * Version: 0.10.0
+ * Version: 0.10.1
  *
  * Changelog:
+ *  v0.10.1 - Persistent-mode SAFETY REFRESH: the live watchdog now reconnects (re-subscribe + fresh read of
+ *            every characteristic) whenever no frame has arrived within a configurable window
+ *            (settings.safetyRefreshSecs, default 120s, floor 20s; 0 = off). Silence-gated, so a live event
+ *            stream keeps it quiet, but an idle accessory (garage door with nothing changing) refreshes every
+ *            window — fixing state that went stale overnight when the event session silently died. Still no
+ *            bare GET on the held session (that's what drops cheap chips); recovery is always a reconnect.
  *  v0.10.0 - Auto-follow IP: if the accessory stops answering at its saved IP (DHCP reassigned it), browse
  *            the subnet via multicast mDNS, match by the accessory's HomeKit id (accPairingId), update the IP,
  *            and reconnect — best-effort; a DHCP reservation is still the reliable fix. Also RESTORED pairErr
@@ -99,6 +105,12 @@ boolean isPaired(){ return (state.paired==true || settings?.iosLtsk) ? true : fa
 // Meross MSG100 drops it ~every 45s regardless of traffic, which makes a persistent session impossible).
 boolean onDemand(){ return settings?.sessionMode=="On-demand (poll)" }
 int pollSecs(){ return Math.max(1,(settings?.pollMins ?: 5) as int)*60 }
+// Persistent-mode safety refresh: if no frame has arrived within this window, RECONNECT (re-subscribe +
+// fresh read of every characteristic) instead of doing a bare GET — a GET on the held session is what makes
+// cheap chips (Meross) drop the link. 0 = off (fall back to the long SILENCE_RECONNECT_SEC watchdog).
+// Floored at 20s: each reconnect is a full pair-verify handshake (hub CPU) on the accessory's single slot.
+int safetySecs(){ def v=settings?.safetyRefreshSecs; if(v==null) return 120; int s=(v as int); return s<=0 ? 0 : Math.max(20,s) }
+int kaEvery(){ int w=safetySecs(); return w>0 ? w : KEEPALIVE_SEC }
 
 // AccessoryInformation (HomeKit service 3E) -> logical key. Universal metadata present on every accessory;
 // values come back in the /accessories response, so no extra read is needed. identifyIid holds the iid of
@@ -577,7 +589,7 @@ void doM4(Map tv){
         state.live=true; state.vtry=0; state.kaMiss=0; state.connInFlight=null; unschedule("verifyWatch")
         sendEvent(name:"hapStatus", value:"live"); logInfo "HAP: live session up — subscribing to events"
         dlog("session up (live) -> subscribe + get")
-        unschedule("liveKeepalive"); runIn(KEEPALIVE_SEC,"liveKeepalive")   // hold the connection warm (some accessories idle-close fast)
+        unschedule("liveKeepalive"); runIn(kaEvery(),"liveKeepalive")   // hold warm; first safety-refresh check at the configured window
         sendEncrypted(subscribeBody())
         String gids=readIds(); dlog("TX get(connect) ids=${gids.split(',').size()}")
         sendEncrypted("GET /characteristics?id=${gids} HTTP/1.1\r\nHost: ${settings.ip}\r\n\r\n")
@@ -648,19 +660,23 @@ def verifyWatch(){
         runIn(b,"startLive")
     }
 }
-// PURE LISTEN (like a real HomeKit controller): we NEVER poll. The ev:true subscription delivers
-// real-time updates; polling (GET /characteristics) is exactly what makes cheap chips drop the session,
-// so we don't do it at all. This watchdog only RECONNECTS (gentle, not a poll) if the link has been
-// totally silent for a long time — recovering a silently-dead connection without antagonising the device.
-// Active accessories send events, so this never fires during use; it only refreshes a long-idle session.
+// PURE LISTEN + optional SAFETY REFRESH. We never do a bare GET on the held session (that's what makes cheap
+// chips like Meross drop the link); the ev:true subscription delivers real-time updates. This watchdog only
+// RECONNECTS (re-subscribe + fresh read of every char on connect) when no frame has arrived within the safety
+// window (settings.safetyRefreshSecs, default 120s; 0 = off -> long SILENCE_RECONNECT_SEC fallback). It is
+// silence-gated: a live event stream keeps lastRx fresh so it stays quiet; an idle accessory (e.g. a garage
+// door with nothing changing) sends no events, so it reconnects every window — a gentle periodic auto-refresh.
 def liveKeepalive(){
     if(state.live && state.sess){
-        if((now() - (state.lastRx?:0L)) >= (SILENCE_RECONNECT_SEC*1000L)){
-            log.warn "HAP: silent ${SILENCE_RECONNECT_SEC}s — refreshing session (reconnect, no poll)"
+        int win = safetySecs()
+        long silentMs = now() - (state.lastRx?:0L)
+        long limitMs = (win>0 ? win : SILENCE_RECONNECT_SEC) * 1000L
+        if(silentMs >= limitMs){
+            log.warn "HAP: no update in ${(int)(silentMs/1000)}s — reconnecting to reconcile (re-subscribe + read)"
             state.live=false; unschedule("liveKeepalive"); try{ interfaces.rawSocket.close() }catch(e){}; state.connInFlight=null
             runIn(4,"liveConnect"); return
         }
-        runIn(KEEPALIVE_SEC,"liveKeepalive")
+        runIn(kaEvery(),"liveKeepalive")
     } else { startLive() }
 }
 void processLiveStream(){
