@@ -5,49 +5,49 @@
     {
       "name": "Acuparse Weather Station",
       "category": "Weather",
-      "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/manifest-acuparse.json",
+      "location": "https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/manifest-acuparse.json",
       "description": "Weather driver for polling Acuparse JSON data with capability integration, timestamp parsing, and optional extra fields."
     },
     {
       "name": "Network Monitor Health Check",
       "category": "Monitoring",
-      "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/manifest-networkmonitor.json",
+      "location": "https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/manifest-networkmonitor.json",
       "description": "Network health check driver to monitor device availability via ping and status reporting."
     },
     {
       "name": "Virtual AQI Driver",
       "category": "Virtual Devices",
-      "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/manifest-aqi.json",
+      "location": "https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/manifest-aqi.json",
       "description": "Virtual Air Quality Index (AQI) driver for Hubitat."
     },
     {
       "name": "IKEA Air Quality to Hub Variables",
       "category": "Air Quality",
-      "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/manifest-ikea-aqi.json",
+      "location": "https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/manifest-ikea-aqi.json",
       "description": "Publishes IKEA Vindstyrka (E2112) PM2.5, air quality, temperature, and humidity into Hub Variables for indoor and outdoor sensors."
     },
     {
       "name": "Zooz Sprinkler Scheduler",
       "category": "Irrigation",
-      "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/manifest-zooz-sprinkler.json",
+      "location": "https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/manifest-zooz-sprinkler.json",
       "description": "Fully-local irrigation controller for Zooz ZEN16/ZEN17 relays \u2014 weather-aware scheduling, cycle & soak, moisture, pause-and-resume, and a verified hardware auto-off failsafe."
     },
     {
       "name": "Blinds Dusk Automation",
       "category": "Convenience",
-      "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/manifest-blinds-dusk.json",
+      "location": "https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/manifest-blinds-dusk.json",
       "description": "Lowers a room's blind at dusk, waits for an open window to close first (with an optional delay), and turns on the room light when occupied. One instance per room."
     },
     {
       "name": "Ecobee HAP Thermostat (Local)",
       "category": "Thermostats",
-      "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/manifest-ecobee-hap.json",
+      "location": "https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/manifest-ecobee-hap.json",
       "description": "Control an ecobee thermostat 100% locally over the HomeKit Accessory Protocol (HAP) \u2014 no cloud, no Apple hardware, no bridge. In-driver pairing, mode/setpoints/humidity/operating state, remote room sensors as child devices, and real-time HomeKit event push."
     },
     {
       "name": "Local Ecobee Helpers",
       "category": "Thermostats",
-      "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/manifest-ecobee-helpers.json",
+      "location": "https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/manifest-ecobee-helpers.json",
       "description": "Offline helper apps for the Ecobee HAP Thermostat (Local): per-room vent control, open-contact HVAC pause with notifications, and humidifier control. Add as many helpers as needed under one parent."
     },
     {

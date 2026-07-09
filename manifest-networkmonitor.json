@@ -11,7 +11,7 @@
       "id": "afe3a491-3205-4c31-8997-5db28b45687b",
       "name": "Network Monitor HealthCheck (HTTP)",
       "namespace": "RamSet",
-      "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/drivers/NetworkMonitorHealthCheck/NetworkMonitorHealthCheck.groovy",
+      "location": "https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/drivers/NetworkMonitorHealthCheck/NetworkMonitorHealthCheck.groovy",
       "required": true,
       "oauth": false,
       "description": "Simple network health check driver to monitor device availability using ping and report status."
