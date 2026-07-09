@@ -29,7 +29,7 @@
  *   "package": "Ecobee HAP Thermostat (Local)",
  *   "namespace": "RamSet",
  *   "author": "RamSet",
- *   "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/drivers/ecobee-hap-sensor/ecobee-hap-sensor.groovy",
+ *   "location": "https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/drivers/ecobee-hap-sensor/ecobee-hap-sensor.groovy",
  *   "description": "Child device for ecobee remote sensors (temperature, occupancy, motion, battery).",
  *   "required": true,
  *   "version": "0.12.0"
@@ -40,7 +40,7 @@
  */
 
 metadata {
-    definition(name: "Ecobee HAP Remote Sensor", namespace: "RamSet", author: "RamSet", importUrl: "https://raw.githubusercontent.com/RamSet/hubitat/main/drivers/ecobee-hap-sensor/ecobee-hap-sensor.groovy") {
+    definition(name: "Ecobee HAP Remote Sensor", namespace: "RamSet", author: "RamSet", importUrl: "https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/drivers/ecobee-hap-sensor/ecobee-hap-sensor.groovy") {
         capability "TemperatureMeasurement"
         capability "MotionSensor"
         capability "PresenceSensor"

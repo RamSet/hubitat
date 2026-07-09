@@ -48,7 +48,7 @@ metadata {
         name: "Network Monitor HealthCheck (HTTP)",
         namespace: "RamSet",
         author: "RamSet",
-        importUrl: "https://raw.githubusercontent.com/RamSet/hubitat/main/drivers/NetworkMonitorHealthCheck/NetworkMonitorHealthCheck.groovy"
+        importUrl: "https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/drivers/NetworkMonitorHealthCheck/NetworkMonitorHealthCheck.groovy"
     ) {
         capability "Sensor"
         capability "Actuator"

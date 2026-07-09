@@ -14,7 +14,7 @@
  * Copyright 2026 RamSet — Apache License 2.0, provided as-is, no warranty.
  */
 metadata {
-    definition(name: "HomeKit HAP Lock", namespace: "RamSet", author: "RamSet", importUrl: "https://raw.githubusercontent.com/RamSet/hubitat/main/drivers/homekit-lock/homekit-lock.groovy") {
+    definition(name: "HomeKit HAP Lock", namespace: "RamSet", author: "RamSet", importUrl: "https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/drivers/homekit-lock/homekit-lock.groovy") {
         capability "Lock"
         capability "Battery"
         capability "Refresh"

@@ -32,7 +32,7 @@ definition(
     parent:      "RamSet:Local Ecobee Helpers",
     iconUrl:     "",
     iconX2Url:   "",
-    importUrl:   "https://raw.githubusercontent.com/RamSet/hubitat/main/apps/ecobee-hap-helpers/ecobee-hap-contact-pause-child.groovy"
+    importUrl:   "https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/apps/ecobee-hap-helpers/ecobee-hap-contact-pause-child.groovy"
 )
 
 preferences {

@@ -2,7 +2,7 @@
  *  Virtual Air Quality Sensor - Device Driver for Hubitat Elevation
  *
  *  Driver Location:
- *  https://raw.githubusercontent.com/RamSet/hubitat/main/drivers/VirtualAQIDriver/VirtualAQIDriver.groovy
+ *  https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/drivers/VirtualAQIDriver/VirtualAQIDriver.groovy
  *
  *  HPM Manifest:
  *  https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/manifest-aqi.json
@@ -12,7 +12,7 @@
  */
 
 metadata {
-    definition(name: "Virtual Air Quality (AQI) Driver", namespace: "RamSet", author: "RamSet", importUrl: "https://raw.githubusercontent.com/RamSet/hubitat/main/drivers/VirtualAQIDriver/VirtualAQIDriver.groovy") {
+    definition(name: "Virtual Air Quality (AQI) Driver", namespace: "RamSet", author: "RamSet", importUrl: "https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/drivers/VirtualAQIDriver/VirtualAQIDriver.groovy") {
         capability "Sensor"
         capability "AirQuality"
 

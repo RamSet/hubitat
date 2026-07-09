@@ -16,7 +16,7 @@
  * Copyright 2026 RamSet — Apache License 2.0, provided as-is, no warranty.
  */
 metadata {
-    definition(name: "HomeKit HAP Garage Door", namespace: "RamSet", author: "RamSet", importUrl: "https://raw.githubusercontent.com/RamSet/hubitat/main/drivers/homekit-garage-door/homekit-garage-door.groovy") {
+    definition(name: "HomeKit HAP Garage Door", namespace: "RamSet", author: "RamSet", importUrl: "https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/drivers/homekit-garage-door/homekit-garage-door.groovy") {
         capability "GarageDoorControl"
         capability "Refresh"
         attribute "obstruction", "enum", ["obstructed","clear"]   // HomeKit ObstructionDetected

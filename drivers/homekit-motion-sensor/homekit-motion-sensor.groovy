@@ -13,7 +13,7 @@
  * Copyright 2026 RamSet — Apache License 2.0, provided as-is, no warranty.
  */
 metadata {
-    definition(name: "HomeKit HAP Motion Sensor", namespace: "RamSet", author: "RamSet", importUrl: "https://raw.githubusercontent.com/RamSet/hubitat/main/drivers/homekit-motion-sensor/homekit-motion-sensor.groovy") {
+    definition(name: "HomeKit HAP Motion Sensor", namespace: "RamSet", author: "RamSet", importUrl: "https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/drivers/homekit-motion-sensor/homekit-motion-sensor.groovy") {
         capability "MotionSensor"
         capability "Battery"
         capability "Refresh"

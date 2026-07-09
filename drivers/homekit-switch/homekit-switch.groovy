@@ -13,7 +13,7 @@
  * Copyright 2026 RamSet — Apache License 2.0, provided as-is, no warranty.
  */
 metadata {
-    definition(name: "HomeKit HAP Switch", namespace: "RamSet", author: "RamSet", importUrl: "https://raw.githubusercontent.com/RamSet/hubitat/main/drivers/homekit-switch/homekit-switch.groovy") {
+    definition(name: "HomeKit HAP Switch", namespace: "RamSet", author: "RamSet", importUrl: "https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/drivers/homekit-switch/homekit-switch.groovy") {
         capability "Switch"
         capability "Refresh"
         attribute "manufacturer", "string"

@@ -8,7 +8,7 @@
  *
  *  To update, import the app from this raw URL (copy the line below):
  *
- *      https://raw.githubusercontent.com/RamSet/hubitat/main/apps/blinds-dusk-automation/blinds-dusk-automation.groovy
+ *      https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/apps/blinds-dusk-automation/blinds-dusk-automation.groovy
  *
  *  Steps: open this app in the editor, paste the URL above into the
  *  "Import" dialog, and import. This stub is intentionally non-functional.

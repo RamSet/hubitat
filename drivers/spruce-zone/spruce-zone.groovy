@@ -1,6 +1,6 @@
 /**
  *  Spruce Controller zone child — Hubitat driver
- *  IMPORT URL: https://raw.githubusercontent.com/RamSet/hubitat/main/drivers/spruce-zone/spruce-zone.groovy
+ *  IMPORT URL: https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/drivers/spruce-zone/spruce-zone.groovy
  *
  *  Copyright 2020 PlaidSystems (original; author: NC, 2020)
  *  Licensed under the Apache License, Version 2.0
@@ -19,7 +19,7 @@
 
 metadata {
     definition (name: "Spruce zone", namespace: "plaidsystems", author: "Plaid Systems",
-                importUrl: "https://raw.githubusercontent.com/RamSet/hubitat/main/drivers/spruce-zone/spruce-zone.groovy") {
+                importUrl: "https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/drivers/spruce-zone/spruce-zone.groovy") {
         capability "Actuator"
         capability "Switch"
         capability "Switch Level"

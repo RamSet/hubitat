@@ -1,5 +1,5 @@
 /*
- * IMPORT URL: https://raw.githubusercontent.com/RamSet/hubitat/main/drivers/AeotecMultiSensor6/AeotecMultiSensor6.groovy
+ * IMPORT URL: https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/drivers/AeotecMultiSensor6/AeotecMultiSensor6.groovy
  *
  *  Copyright 2015 SmartThings
  *
@@ -206,7 +206,7 @@
  import groovy.transform.Field
 
 metadata {
-    definition (name: "AeotecMultiSensor6", namespace: "cSteele", author: "cSteele", importUrl: "https://raw.githubusercontent.com/RamSet/hubitat/main/drivers/AeotecMultiSensor6/AeotecMultiSensor6.groovy") {
+    definition (name: "AeotecMultiSensor6", namespace: "cSteele", author: "cSteele", importUrl: "https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/drivers/AeotecMultiSensor6/AeotecMultiSensor6.groovy") {
         capability "Motion Sensor"
         capability "Temperature Measurement"
         capability "Relative Humidity Measurement"

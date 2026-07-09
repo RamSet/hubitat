@@ -1,6 +1,6 @@
 /**
  *  Zooz Sprinkler Scheduler — Hubitat app
- *  IMPORT URL: https://raw.githubusercontent.com/RamSet/hubitat/main/apps/zooz-sprinkler-scheduler/zooz-sprinkler-scheduler.groovy
+ *  IMPORT URL: https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/apps/zooz-sprinkler-scheduler/zooz-sprinkler-scheduler.groovy
  *
  *  Runs sprinkler zones via Zooz ZEN16 (3-relay) or ZEN17 (2-relay) 800LR
  *  multi-relay controllers — or any Hubitat device exposing the Switch
@@ -40,7 +40,7 @@ definition(
     name: "Zooz Sprinkler Scheduler",
     namespace: "ramset",
     author: "RamSet",
-    importUrl: "https://raw.githubusercontent.com/RamSet/hubitat/main/apps/zooz-sprinkler-scheduler/zooz-sprinkler-scheduler.groovy",
+    importUrl: "https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/apps/zooz-sprinkler-scheduler/zooz-sprinkler-scheduler.groovy",
     description: "Sprinkler schedule using Zooz ZEN16 / ZEN17 (or any Switch device) relays — Spruce-style logic, hardware-agnostic",
     category: "Green Living",
     // Resized via images.weserv.nl proxy — 618×618 source PNGs would render
@@ -877,8 +877,8 @@ def hardwarePage() {
         }
         section("Driver options") {
             paragraph "Hubitat's built-in Zooz driver works for the basics (zone child switches), but it does NOT expose setParameter on the parent — so the Hardware Safety push needs jtp10181's Advanced drivers (vendored in this repo):"
-            paragraph "• ZEN16:  https://raw.githubusercontent.com/RamSet/hubitat/main/zooz-zen16-multirelay.groovy\n" +
-                      "• ZEN17:  https://raw.githubusercontent.com/RamSet/hubitat/main/zooz-zen17-universal-relay.groovy\n" +
+            paragraph "• ZEN16:  https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/zooz-zen16-multirelay.groovy\n" +
+                      "• ZEN17:  https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/zooz-zen17-universal-relay.groovy\n" +
                       "(Vendored from jtp10181/Hubitat — upstream: https://github.com/jtp10181/Hubitat/tree/main/Drivers/zooz)"
             input name: "hwSetParamStyle", type: "enum",
                   title: "setParameter argument order",
@@ -1192,7 +1192,7 @@ def aboutPage() {
                       "Author: RamSet<br>" +
                       "License: Apache License, Version 2.0<br>" +
                       "Source: <a href='https://github.com/RamSet/hubitat'>github.com/RamSet/hubitat</a><br>" +
-                      "Import URL: https://raw.githubusercontent.com/RamSet/hubitat/main/apps/zooz-sprinkler-scheduler/zooz-sprinkler-scheduler.groovy"
+                      "Import URL: https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/apps/zooz-sprinkler-scheduler/zooz-sprinkler-scheduler.groovy"
         }
         section("What this is") {
             paragraph "A Hubitat app for running sprinkler zones via Zooz ZEN16 / ZEN17 800LR multi-relay controllers — or any Hubitat device exposing the Switch capability. Hardware-agnostic, multi-instance, with Spruce-style weather adaptation, per-zone moisture-aware watering, restrictions (quiet hours / mode / HSM), pause-and-resume from external sensors, hub-independent hardware watchdog via Z-Wave parameters (model-aware: pushes the right per-relay timers for ZEN16's 3 relays or ZEN17's 2 relays), full external JSON/HTML/iCal API, and granular templated notifications with Pushover support."

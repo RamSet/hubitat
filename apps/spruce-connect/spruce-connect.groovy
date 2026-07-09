@@ -1,6 +1,6 @@
 /**
  *  Spruce Connect — Hubitat cloud-to-cloud app for the WiFi Spruce controller.
- *  IMPORT URL: https://raw.githubusercontent.com/RamSet/hubitat/main/apps/spruce-connect/spruce-connect.groovy
+ *  IMPORT URL: https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/apps/spruce-connect/spruce-connect.groovy
  *
  *  NOTE: this app is only needed for the WiFi Spruce controller
  *  (PS-SPRWIFI16-01). The Zigbee Spruce Controller SST (PS-SPRZ16-01) does
@@ -68,7 +68,7 @@ definition(
     name: "Spruce Connect",
     namespace: "plaidsystems",
     author: "Plaid Systems",
-    importUrl: "https://raw.githubusercontent.com/RamSet/hubitat/main/apps/spruce-connect/spruce-connect.groovy",
+    importUrl: "https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/apps/spruce-connect/spruce-connect.groovy",
     description: "Connect Spruce Controller and Sensors to Hubitat Elevation",
     category: "",
     iconUrl:   "https://raw.githubusercontent.com/hfg-gmuend/openmoji/master/color/618x618/1F332.png",

@@ -18,7 +18,7 @@
  * Copyright 2026 RamSet — Apache License 2.0, provided as-is, no warranty.
  */
 metadata {
-    definition(name: "HomeKit HAP Thermostat", namespace: "RamSet", author: "RamSet", importUrl: "https://raw.githubusercontent.com/RamSet/hubitat/main/drivers/homekit-thermostat/homekit-thermostat.groovy") {
+    definition(name: "HomeKit HAP Thermostat", namespace: "RamSet", author: "RamSet", importUrl: "https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/drivers/homekit-thermostat/homekit-thermostat.groovy") {
         capability "Thermostat"
         capability "TemperatureMeasurement"
         capability "RelativeHumidityMeasurement"

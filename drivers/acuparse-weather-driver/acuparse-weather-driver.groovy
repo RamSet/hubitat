@@ -61,7 +61,7 @@
  *   "package": "Acuparse Weather Station",
  *   "namespace": "RamSet",
  *   "author: "RamSet",
- *   "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/drivers/acuparse-weather-driver/acuparse-weather-driver.groovy",
+ *   "location": "https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/drivers/acuparse-weather-driver/acuparse-weather-driver.groovy",
  *   "description": "Weather driver for polling Acuparse JSON data with capabilities integration and extra field selection.",
  *   "required": true,
  *   "version": "1.3.2"
@@ -72,7 +72,7 @@ import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 
 metadata {
-    definition(name: "Acuparse Weather Station", namespace: "RamSet", author: "RamSet", importUrl: "https://raw.githubusercontent.com/RamSet/hubitat/main/drivers/acuparse-weather-driver/acuparse-weather-driver.groovy") {
+    definition(name: "Acuparse Weather Station", namespace: "RamSet", author: "RamSet", importUrl: "https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/drivers/acuparse-weather-driver/acuparse-weather-driver.groovy") {
         capability "Sensor"
         capability "Polling"
         capability "Refresh"

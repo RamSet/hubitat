@@ -29,7 +29,7 @@ definition(
     category:    "Convenience",
     iconUrl:     "",
     iconX2Url:   "",
-    importUrl:   "https://raw.githubusercontent.com/RamSet/hubitat/main/apps/blinds-dusk-automation/blinds-dusk-automation.groovy"
+    importUrl:   "https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/apps/blinds-dusk-automation/blinds-dusk-automation.groovy"
 )
 
 preferences {

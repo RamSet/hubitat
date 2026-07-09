@@ -91,7 +91,7 @@ metadata {
 		namespace: "jtp10181",
 		author: "Jeff Page (@jtp10181)",
 		singleThreaded: true,
-		importUrl: "https://raw.githubusercontent.com/RamSet/hubitat/main/drivers/zooz-zen16-multirelay/zooz-zen16-multirelay.groovy"
+		importUrl: "https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/drivers/zooz-zen16-multirelay/zooz-zen16-multirelay.groovy"
 	) {
 		capability "Actuator"
 		capability "Switch"

@@ -1,6 +1,6 @@
 /**
  *  Spruce Controller SST — Hubitat driver
- *  IMPORT URL: https://raw.githubusercontent.com/RamSet/hubitat/main/drivers/spruce-controller-sst/spruce-controller-sst.groovy
+ *  IMPORT URL: https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/drivers/spruce-controller-sst/spruce-controller-sst.groovy
  *
  *  Copyright 2020 PlaidSystems (original)
  *  Licensed under the Apache License, Version 2.0
@@ -37,7 +37,7 @@ private def getVersion() { return "v2.72 2026-05" }
 
 metadata {
     definition (name: "Spruce Controller SST", namespace: "plaidsystems", author: "plaidsystems",
-                importUrl: "https://raw.githubusercontent.com/RamSet/hubitat/main/drivers/spruce-controller-sst/spruce-controller-sst.groovy") {
+                importUrl: "https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/drivers/spruce-controller-sst/spruce-controller-sst.groovy") {
         capability "Switch"
         capability "Actuator"
         capability "Water Sensor"

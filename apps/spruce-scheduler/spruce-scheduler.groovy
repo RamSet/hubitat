@@ -1,6 +1,6 @@
  /**
  *  Spruce Scheduler
- *  IMPORT URL: https://raw.githubusercontent.com/RamSet/hubitat/main/apps/spruce-scheduler/spruce-scheduler.groovy
+ *  IMPORT URL: https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/apps/spruce-scheduler/spruce-scheduler.groovy
  *
  *  Copyright 2015 Plaid Systems
  *
@@ -67,7 +67,7 @@ definition(
     name: "Spruce Scheduler",
     namespace: "plaidsystems",
     author: "Plaid Systems",
-    importUrl: "https://raw.githubusercontent.com/RamSet/hubitat/main/apps/spruce-scheduler/spruce-scheduler.groovy",
+    importUrl: "https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/apps/spruce-scheduler/spruce-scheduler.groovy",
     description: "Setup schedules for Spruce irrigation controller",
     category: "Green Living",
     iconUrl:   "https://raw.githubusercontent.com/hfg-gmuend/openmoji/master/color/618x618/1F332.png",

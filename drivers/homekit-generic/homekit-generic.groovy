@@ -18,7 +18,7 @@
  * Copyright 2026 RamSet — Apache License 2.0, provided as-is, no warranty.
  */
 metadata {
-    definition(name: "HomeKit HAP Generic", namespace: "RamSet", author: "RamSet", importUrl: "https://raw.githubusercontent.com/RamSet/hubitat/main/drivers/homekit-generic/homekit-generic.groovy") {
+    definition(name: "HomeKit HAP Generic", namespace: "RamSet", author: "RamSet", importUrl: "https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/drivers/homekit-generic/homekit-generic.groovy") {
         capability "Refresh"
         command "setCharacteristic", [[name:"iid*",type:"NUMBER",description:"characteristic iid (see the 'characteristics' attribute)"],[name:"value*",type:"STRING",description:"number, true/false, or text"]]
         attribute "characteristics", "string"   // JSON of all readable characteristics in this service

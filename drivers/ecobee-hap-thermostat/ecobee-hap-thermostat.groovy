@@ -144,7 +144,7 @@
  *   "package": "Ecobee HAP Thermostat (Local)",
  *   "namespace": "RamSet",
  *   "author": "RamSet",
- *   "location": "https://raw.githubusercontent.com/RamSet/hubitat/main/drivers/ecobee-hap-thermostat/ecobee-hap-thermostat.groovy",
+ *   "location": "https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/drivers/ecobee-hap-thermostat/ecobee-hap-thermostat.groovy",
  *   "description": "Local HAP controller for an ecobee thermostat: mode, setpoints, temperature, humidity, operating state, fan, and remote sensors.",
  *   "required": true,
  *   "version": "0.15.0"
@@ -156,7 +156,7 @@
  */
 
 metadata {
-    definition(name: "Ecobee HAP Thermostat", namespace: "RamSet", author: "RamSet", importUrl: "https://raw.githubusercontent.com/RamSet/hubitat/main/drivers/ecobee-hap-thermostat/ecobee-hap-thermostat.groovy") {
+    definition(name: "Ecobee HAP Thermostat", namespace: "RamSet", author: "RamSet", importUrl: "https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/drivers/ecobee-hap-thermostat/ecobee-hap-thermostat.groovy") {
         capability "Thermostat"
         capability "TemperatureMeasurement"
         capability "RelativeHumidityMeasurement"

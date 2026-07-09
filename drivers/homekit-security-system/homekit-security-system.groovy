@@ -22,7 +22,7 @@
  * Copyright 2026 RamSet — Apache License 2.0, provided as-is, no warranty.
  */
 metadata {
-    definition(name: "HomeKit HAP Security System", namespace: "RamSet", author: "RamSet", importUrl: "https://raw.githubusercontent.com/RamSet/hubitat/main/drivers/homekit-security-system/homekit-security-system.groovy") {
+    definition(name: "HomeKit HAP Security System", namespace: "RamSet", author: "RamSet", importUrl: "https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/drivers/homekit-security-system/homekit-security-system.groovy") {
         capability "Actuator"
         capability "Refresh"
         command "armHome"
