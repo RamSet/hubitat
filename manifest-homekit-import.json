@@ -1,11 +1,11 @@
 {
   "packageName": "HomeKit Import (Local)",
   "author": "RamSet",
-  "version": "0.9.7",
-  "releaseNotes": "0.9.7 - Adds SecuritySystem support: a HomeKit accessory's home/away/night arm state (e.g. a Eufy Homebase security bridge) now imports as a 'HomeKit HAP Security System' device with armHome/armAway/armNight/disarm and a live securitySystem status. Import the new child driver (or reinstall the package) to use it.",
+  "version": "0.9.8",
+  "releaseNotes": "0.9.8 - Persistent-mode Safety Refresh: the accessory driver now has a 'Safety refresh (seconds)' preference (default 120s). If a held HomeKit event session goes silent for that window, the driver reconnects and re-reads every characteristic, so device state no longer goes stale when the session silently dies (e.g. a Meross garage door overnight). Set it to ~30s for near-real-time auto-refresh, or 0 to disable. Includes updated hapCore bundle (0.10.1) — reinstall/repair the package so the library updates too.",
   "category": "Integrations",
   "tags": "HomeKit, HAP, Local, Import, No Cloud",
-  "dateReleased": "2026-07-07",
+  "dateReleased": "2026-07-09",
   "minimumHEVersion": "2.3.0",
   "drivers": [
     {
