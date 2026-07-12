@@ -1,8 +1,8 @@
 {
   "packageName": "Ecobee HAP Thermostat (Local)",
   "author": "RamSet",
-  "version": "0.18.2",
-  "releaseNotes": "0.18.2 - Clears the removed battery/lowBattery readings off existing sensor children on the next discovery (Save Preferences), so the stale 100% from older versions does not linger. Pairs with 0.18.1, which removed the unreliable battery reporting.",
+  "version": "0.18.3",
+  "releaseNotes": "0.18.3 - Quieter logs (hapCore 0.10.2): the occasional 'parse: AEADBadTagException: Tag mismatch' error is an expected, self-healing session re-key that the driver already recovers from automatically. It now logs at warn instead of error, so busy multi-sensor thermostats no longer spam a scary red error in the log. No functional change — the reconnect-for-fresh-keys recovery is unchanged.",
   "category": "Thermostats",
   "tags": "Thermostat, ecobee, HomeKit, HAP, Local, Sensor",
   "dateReleased": "2026-07-07",

@@ -24,9 +24,13 @@
  * Include in a driver with:  #include RamSet.hapCore
  *
  * Author: RamSet
- * Version: 0.10.1
+ * Version: 0.10.2
  *
  * Changelog:
+ *  v0.10.2 - Quiet the expected self-healing desync. An AEADBadTag/Tag-mismatch on the live session is a known
+ *            re-key event the driver already recovers from (reconnect for fresh keys), so it now logs at WARN,
+ *            not ERROR — only genuinely unexpected exceptions log at error. Fixes the frequent scary red
+ *            "parse: AEADBadTagException" spam on busy (multi-sensor) thermostats; behavior is unchanged.
  *  v0.10.1 - Persistent-mode SAFETY REFRESH: the live watchdog now reconnects (re-subscribe + fresh read of
  *            every characteristic) whenever no frame has arrived within a configurable window
  *            (settings.safetyRefreshSecs, default 120s, floor 20s; 0 = off). Silence-gated, so a live event
@@ -556,15 +560,20 @@ def parse(String message){
         else if(state.vstage=="m4"){ doM4(tv) } else { doM2(tv) }
     } else { handleSession() }
   } catch(Throwable e){
-    log.error "parse: ${e}"; rep("ERR parse ${state.op}/${state.vstage}: ${e.class.simpleName}: ${e.message}")
     // A decrypt/tag mismatch means the encrypted session desynced (accessory rebooted or re-keyed under us) —
-    // every subsequent frame will then fail to decrypt, so reconnect NOW (re-runs pair-verify for fresh keys)
-    // instead of waiting out the ~30-min silence watchdog.
-    if(state.live){ String es=e.toString(); if(es.contains("AEADBadTag") || es.contains("Tag mismatch") || es.contains("BadPadding")){
+    // every subsequent frame then fails to decrypt, so reconnect NOW (re-runs pair-verify for fresh keys) instead
+    // of waiting out the ~30-min silence watchdog. This is EXPECTED and self-healing, so it logs at warn, NOT
+    // error — only genuinely unexpected exceptions get error level. (More sensors => more event frames => more
+    // chances to be mid-stream on a re-key, so on busy thermostats this fires often but harmlessly.)
+    String es=e.toString()
+    if(state.live && (es.contains("AEADBadTag") || es.contains("Tag mismatch") || es.contains("BadPadding"))){
         log.warn "HAP: session desynced (decrypt failed) — reconnecting for fresh keys"
+        rep("ERR parse ${state.op}/${state.vstage}: ${e.class.simpleName}: ${e.message}")
         state.live=false; state.sess=false; try{ interfaces.rawSocket.close() }catch(ig){}; state.connInFlight=null
         unschedule("liveKeepalive"); unschedule("kaWatch"); runIn(2,"startLive")
-    } }
+    } else {
+        log.error "parse: ${e}"; rep("ERR parse ${state.op}/${state.vstage}: ${e.class.simpleName}: ${e.message}")
+    }
   }
 }
 void doM2(Map tv){
