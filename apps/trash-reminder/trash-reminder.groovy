@@ -1,24 +1,28 @@
 /**
  *  Trash Reminder
  *
- *  Reminds you to put the bins out, and knows which bin it is when collection alternates
- *  between rubbish and recycling.
+ *  Reminds you to put the bins out, and tells you which bins.
+ *
+ *  Collections are modelled as independent streams sharing a collection day. Each stream
+ *  has its own frequency: rubbish might go out every week while recycling goes out every
+ *  second week, in which case a recycling week means both bins, not one instead of the
+ *  other. Change a frequency and the reminders follow.
  *
  *  This app asks the hub what day it is. It needs no date/time device, nothing to keep
- *  such a device refreshed, and no hub variables to carry the state between rules.
+ *  such a device refreshed, and no hub variables to carry state between rules.
  *
- *  Alternating weeks are worked out from an anchor date — one date you know recycling
- *  was collected — and not from whether the week number is odd. Week numbers are not a
- *  reliable alternator: a 53-week year puts two odd weeks back to back, which silently
- *  inverts the schedule for the following year, and what counts as week 1 depends on
- *  locale.
+ *  A stream that repeats every N weeks is worked out by counting weeks from an anchor
+ *  date — a collection you know happened — and not from whether the week number is odd.
+ *  Week numbers are not a reliable alternator: a 53-week year puts two odd weeks back to
+ *  back, which silently inverts the schedule for the year that follows, and what counts
+ *  as week 1 depends on locale.
  */
 
 definition(
     name:        "Trash Reminder",
     namespace:   "ramset",
     author:      "RamSet",
-    description: "Reminds you to take the bins out, tracking alternating rubbish and recycling weeks",
+    description: "Reminds you to take the bins out, tracking each collection stream on its own frequency",
     category:    "Convenience",
     iconUrl:     "",
     iconX2Url:   "",
@@ -29,48 +33,61 @@ preferences {
     page(name: "mainPage")
 }
 
-def DAYS() { ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"] }
+def DAYS()  { ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"] }
+def EVERY() { ["1": "Every collection", "2": "Every 2nd", "3": "Every 3rd", "4": "Every 4th"] }
 
 def mainPage() {
     dynamicPage(name: "mainPage", title: "Trash Reminder", install: true, uninstall: true) {
         section("Status") {
             paragraph statusHtml()
         }
-        section("Collection") {
-            input "collectionDay", "enum", title: "Collection day",
-                  options: DAYS(), required: true, submitOnChange: true
-            input "alternates", "bool", title: "Recycling and rubbish alternate week by week",
-                  defaultValue: true, required: true, submitOnChange: true
-            if (alternates != false) {
-                input "anchorDate", "date",
-                      title: "A date when RECYCLING was collected",
-                      description: "Any past collection date you are sure about. Weeks are counted from here, " +
-                                   "so the alternation can never drift or invert at New Year.",
-                      required: true, submitOnChange: true
+        section("Collection day") {
+            input "collectionDay", "enum", title: "Bins go out on", options: DAYS(), required: true, submitOnChange: true
+        }
+        section("What goes out, and how often") {
+            paragraph "Each stream is independent. If rubbish is every week and recycling every second week, " +
+                      "then on a recycling week <b>both</b> go out — and the reminder says so."
+
+            input "trashOn", "bool", title: "Rubbish", defaultValue: true, submitOnChange: true
+            if (trashOn != false) {
+                input "trashEvery", "enum", title: "collected", options: EVERY(), defaultValue: "1", required: true, submitOnChange: true, width: 6
+                if ((trashEvery ?: "1") != "1") {
+                    input "trashAnchor", "date", title: "...counting from this collection date", required: true, submitOnChange: true, width: 6
+                }
+                input "trashLights", "capability.switch", title: "Light for rubbish (optional)", multiple: true, required: false, submitOnChange: true
+            }
+
+            input "recycleOn", "bool", title: "Recycling", defaultValue: true, submitOnChange: true
+            if (recycleOn != false) {
+                input "recycleEvery", "enum", title: "collected", options: EVERY(), defaultValue: "2", required: true, submitOnChange: true, width: 6
+                if ((recycleEvery ?: "2") != "1") {
+                    input "recycleAnchor", "date", title: "...counting from this collection date", required: true, submitOnChange: true, width: 6
+                }
+                input "recycleLights", "capability.switch", title: "Light for recycling (optional)", multiple: true, required: false, submitOnChange: true
+            }
+
+            if (allLights()) {
+                paragraph "Each stream's light comes on only when <b>that</b> stream is actually due, so on a " +
+                          "rubbish-only week the recycling light stays off."
+                input "lightsFor", "number", title: "Switch the lights off again after (hours)", defaultValue: 3, required: true
             }
         }
         section("Remind me") {
-            paragraph "Leave a time blank to skip that reminder."
+            paragraph "Leave a time blank to skip that reminder. Nothing is sent if nothing goes out that week."
             input "remindEve",   "time", title: "The evening before", required: false
             input "remindFinal", "time", title: "The evening before, again (final reminder)", required: false
             input "remindDay",   "time", title: "On the morning of", required: false
         }
         section(hideable: true, hidden: true, "Messages") {
-            paragraph "Tokens: <b>%type%</b> (Recycling / Regular trash) &nbsp; <b>%day%</b> (e.g. Thursday)"
-            input "msgEve",   "textarea", title: "Evening before",  defaultValue: defaultEve(),   required: false
-            input "msgFinal", "textarea", title: "Final reminder",  defaultValue: defaultFinal(), required: false
-            input "msgDay",   "textarea", title: "Morning of",      defaultValue: defaultDay(),   required: false
+            paragraph "Tokens: <b>%what%</b> what goes out, e.g. <i>Rubbish and Recycling</i> &nbsp; " +
+                      "<b>%day%</b> e.g. <i>Thursday</i>"
+            input "msgEve",   "textarea", title: "Evening before", defaultValue: defaultEve(),   required: false
+            input "msgFinal", "textarea", title: "Final reminder", defaultValue: defaultFinal(), required: false
+            input "msgDay",   "textarea", title: "Morning of",     defaultValue: defaultDay(),   required: false
         }
         section("Notify") {
             input "notifiers", "capability.notification",    title: "Notification devices", multiple: true, required: false
             input "speakers",  "capability.speechSynthesis", title: "Speakers to announce on", multiple: true, required: false
-        }
-        section(hideable: true, hidden: true, "Lights (optional)") {
-            paragraph "Switch something on when the reminder fires — a porch light by the bins, say."
-            input "lights",   "capability.switch", title: "Switch on with the reminder", multiple: true, required: false, submitOnChange: true
-            if (lights) {
-                input "lightsFor", "number", title: "Then switch off after (hours)", defaultValue: 3, required: true
-            }
         }
         section("Options") {
             input "logEnable", "bool", title: "Enable debug logging", defaultValue: true
@@ -87,13 +104,14 @@ def updated() {
 }
 
 def initialize() {
-    // One daily cron per configured reminder. Each one checks the calendar when it fires;
-    // nothing has to be rescheduled as the weeks alternate.
+    // One daily cron per configured reminder. Each checks the calendar when it fires, so
+    // nothing needs rescheduling as the streams cycle.
     if (remindEve)   schedule(cronFor(remindEve),   "eveHandler")
     if (remindFinal) schedule(cronFor(remindFinal), "finalHandler")
     if (remindDay)   schedule(cronFor(remindDay),   "dayHandler")
 
-    logDebug "initialized — next collection ${nextCollection()?.format('EEEE d MMM', location.timeZone)} (${nextType()})"
+    def n = nextCollection()
+    logDebug "initialized — next collection ${n?.format('EEEE d MMM', location.timeZone)}: ${whatText(n)}"
 }
 
 // Quartz: sec min hour day-of-month month day-of-week
@@ -102,15 +120,59 @@ def cronFor(timeSetting) {
     return "0 ${t.format('m', location.timeZone)} ${t.format('H', location.timeZone)} * * ?"
 }
 
+// ---------------------------------------------------------------- streams
+
+// Each stream: what it is, how often, the date to count from, and its own light.
+def streams() {
+    def out = []
+    if (trashOn   != false) out << [name: "Rubbish",   every: ((trashEvery   ?: "1") as Integer), anchor: parseDate(trashAnchor),   lights: trashLights]
+    if (recycleOn != false) out << [name: "Recycling", every: ((recycleEvery ?: "2") as Integer), anchor: parseDate(recycleAnchor), lights: recycleLights]
+    return out
+}
+
+def allLights() { (trashLights ?: []) + (recycleLights ?: []) }
+
+// Every collection means always. Otherwise count whole weeks from the anchor — immune to
+// 53-week years, to locale, and to drift.
+def isDue(Date d, Map s) {
+    if (s.every <= 1)     return true
+    if (s.anchor == null) return false
+
+    long days  = Math.round((d.clearTime().time - s.anchor.time) / 86400000.0d)
+    long weeks = Math.floorDiv(days, 7L)
+    return Math.floorMod(weeks, (long) s.every) == 0L
+}
+
+def whatGoesOut(Date d) {
+    d == null ? [] : streams().findAll { isDue(d, it) }*.name
+}
+
+// "Rubbish", "Rubbish and Recycling", "Rubbish, Recycling and Garden"
+def whatText(Date d) {
+    def w = whatGoesOut(d)
+    if (!w)            return "nothing"
+    if (w.size() == 1) return w[0]
+    return "${w[0..-2].join(', ')} and ${w[-1]}"
+}
+
 // ---------------------------------------------------------------- handlers
 
-def eveHandler()   { remindIfCollection(tomorrow(), msgEve   ?: defaultEve()) }
-def finalHandler() { remindIfCollection(tomorrow(), msgFinal ?: defaultFinal()) }
-def dayHandler()   { remindIfCollection(today(),    msgDay   ?: defaultDay()) }
+// The lights come on with the evening-before reminders, when you are actually going out
+// to the bins. The morning-of reminder only talks.
+def eveHandler()   { remind(tomorrow(), msgEve   ?: defaultEve(),   true) }
+def finalHandler() { remind(tomorrow(), msgFinal ?: defaultFinal(), true) }
+def dayHandler()   { remind(today(),    msgDay   ?: defaultDay(),   false) }
 
-def remindIfCollection(Date d, String template) {
+def remind(Date d, String template, boolean lightUp) {
     if (!isCollectionDay(d)) {
         logDebug "${d.format('EEEE', location.timeZone)} is not collection day — quiet"
+        return
+    }
+
+    def due = streams().findAll { isDue(d, it) }
+    // A collection day on which no stream is due is not worth waking anyone for.
+    if (!due) {
+        logDebug "collection day but nothing is due — quiet"
         return
     }
 
@@ -120,13 +182,20 @@ def remindIfCollection(Date d, String template) {
     notifiers*.deviceNotification(msg)
     speakers*.speak(msg)
 
-    if (lights) {
-        lights*.on()
-        runIn(((lightsFor ?: 3) as Integer) * 3600, "lightsOff")
-    }
+    if (!lightUp) return
+
+    // Only the streams actually going out get lit. On a dual-bin day that is both.
+    def on = due.collectMany { it.lights ?: [] }
+    if (!on) return
+
+    logDebug "lighting ${on*.displayName.join(', ')} for ${lightsFor ?: 3}h"
+    on*.on()
+    runIn(((lightsFor ?: 3) as Integer) * 3600, "lightsOff")
 }
 
-def lightsOff() { lights*.off() }
+// Switch off everything we could have lit, not just this run's streams — cheaper than
+// remembering, and a light that is already off does not care.
+def lightsOff() { allLights()*.off() }
 
 // ---------------------------------------------------------------- the calendar
 
@@ -134,7 +203,7 @@ def today()    { new Date().clearTime() }
 def tomorrow() { today() + 1 }
 
 def isCollectionDay(Date d) {
-    d.format("EEEE", location.timeZone) == collectionDay
+    collectionDay && d.format("EEEE", location.timeZone) == collectionDay
 }
 
 // The next collection day, today included.
@@ -148,37 +217,15 @@ def nextCollection() {
     return null
 }
 
-// Weeks counted from the anchor, so this cannot drift, invert at New Year, or depend on
-// what the locale thinks week 1 is.
-def typeFor(Date d) {
-    if (alternates == false) return "Regular trash"
-    def a = anchor()
-    if (a == null) return "unknown"
-
-    long days  = Math.round((d.clearTime().time - a.time) / 86400000.0d)
-    long weeks = Math.floorDiv(days, 7L)
-    return (Math.floorMod(weeks, 2L) == 0L) ? "Recycling" : "Regular trash"
-}
-
-def nextType() {
-    def n = nextCollection()
-    return n == null ? "unknown" : typeFor(n)
-}
-
-// Any date inside a recycling week will do: the week maths floors to whole weeks, so the
-// anchor does not have to be the collection day itself.
-def anchor() {
-    if (!anchorDate) return null
-
-    def raw = anchorDate.toString().trim()
-    // Do not assume what the date input hands back — take the leading yyyy-MM-dd from it
-    // whether it arrives bare or as a full timestamp.
-    def m = (raw =~ /(\d{4})-(\d{2})-(\d{2})/)
+// Do not assume what the date input hands back — take the leading yyyy-MM-dd from it
+// whether it arrives bare or as a full timestamp.
+def parseDate(v) {
+    if (!v) return null
+    def m = (v.toString().trim() =~ /(\d{4})-(\d{2})-(\d{2})/)
     if (!m.find()) {
-        log.warn "could not read the anchor date '${raw}'"
+        log.warn "could not read the date '${v}'"
         return null
     }
-
     def c = Calendar.getInstance(location.timeZone)
     c.clear()
     c.set(m.group(1) as Integer, (m.group(2) as Integer) - 1, m.group(3) as Integer)
@@ -187,13 +234,13 @@ def anchor() {
 
 // ---------------------------------------------------------------- messages
 
-def defaultEve()   { 'Tomorrow is %type% day. Take out the trash.' }
-def defaultFinal() { 'Tomorrow is %type% day. Take out the trash (final reminder).' }
-def defaultDay()   { 'TODAY is %type% day. Take out the trash, if you have not already.' }
+def defaultEve()   { 'Tomorrow is %what% day. Take it out.' }
+def defaultFinal() { 'Tomorrow is %what% day. Take it out (final reminder).' }
+def defaultDay()   { 'TODAY is %what% day. Take it out, if you have not already.' }
 
 def render(String tmpl, Date d) {
     (tmpl ?: '')
-        .replace('%type%', typeFor(d))
+        .replace('%what%', whatText(d))
         .replace('%day%',  d.format("EEEE", location.timeZone))
         .trim()
 }
@@ -208,33 +255,45 @@ def statusHtml() {
 
     def days = Math.round((n.time - today().time) / 86400000.0d) as Integer
     def when = days == 0 ? "<b>today</b>" : (days == 1 ? "<b>tomorrow</b>" : "in ${days} days")
-    def type = typeFor(n)
+    def what = whatGoesOut(n)
 
     def rows = []
-    rows << ["Next collection", "${dot(type == 'Recycling' ? '#27ae60' : '#95a5a6')} " +
-                                "<b>${type}</b> &nbsp;·&nbsp; ${n.format('EEEE d MMM', location.timeZone)} &nbsp;·&nbsp; ${when}"]
+    rows << ["Next collection", "${dot(what ? '#27ae60' : '#95a5a6')} <b>${whatText(n)}</b> &nbsp;·&nbsp; " +
+                                "${n.format('EEEE d MMM', location.timeZone)} &nbsp;·&nbsp; ${when}"]
 
-    if (alternates != false) {
-        if (anchor() == null) {
-            rows << ["Anchor", "${dot('#e74c3c')} <b>set an anchor date below</b> — without it the app cannot tell the weeks apart"]
-        } else {
-            // Show the run of upcoming collections, so a wrong anchor is obvious at a glance
-            // rather than discovered on the wrong Thursday.
-            def upcoming = []
-            def d = n
-            4.times {
-                upcoming << "${d.format('d MMM', location.timeZone)}: <b>${typeFor(d)}</b>"
-                d = d + 7
-            }
-            rows << ["Coming up", upcoming.join("<br>")]
-        }
+    def needsAnchor = streams().findAll { it.every > 1 && it.anchor == null }
+    if (needsAnchor) {
+        rows << ["Anchor", "${dot('#e74c3c')} <b>${needsAnchor*.name.join(', ')}</b> repeats every few weeks but has no " +
+                           "date to count from — set one below, or it will never be due"]
     }
+
+    // Print the run ahead: a wrong anchor is then obvious here, rather than discovered on
+    // the wrong morning.
+    def upcoming = []
+    def d = n
+    6.times {
+        upcoming << "${d.format('EEE d MMM', location.timeZone)}: <b>${whatText(d)}</b>"
+        d = d + 7
+    }
+    rows << ["Coming up", upcoming.join("<br>")]
 
     def times = []
     if (remindEve)   times << "evening before"
     if (remindFinal) times << "final reminder"
     if (remindDay)   times << "morning of"
     rows << ["Reminders", times ? times.join(", ") : "<i>none set — nothing will be sent</i>"]
+
+    if (allLights()) {
+        def lit = streams().findAll { isDue(n, it) && it.lights }
+        rows << ["Lights", lit
+            ? "the evening before, <b>${lit.collectMany { it.lights }*.displayName.join(', ')}</b> " +
+              "(for ${lit*.name.join(' and ')}), off after ${lightsFor ?: 3}h"
+            : "<i>none of the due streams has a light</i>"]
+        if (!remindEve && !remindFinal) {
+            rows << ["<b>Warning</b>", "${dot('#e67e22')} the lights come on with an <b>evening-before</b> reminder, " +
+                                       "and you have not set one — they will never come on"]
+        }
+    }
 
     if (!notifiers && !speakers) rows << ["<b>Warning</b>", "${dot('#e67e22')} no notification device or speaker selected"]
 
