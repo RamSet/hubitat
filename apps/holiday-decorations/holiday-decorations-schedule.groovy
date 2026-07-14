@@ -75,7 +75,10 @@ def mainPage() {
             input "offTime", "time", title: "Off at", required: true
         }
         section("Vetoes") {
-            input "weatherProtect", "bool", title: "Force off in wind or rain (inflatables: yes)", defaultValue: true
+            input "weatherProtect", "bool",
+                  title: "Force off in wind or rain",
+                  description: "On for anything outdoors (inflatables). Off for anything indoors — the Cauldron does not care about the weather.",
+                  defaultValue: true
             input "hsmOff", "enum", title: "Force off when the security system is in any of these states",
                   options: ["armedAway": "Armed Away", "armedNight": "Armed Night", "armedHome": "Armed Home"],
                   multiple: true, required: false
@@ -137,18 +140,22 @@ def evaluate() {
 }
 
 def desired() {
-    if (!inSeason())                          return false
-    if (weatherProtect && parent.weatherUnsafe()) return false
-    if (hsmBlocked())                         return false
+    if (!inSeason())                                 return false
+    if (weatherProtected() && parent.weatherUnsafe()) return false
+    if (hsmBlocked())                                return false
     return inWindow()
 }
 
 def offReason() {
-    if (!inSeason())                              return "out of season"
-    if (weatherProtect && parent.weatherUnsafe()) return "wind or rain"
-    if (hsmBlocked())                             return "security is ${location.hsmStatus}"
+    if (!inSeason())                                 return "out of season"
+    if (weatherProtected() && parent.weatherUnsafe()) return "wind or rain"
+    if (hsmBlocked())                                return "security is ${location.hsmStatus}"
     return "end of the evening"
 }
+
+// defaultValue does not reach settings until the page is submitted, so a null here
+// means "never saved", not "unticked". Weather protection must fail closed.
+def weatherProtected() { weatherProtect != false }
 
 def hsmBlocked() {
     hsmOff && hsmOff.contains(location.hsmStatus)
@@ -227,6 +234,7 @@ def summaryHtml() {
     def col  = want ? "#27ae60" : "#95a5a6"
     def bits = ["<b>${app.label}</b>", rangeText()]
     bits << (want ? "<b>on</b>" : "off — ${offReason()}")
+    bits << (weatherProtected() ? "weather-protected" : "indoor")
     if (devices) bits << "${devices.size()} device${devices.size() == 1 ? '' : 's'}"
     return "<span style='color:${col};font-size:1.1em'>&#9679;</span> ${bits.join(' &nbsp;·&nbsp; ')}"
 }
@@ -235,9 +243,9 @@ def statusHtml() {
     def rows = [
         ["Right now", desired() ? "<b>should be on</b>" : "should be off — ${offReason()}"],
         ["Season",    "${rangeText()} &nbsp;·&nbsp; <b>${inSeason() ? 'in season' : 'out of season'}</b>"],
-        ["Weather",   weatherProtect
-            ? (parent.weatherUnsafe() ? "protected — <b>currently unsafe</b>" : "protected — clear")
-            : "<i>not protected</i>"],
+        ["Weather",   weatherProtected()
+            ? (parent.weatherUnsafe() ? "wind/rain protected — <b>currently unsafe</b>" : "wind/rain protected — clear")
+            : "<i>ignores wind and rain (indoor)</i>"],
     ]
     devices?.each { d ->
         rows << [rows.any { it[0] == "Devices" } ? "" : "Devices", "${d.displayName}: <b>${d.currentValue('switch')}</b>"]
