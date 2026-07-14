@@ -71,8 +71,10 @@ def mainPage() {
                 input "onTime", "time", title: "On at", required: true
             }
             if (mode == "dark") {
-                // Without a floor, "when it gets dark" is also true at 4am in December.
-                input "notBefore", "time", title: "But never before", defaultValue: "12:00", required: true
+                paragraph parent ? parent.darkExplainer() : ""
+                input "notBefore", "time", title: "But never before (optional)", required: false
+                paragraph "<small>Leave blank and it will not come on before <b>noon</b> — without some floor, " +
+                          "&ldquo;when it gets dark&rdquo; is also true at 4am.</small>"
             }
             input "offTime", "time", title: "Off at", required: true
         }

@@ -50,9 +50,15 @@ def mainPage() {
             input "allClear", "number", title: "Stay off for this many minutes after it clears", defaultValue: 10, required: true
         }
         section("Darkness") {
-            paragraph "Used by schedules set to come on <i>when it gets dark</i>."
-            input "luxSensors", "capability.illuminanceMeasurement", title: "Light sensors", multiple: true, required: false
-            input "darkBelow",  "number", title: "Dark when the brightest sensor is at or below (lux)", defaultValue: 40, required: true
+            paragraph "Used by any schedule set to come on <i>when it gets dark</i>. " +
+                      "For scale: full daylight is thousands of lux, an overcast day still hundreds, " +
+                      "civil twilight is around 3&ndash;40, and full night is under 1. " +
+                      "<b>40 is a sensible threshold for decorations</b> &mdash; it trips as dusk finishes, " +
+                      "and it is what the old Christmas Lights rule used."
+            input "luxSensors", "capability.illuminanceMeasurement", title: "Light sensors", multiple: true, required: false, submitOnChange: true
+            input "darkBelow",  "number", title: "Dark when the brightest sensor is at or below (lux)",
+                  range: "0..100000", defaultValue: 40, required: true
+            if (luxSensors) paragraph liveLuxHtml()
         }
         section("Notify (optional)") {
             input "notifiers", "capability.notification",    title: "Notification devices", multiple: true, required: false
@@ -124,6 +130,32 @@ def isDark() {
     def readings = luxSensors?.collect { toInt(it.currentValue("illuminance")) }?.findAll { it != null }
     if (!readings) return true
     return readings.max() <= (darkBelow ?: 40)
+}
+
+def liveLuxHtml() {
+    def bits = luxSensors.collect { d ->
+        def v = toInt(d.currentValue("illuminance"))
+        "${d.displayName}: <b>${v == null ? 'no reading' : v + ' lux'}</b>"
+    }
+    return "${bits.join(' &nbsp;·&nbsp; ')} &nbsp;&rarr;&nbsp; currently <b>${isDark() ? 'dark' : 'daylight'}</b>"
+}
+
+// Shown on the child pages: "dark" is defined here, in one place, so every schedule
+// agrees on it — but the child is where you feel the need to know what it means.
+def darkExplainer() {
+    if (!luxSensors) {
+        return "<b>No light sensors are set in the Holiday Decorations parent app</b>, so &ldquo;dark&rdquo; " +
+               "is always true and this will come on at the &ldquo;never before&rdquo; time. Add a light " +
+               "sensor in the parent to make this meaningful."
+    }
+    def readings = luxSensors.collect { toInt(it.currentValue("illuminance")) }.findAll { it != null }
+    def now = readings ? readings.max() : null
+    def txt = "&ldquo;Dark&rdquo; means <b>${darkBelow ?: 40} lux or less</b>, measured on " +
+              "${luxSensors*.displayName.join(', ')}. Change it in the Holiday Decorations parent app."
+    if (now != null) {
+        txt += " Right now it reads <b>${now} lux</b> &mdash; ${isDark() ? 'dark' : 'daylight'}."
+    }
+    return txt
 }
 
 def announce(String msg) {
