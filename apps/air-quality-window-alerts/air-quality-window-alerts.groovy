@@ -42,14 +42,18 @@ def mainPage() {
         }
         section("Sensors") {
             input "contacts",  "capability.contactSensor", title: "Windows / doors to watch", multiple: true, required: true, submitOnChange: true
-            input "outdoorAQ", "capability.airQuality",    title: "Outdoor air quality sensor", required: true, submitOnChange: true
-            input "indoorAQ",  "capability.airQuality",    title: "Indoor air quality sensor (for message context, optional)", required: false, submitOnChange: true
+            input "outdoorAQ", "capability.airQuality",    title: "Outdoor air quality sensors", multiple: true, required: true,  submitOnChange: true
+            input "indoorAQ",  "capability.airQuality",    title: "Indoor air quality sensors (for message context, optional)", multiple: true, required: false, submitOnChange: true
+            paragraph "Pick <b>one device per pollutant</b> — a PM2.5 device and a TVOC device are different measurements, " +
+                      "and a sensor's own <b>airQualityIndex</b> usually reflects only one of them. The app takes the " +
+                      "<b>worst</b> reading across everything you pick, which is how an overall AQI is meant to be " +
+                      "computed, and the messages name the pollutant that is driving it."
         }
         section("When is the air 'bad'?") {
-            input "threshold", "enum", title: "Alert when outdoor air quality reaches",
+            input "threshold", "enum", title: "Alert when the worst outdoor reading reaches",
                   options: bands().collectEntries { [(it[0].toString()): it[1]] },
                   defaultValue: "51", required: true, submitOnChange: true
-            paragraph "Judged on the sensor's <b>airQualityIndex</b> (EPA 0-500 scale). " +
+            paragraph "Judged on <b>airQualityIndex</b> (EPA 0-500 scale). " +
                       "Picking <i>Moderate</i> alerts on anything that is not Good."
         }
         section("Alerts") {
@@ -96,7 +100,7 @@ def updated() {
 def initialize() {
     state.alerted    = false
     state.alertedAqi = null
-    state.lastAqi    = currentAqi(outdoorAQ)
+    state.lastAqi    = outdoorWorst()?.aqi
     state.fanStopped = null
 
     subscribe(contacts,  "contact",         contactHandler)
@@ -120,9 +124,9 @@ def contactHandler(evt) {
 
     if (!alertOnOpen) return
 
-    def aqi = currentAqi(outdoorAQ)
+    def aqi = outdoorWorst()?.aqi
     if (aqi == null) {
-        log.warn "${outdoorAQ?.displayName} has no airQualityIndex value — cannot evaluate ${evt.displayName} opening"
+        log.warn "no airQualityIndex on any outdoor sensor — cannot evaluate ${evt.displayName} opening"
         return
     }
     if (aqi < thresholdAqi()) {
@@ -142,7 +146,9 @@ def contactHandler(evt) {
 }
 
 def airQualityHandler(evt) {
-    def aqi  = toInt(evt.value)
+    // Recompute across every sensor rather than trusting evt.value: a clean PM2.5
+    // reading arriving after a bad TVOC one must not overwrite the verdict.
+    def aqi  = outdoorWorst()?.aqi
     def prev = state.lastAqi
     state.lastAqi = aqi
     if (aqi == null) return
@@ -201,7 +207,7 @@ def powerHandler(evt) {
 def fanSettled() {
     state.fanStopped = null
 
-    def aqi = currentAqi(outdoorAQ)
+    def aqi = outdoorWorst()?.aqi
     if (aqi == null || aqi < thresholdAqi()) return
     if (state.alerted) return
 
@@ -227,9 +233,10 @@ def tokenHelp() {
       "<b>%openSensors%</b> every sensor currently open, comma separated",
       "<b>%openCount%</b> how many are open",
       "<b>%outdoorLevel%</b> e.g. Unhealthy &nbsp; <b>%outdoorDetail%</b> e.g. AQI 158, PM2.5 68 µg/m³",
+      "<b>%outdoorSource%</b> which sensor is driving the reading, e.g. Outside Air Quality TVOC",
       "<b>%outdoorAQI%</b> &nbsp; <b>%outdoorPM25%</b> &nbsp; <b>%previousLevel%</b> the band before this change",
       "<b>%indoorSummary%</b> a whole sentence about indoors, empty if no indoor sensor",
-      "<b>%indoorLevel%</b> &nbsp; <b>%indoorDetail%</b> &nbsp; <b>%indoorAQI%</b> &nbsp; <b>%indoorPM25%</b>"
+      "<b>%indoorLevel%</b> &nbsp; <b>%indoorDetail%</b> &nbsp; <b>%indoorSource%</b> &nbsp; <b>%indoorAQI%</b> &nbsp; <b>%indoorPM25%</b>"
     ].join("<br>")
 }
 
@@ -242,30 +249,32 @@ def worsenMessage(Integer aqi, Integer prev, List open) {
 }
 
 def tokens(String device, Integer aqi, Integer prev, List open) {
-    def inAqi = indoorAQ ? currentAqi(indoorAQ) : null
+    def out = outdoorWorst()
+    def inn = indoorWorst()
     [
         '%device%'       : device ?: '',
         '%openSensors%'  : open ? open*.displayName.sort().join(', ') : '',
         '%openCount%'    : (open?.size() ?: 0).toString(),
-        '%outdoorLevel%' : bandLabel(outdoorAQ, aqi),
-        '%outdoorDetail%': aqiDetail(outdoorAQ, aqi),
+        '%outdoorLevel%' : out == null ? '' : bandLabel(out.dev, aqi ?: out.aqi),
+        '%outdoorDetail%': out == null ? '' : aqiDetail(out.dev, aqi ?: out.aqi),
+        '%outdoorSource%': out == null ? '' : out.dev.displayName,
         '%outdoorAQI%'   : aqi == null ? '' : aqi.toString(),
-        '%outdoorPM25%'  : str(outdoorAQ?.currentValue("pm25")),
-        // prev is a past reading, so it gets the band name, never the device's current wording
+        '%outdoorPM25%'  : out == null ? '' : str(out.dev.currentValue("pm25")),
+        // prev is a past reading, so it gets the band name, never a device's current wording
         '%previousLevel%': prev == null ? '' : bandName(prev),
         '%indoorSummary%': indoorSummary() ?: '',
-        '%indoorLevel%'  : inAqi == null ? '' : bandLabel(indoorAQ, inAqi),
-        '%indoorDetail%' : inAqi == null ? '' : aqiDetail(indoorAQ, inAqi),
-        '%indoorAQI%'    : inAqi == null ? '' : inAqi.toString(),
-        '%indoorPM25%'   : str(indoorAQ?.currentValue("pm25")),
+        '%indoorLevel%'  : inn == null ? '' : bandLabel(inn.dev, inn.aqi),
+        '%indoorDetail%' : inn == null ? '' : aqiDetail(inn.dev, inn.aqi),
+        '%indoorSource%' : inn == null ? '' : inn.dev.displayName,
+        '%indoorAQI%'    : inn == null ? '' : inn.aqi.toString(),
+        '%indoorPM25%'   : inn == null ? '' : str(inn.dev.currentValue("pm25")),
     ]
 }
 
 def indoorSummary() {
-    if (!indoorAQ) return null
-    def aqi = currentAqi(indoorAQ)
-    if (aqi == null) return null
-    return "Indoors it is ${bandLabel(indoorAQ, aqi)} (${aqiDetail(indoorAQ, aqi)})."
+    def inn = indoorWorst()
+    if (inn == null) return null
+    return "Indoors it is ${bandLabel(inn.dev, inn.aqi)} (${aqiDetail(inn.dev, inn.aqi)})."
 }
 
 // Substitute tokens, then tidy up the gaps left by ones that resolved to nothing —
@@ -326,6 +335,20 @@ def suppressed() {
 
 def thresholdAqi() { toInt(threshold) ?: 51 }
 
+// An overall AQI is the WORST of its sub-indices, never an average: a pristine PM2.5
+// reading must not dilute a bad TVOC one. Returns [aqi: n, dev: <the driving device>].
+def worst(devs) {
+    def w = null
+    devs?.each { d ->
+        def a = toInt(d.currentValue("airQualityIndex"))
+        if (a != null && (w == null || a > w.aqi)) w = [aqi: a, dev: d]
+    }
+    return w
+}
+
+def outdoorWorst() { worst(outdoorAQ) }
+def indoorWorst()  { worst(indoorAQ) }
+
 def currentAqi(dev) { toInt(dev?.currentValue("airQualityIndex")) }
 
 // Index into bands(), so severity can be compared with < and >.
@@ -358,16 +381,18 @@ def statusHtml() {
     if (!outdoorAQ && !contacts) return "<i>Pick your sensors below — live readings appear here.</i>"
 
     def rows = []
-    if (outdoorAQ) rows << ["Outdoor air", airHtml(outdoorAQ)]
-    if (indoorAQ)  rows << ["Indoor air",  airHtml(indoorAQ)]
+    def out = outdoorWorst()
+    def inn = indoorWorst()
+
+    outdoorAQ?.each { rows << [rows.any { it[0] == "Outdoor" } ? "" : "Outdoor", airHtml(it, out?.dev)] }
+    indoorAQ?.each  { rows << [rows.any { it[0] == "Indoor"  } ? "" : "Indoor",  airHtml(it, inn?.dev)] }
 
     if (outdoorAQ) {
-        def aqi = currentAqi(outdoorAQ)
-        rows << ["Verdict", aqi == null
+        rows << ["Verdict", out == null
             ? "<i>no outdoor reading — nothing can fire</i>"
-            : (aqi >= thresholdAqi()
-                ? "${dot('#e74c3c')} outdoor air is <b>bad</b> (at or past ${bandName(thresholdAqi())})"
-                : "${dot('#27ae60')} outdoor air is <b>OK</b> (below ${bandName(thresholdAqi())})")]
+            : (out.aqi >= thresholdAqi()
+                ? "${dot('#e74c3c')} outdoor air is <b>bad</b> (at or past ${bandName(thresholdAqi())}), driven by <b>${out.dev.displayName}</b>"
+                : "${dot('#27ae60')} outdoor air is <b>OK</b> (below ${bandName(thresholdAqi())}), worst is <b>${out.dev.displayName}</b>")]
     }
 
     if (exhaustMeter) {
@@ -382,17 +407,26 @@ def statusHtml() {
     return tableHtml(rows) + contactsHtml()
 }
 
-def airHtml(dev) {
+// governing = the device whose reading is currently deciding things, flagged so a split
+// between a clean PM2.5 sensor and a bad TVOC one is impossible to miss.
+def airHtml(dev, governing = null) {
     def aqi = currentAqi(dev)
-    if (aqi == null) return "<i>no reading</i>"
+    def name = "${dev.displayName}:"
+    if (aqi == null) return "<span style='opacity:.6'>${name}</span> <i>no reading</i>"
+
     def bits = ["<b>${bandLabel(dev, aqi)}</b>", "AQI ${aqi}"]
-    def pm = dev.currentValue("pm25")
-    def t  = dev.currentValue("temperature")
-    def h  = dev.currentValue("humidity")
-    if (pm != null) bits << "PM2.5 ${pm} µg/m³"
-    if (t  != null) bits << "${t}°"
-    if (h  != null) bits << "${h}% RH"
-    return "${dot(bandColor(aqi))} ${bits.join(' &nbsp;·&nbsp; ')}"
+    def pm   = dev.currentValue("pm25")
+    def voc  = dev.currentValue("vocIndex")
+    def t    = dev.currentValue("temperature")
+    def h    = dev.currentValue("humidity")
+    if (pm  != null) bits << "PM2.5 ${pm} µg/m³"
+    if (voc != null) bits << "VOC ${voc}"
+    if (t   != null) bits << "${t}°"
+    if (h   != null) bits << "${h}% RH"
+
+    def line = "${dot(bandColor(aqi))} <span style='opacity:.6'>${name}</span> ${bits.join(' &nbsp;·&nbsp; ')}"
+    if (governing != null && dev.id == governing.id) line += " &nbsp;<b>&larr; governing</b>"
+    return line
 }
 
 def alertStateHtml() {

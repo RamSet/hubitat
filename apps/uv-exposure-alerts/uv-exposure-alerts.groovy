@@ -39,7 +39,7 @@ def mainPage() {
         section("Sensors") {
             input "contacts",  "capability.contactSensor",          title: "Doors that mean someone is going outside", multiple: true, required: true, submitOnChange: true
             input "uvSensor",  "capability.illuminanceMeasurement", title: "UV sensor (its illuminance value is the UV index)", required: true, submitOnChange: true
-            input "outdoorAQ", "capability.airQuality",             title: "Outdoor air quality sensor (for message context, optional)", required: false, submitOnChange: true
+            input "outdoorAQ", "capability.airQuality",             title: "Outdoor air quality sensors (for message context, optional)", multiple: true, required: false, submitOnChange: true
             input "openFor",   "number",                            title: "Only alert if the door stays open this many seconds", defaultValue: 2, required: true
         }
         section("Messages") {
@@ -172,40 +172,51 @@ def messageFor(Integer band) {
 }
 
 def tokens(String device, Integer uv) {
-    def aqi = outdoorAQ ? toInt(outdoorAQ.currentValue("airQualityIndex")) : null
+    def aq = aqWorst()
     [
         '%device%'       : device ?: '',
         '%uv%'           : uv == null ? '' : uv.toString(),
         '%uvLevel%'      : bandName(uv),
         '%aqSuffix%'     : aqSuffix() ?: '',
-        '%outdoorLevel%' : aqi == null ? '' : aqLabel(aqi),
-        '%outdoorDetail%': aqi == null ? '' : aqDetail(aqi),
-        '%outdoorAQI%'   : aqi == null ? '' : aqi.toString(),
-        '%outdoorPM25%'  : str(outdoorAQ?.currentValue("pm25")),
+        '%outdoorLevel%' : aq == null ? '' : aqLabel(aq),
+        '%outdoorDetail%': aq == null ? '' : aqDetail(aq),
+        '%outdoorSource%': aq == null ? '' : aq.dev.displayName,
+        '%outdoorAQI%'   : aq == null ? '' : aq.aqi.toString(),
+        '%outdoorPM25%'  : aq == null ? '' : str(aq.dev.currentValue("pm25")),
     ]
 }
 
-def aqSuffix() {
-    if (!outdoorAQ) return null
-    def aqi = toInt(outdoorAQ.currentValue("airQualityIndex"))
-    if (aqi == null) return null
-    return " Outdoor air quality is ${aqLabel(aqi)} (${aqDetail(aqi)})."
+// An overall AQI is the WORST of its sub-indices, never an average: a pristine PM2.5
+// reading must not dilute a bad TVOC one. Returns [aqi: n, dev: <the driving device>].
+def aqWorst() {
+    def w = null
+    outdoorAQ?.each { d ->
+        def a = toInt(d.currentValue("airQualityIndex"))
+        if (a != null && (w == null || a > w.aqi)) w = [aqi: a, dev: d]
+    }
+    return w
 }
 
-// EPA AQI wording, but prefer whatever the sensor itself calls it.
-def aqLabel(Integer aqi) {
-    def plain = outdoorAQ?.currentValue("airQualityPlain")
+def aqSuffix() {
+    def aq = aqWorst()
+    if (aq == null) return null
+    return " Outdoor air quality is ${aqLabel(aq)} (${aqDetail(aq)})."
+}
+
+// EPA AQI wording, but prefer whatever the driving sensor itself calls it.
+def aqLabel(Map aq) {
+    def plain = aq.dev.currentValue("airQualityPlain")
     if (plain) return plain
     def epa = [[0, "Good"], [51, "Moderate"], [101, "Unhealthy for Sensitive Groups"],
                [151, "Unhealthy"], [201, "Very Unhealthy"], [301, "Hazardous"]]
     def i = 0
-    epa.eachWithIndex { b, ndx -> if (aqi >= b[0]) i = ndx }
+    epa.eachWithIndex { b, ndx -> if (aq.aqi >= b[0]) i = ndx }
     return epa[i][1]
 }
 
-def aqDetail(Integer aqi) {
-    def bits = ["AQI ${aqi}"]
-    def pm25 = outdoorAQ?.currentValue("pm25")
+def aqDetail(Map aq) {
+    def bits = ["AQI ${aq.aqi}"]
+    def pm25 = aq.dev.currentValue("pm25")
     if (pm25 != null) bits << "PM2.5 ${pm25} µg/m³"
     return bits.join(", ")
 }
@@ -245,11 +256,15 @@ def statusHtml() {
 
     def rows = []
     if (uvSensor) rows << ["UV", uvHtml()]
-    if (outdoorAQ) {
-        def aqi = toInt(outdoorAQ.currentValue("airQualityIndex"))
-        rows << ["Outdoor air", aqi == null
-            ? "<i>no reading</i>"
-            : "${dot(aqColor(aqi))} <b>${aqLabel(aqi)}</b> &nbsp;·&nbsp; ${aqDetail(aqi)}"]
+
+    def gov = aqWorst()
+    outdoorAQ?.eachWithIndex { d, i ->
+        def a = toInt(d.currentValue("airQualityIndex"))
+        def line = a == null
+            ? "<span style='opacity:.6'>${d.displayName}:</span> <i>no reading</i>"
+            : "${dot(aqColor(a))} <span style='opacity:.6'>${d.displayName}:</span> <b>${aqLabel([aqi: a, dev: d])}</b> &nbsp;·&nbsp; ${aqDetail([aqi: a, dev: d])}"
+        if (gov != null && d.id == gov.dev.id) line += " &nbsp;<b>&larr; governing</b>"
+        rows << [i == 0 ? "Outdoor air" : "", line]
     }
 
     def uv = currentUv()
