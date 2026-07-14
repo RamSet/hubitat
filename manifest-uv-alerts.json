@@ -1,0 +1,22 @@
+{
+  "packageName": "UV Exposure Alerts",
+  "author": "RamSet",
+  "version": "1.0.0",
+  "releaseNotes": "Warns you about sun exposure when an exterior door is opened and stays open. Looks up the current UV index and sends a message for that UV band (Low, Moderate, High, Very High, Extreme), optionally strobing a siren on the worst bands and switching it off again after a couple of minutes. Every message is editable, with defaults, and can include the outdoor air quality and PM2.5 reading. Leave a band's message blank to stay quiet at that level. Can also keep a Hub Variable updated with the current UV index.",
+  "category": "Safety",
+  "tags": "UV, Sun, Air Quality, Contact Sensor, Notification, Safety",
+  "dateReleased": "2026-07-14",
+  "minimumHEVersion": "2.3.0",
+  "apps": [
+    {
+      "id": "3e7c3459-09ba-48aa-b6ee-ebbeb8c172ef",
+      "name": "UV Exposure Alerts",
+      "namespace": "ramset",
+      "location": "https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/apps/uv-exposure-alerts/uv-exposure-alerts.groovy",
+      "required": true,
+      "oauth": false,
+      "primary": true,
+      "description": "Warns about UV exposure when an exterior door is opened, with editable per-band messages and optional siren strobe."
+    }
+  ]
+}

@@ -61,6 +61,12 @@
       "category": "Air Quality",
       "location": "https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/manifest-aq-window-alerts.json",
       "description": "Notifies when windows/doors are open and the outdoor air quality is bad, naming every open sensor; holds alerts while the range hood or microwave fan is exhausting cooking fumes."
+    },
+    {
+      "name": "UV Exposure Alerts",
+      "category": "Safety",
+      "location": "https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/manifest-uv-alerts.json",
+      "description": "Warns about UV exposure when an exterior door is opened, with editable per-band messages and an optional siren strobe."
     }
   ]
 }

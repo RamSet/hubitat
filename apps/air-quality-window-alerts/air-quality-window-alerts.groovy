@@ -69,6 +69,11 @@ def mainPage() {
         section("Notify") {
             input "notifiers", "capability.notification", title: "Notification devices", multiple: true, required: true
         }
+        section(hideable: true, hidden: true, "Messages") {
+            paragraph "Leave these alone for sensible defaults, or rewrite them. Tokens:<br>" + tokenHelp()
+            input "openMsg",   "textarea", title: "Opened into bad air", defaultValue: defaultOpenMsg(),   required: true
+            input "worsenMsg", "textarea", title: "Air turned bad while open", defaultValue: defaultWorsenMsg(), required: true
+        }
         section("Options") {
             input "logEnable", "bool", title: "Enable debug logging", defaultValue: true
             label title: "Name this app", required: false
@@ -205,23 +210,51 @@ def fanSettled() {
 
 // ---------------------------------------------------------------- messages
 
+def defaultOpenMsg() {
+    '%device% is open and the outdoor air quality is %outdoorLevel% (%outdoorDetail%). %indoorSummary%'
+}
+
+def defaultWorsenMsg() {
+    'Outdoor air quality is now %outdoorLevel% (%outdoorDetail%). Please close: %openSensors%. %indoorSummary%'
+}
+
+def tokenHelp() {
+    [ "<b>%device%</b> the sensor that just opened",
+      "<b>%openSensors%</b> every sensor currently open, comma separated",
+      "<b>%openCount%</b> how many are open",
+      "<b>%outdoorLevel%</b> e.g. Unhealthy &nbsp; <b>%outdoorDetail%</b> e.g. AQI 158, PM2.5 68 µg/m³",
+      "<b>%outdoorAQI%</b> &nbsp; <b>%outdoorPM25%</b> &nbsp; <b>%previousLevel%</b> the band before this change",
+      "<b>%indoorSummary%</b> a whole sentence about indoors, empty if no indoor sensor",
+      "<b>%indoorLevel%</b> &nbsp; <b>%indoorDetail%</b> &nbsp; <b>%indoorAQI%</b> &nbsp; <b>%indoorPM25%</b>"
+    ].join("<br>")
+}
+
 def openMessage(String device, Integer aqi) {
-    def msg = "${device} is open and the outdoor air quality is ${bandLabel(outdoorAQ, aqi)} (${aqiDetail(outdoorAQ, aqi)})."
-    def inside = indoorSummary()
-    if (inside) msg += " ${inside}"
-    return msg
+    render(openMsg ?: defaultOpenMsg(), tokens(device, aqi, null, openContacts()))
 }
 
 def worsenMessage(Integer aqi, Integer prev, List open) {
-    // prev is a past reading, so it gets the band name, not the device's current wording.
-    def msg = (prev != null && bandOf(prev) < bandOf(aqi))
-        ? "Outdoor air quality has worsened from ${bandName(prev)} to ${bandLabel(outdoorAQ, aqi)} (${aqiDetail(outdoorAQ, aqi)})."
-        : "Outdoor air quality is ${bandLabel(outdoorAQ, aqi)} (${aqiDetail(outdoorAQ, aqi)})."
+    render(worsenMsg ?: defaultWorsenMsg(), tokens(null, aqi, prev, open))
+}
 
-    msg += " Please close: ${open*.displayName.sort().join(', ')}."
-    def inside = indoorSummary()
-    if (inside) msg += " ${inside}"
-    return msg
+def tokens(String device, Integer aqi, Integer prev, List open) {
+    def inAqi = indoorAQ ? currentAqi(indoorAQ) : null
+    [
+        '%device%'       : device ?: '',
+        '%openSensors%'  : open ? open*.displayName.sort().join(', ') : '',
+        '%openCount%'    : (open?.size() ?: 0).toString(),
+        '%outdoorLevel%' : bandLabel(outdoorAQ, aqi),
+        '%outdoorDetail%': aqiDetail(outdoorAQ, aqi),
+        '%outdoorAQI%'   : aqi == null ? '' : aqi.toString(),
+        '%outdoorPM25%'  : str(outdoorAQ?.currentValue("pm25")),
+        // prev is a past reading, so it gets the band name, never the device's current wording
+        '%previousLevel%': prev == null ? '' : bandName(prev),
+        '%indoorSummary%': indoorSummary() ?: '',
+        '%indoorLevel%'  : inAqi == null ? '' : bandLabel(indoorAQ, inAqi),
+        '%indoorDetail%' : inAqi == null ? '' : aqiDetail(indoorAQ, inAqi),
+        '%indoorAQI%'    : inAqi == null ? '' : inAqi.toString(),
+        '%indoorPM25%'   : str(indoorAQ?.currentValue("pm25")),
+    ]
 }
 
 def indoorSummary() {
@@ -230,6 +263,16 @@ def indoorSummary() {
     if (aqi == null) return null
     return "Indoors it is ${bandLabel(indoorAQ, aqi)} (${aqiDetail(indoorAQ, aqi)})."
 }
+
+// Substitute tokens, then tidy up the gaps left by ones that resolved to nothing —
+// without collapsing newlines, so multi-line templates survive.
+def render(String tmpl, Map tok) {
+    def s = tmpl ?: ''
+    tok.each { k, v -> s = s.replace(k, v.toString()) }
+    return s.replaceAll(/[ \t]{2,}/, ' ').replaceAll(/[ \t]+([.,;:])/, '$1').trim()
+}
+
+def str(v) { v == null ? '' : v.toString() }
 
 // "AQI 158, PM2.5 68 µg/m³" — drops the PM2.5 half if the device does not report it.
 def aqiDetail(dev, Integer aqi) {

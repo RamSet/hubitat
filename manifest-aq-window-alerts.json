@@ -1,8 +1,8 @@
 {
   "packageName": "Air Quality Window Alerts",
   "author": "RamSet",
-  "version": "1.0.0",
-  "releaseNotes": "Notifies you when windows or doors are open while the outdoor air quality is bad. Two independent alerts: one fires when you open a window into bad air, the other fires when the air outside turns bad (or gets worse) while something is already open. Messages are plain English and name every sensor that is currently open, along with the outdoor and indoor air quality and PM2.5 readings. Alerts are held while the range hood or microwave fan is drawing power, since it is already exhausting cooking fumes, and the app re-checks once the fan stops.",
+  "version": "1.1.0",
+  "releaseNotes": "Notifies you when windows or doors are open while the outdoor air quality is bad. Two independent alerts: one fires when you open a window into bad air, the other fires when the air outside turns bad (or gets worse) while something is already open. Every alert message is now fully editable, with sensible defaults and tokens for the open sensors, the outdoor and indoor air quality levels, and the PM2.5 readings. Alerts are held while the range hood or microwave fan is drawing power, since it is already exhausting cooking fumes, and the app re-checks once the fan stops.",
   "category": "Air Quality",
   "tags": "Air Quality, PM2.5, Contact Sensor, Notification, Windows, AQI",
   "dateReleased": "2026-07-14",
