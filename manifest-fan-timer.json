@@ -1,0 +1,22 @@
+{
+  "packageName": "Fan Timer",
+  "author": "RamSet",
+  "version": "1.0.0",
+  "releaseNotes": "Runs a fan for a set time, started by virtual switches you can expose to HomeKit, Alexa, or a dashboard. Press '30 min' and the fan runs for thirty minutes and stops on its own. The button you pressed stays lit while the fan is running, so it tells you both that the fan is on and which duration is counting down. Pressing a different duration re-times it, and pressing Off, or switching the fan off by hand, cancels everything. A fan can also be set to follow an appliance's power draw, running for as long as, say, a water heater is working. A maximum runtime backstops all of it, so however the fan was started it can never be left running.",
+  "category": "Convenience",
+  "tags": "Fan, Timer, Bathroom, Extractor, Virtual Switch, HomeKit",
+  "dateReleased": "2026-07-14",
+  "minimumHEVersion": "2.3.0",
+  "apps": [
+    {
+      "id": "bbe9c396-ed53-4bc2-b434-5ac314217b8b",
+      "name": "Fan Timer",
+      "namespace": "ramset",
+      "location": "https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/apps/fan-timer/fan-timer.groovy",
+      "required": true,
+      "oauth": false,
+      "primary": true,
+      "description": "Run a fan for a set time from virtual switches, with an optional power-triggered run and a maximum runtime."
+    }
+  ]
+}

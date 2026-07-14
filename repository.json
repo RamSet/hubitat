@@ -73,6 +73,12 @@
       "category": "Convenience",
       "location": "https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/manifest-holiday-decorations.json",
       "description": "Seasonal decoration schedules with shared wind and rain protection, darkness sensing, and a security-state veto."
+    },
+    {
+      "name": "Fan Timer",
+      "category": "Convenience",
+      "location": "https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/manifest-fan-timer.json",
+      "description": "Run a fan for a set time from virtual switches, with an optional power-triggered run and a maximum runtime backstop."
     }
   ]
 }
