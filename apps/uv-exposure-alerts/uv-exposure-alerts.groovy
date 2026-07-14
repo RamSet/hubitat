@@ -365,7 +365,8 @@ def tableHtml(List rows) {
         s << "<tr><td style='padding:3px 14px 3px 0;white-space:nowrap;vertical-align:top;opacity:.6'>${it[0]}</td>"
         s << "<td style='padding:3px 0'>${it[1]}</td></tr>"
     }
-    return s << "</table>"
+    s << "</table>"
+    return s.toString()
 }
 
 def uvColor(uv) { ["#27ae60", "#f1c40f", "#e67e22", "#e74c3c", "#8e44ad"][bandOf(uv)] }

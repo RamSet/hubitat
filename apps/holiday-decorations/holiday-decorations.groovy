@@ -190,7 +190,8 @@ def tableHtml(List rows) {
         s << "<tr><td style='padding:3px 14px 3px 0;white-space:nowrap;vertical-align:top;opacity:.6'>${it[0]}</td>"
         s << "<td style='padding:3px 0'>${it[1]}</td></tr>"
     }
-    return s << "</table>"
+    s << "</table>"
+    return s.toString()
 }
 
 def dot(String color) { "<span style='color:${color};font-size:1.1em'>&#9679;</span>" }
