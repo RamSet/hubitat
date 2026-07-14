@@ -67,9 +67,11 @@ def mainPage() {
             }
 
             if (allLights()) {
-                paragraph "Each stream's light comes on only when <b>that</b> stream is actually due, so on a " +
-                          "rubbish-only week the recycling light stays off."
-                input "lightsFor", "number", title: "Switch the lights off again after (hours)", defaultValue: 3, required: true
+                paragraph "Lights come on <b>the day before</b> collection, on their own schedule — independent of the " +
+                          "reminders below. Each stream's light comes on only when <b>that</b> stream is actually due, " +
+                          "so on a rubbish-only week the recycling light stays off, and on a double week both come on."
+                input "lightsAt",  "time",   title: "Switch the lights on at (the day before)", defaultValue: "07:00", required: true, width: 6
+                input "lightsFor", "number", title: "and off again after (hours)", defaultValue: 12, required: true, width: 6
             }
         }
         section("Remind me") {
@@ -109,6 +111,9 @@ def initialize() {
     if (remindEve)   schedule(cronFor(remindEve),   "eveHandler")
     if (remindFinal) schedule(cronFor(remindFinal), "finalHandler")
     if (remindDay)   schedule(cronFor(remindDay),   "dayHandler")
+
+    // The lights run on their own clock, not off the back of a reminder.
+    if (allLights() && lightsAt) schedule(cronFor(lightsAt), "lightsHandler")
 
     def n = nextCollection()
     logDebug "initialized — next collection ${n?.format('EEEE d MMM', location.timeZone)}: ${whatText(n)}"
@@ -157,45 +162,56 @@ def whatText(Date d) {
 
 // ---------------------------------------------------------------- handlers
 
-// The lights come on with the evening-before reminders, when you are actually going out
-// to the bins. The morning-of reminder only talks.
-def eveHandler()   { remind(tomorrow(), msgEve   ?: defaultEve(),   true) }
-def finalHandler() { remind(tomorrow(), msgFinal ?: defaultFinal(), true) }
-def dayHandler()   { remind(today(),    msgDay   ?: defaultDay(),   false) }
+def eveHandler()   { remind(tomorrow(), msgEve   ?: defaultEve()) }
+def finalHandler() { remind(tomorrow(), msgFinal ?: defaultFinal()) }
+def dayHandler()   { remind(today(),    msgDay   ?: defaultDay()) }
 
-def remind(Date d, String template, boolean lightUp) {
-    if (!isCollectionDay(d)) {
-        logDebug "${d.format('EEEE', location.timeZone)} is not collection day — quiet"
-        return
-    }
-
-    def due = streams().findAll { isDue(d, it) }
-    // A collection day on which no stream is due is not worth waking anyone for.
-    if (!due) {
-        logDebug "collection day but nothing is due — quiet"
-        return
-    }
+def remind(Date d, String template) {
+    def due = dueOn(d)
+    if (due == null) return
 
     def msg = render(template, d)
     log.info "trash reminder: ${msg}"
 
     notifiers*.deviceNotification(msg)
     speakers*.speak(msg)
+}
 
-    if (!lightUp) return
+// Fires the day before collection, at whatever time the lights are set to. Only the
+// streams actually going out get lit — on a dual-bin day, that is both.
+def lightsHandler() {
+    def due = dueOn(tomorrow())
+    if (due == null) return
 
-    // Only the streams actually going out get lit. On a dual-bin day that is both.
     def on = due.collectMany { it.lights ?: [] }
-    if (!on) return
+    if (!on) {
+        logDebug "nothing due tomorrow has a light"
+        return
+    }
 
-    logDebug "lighting ${on*.displayName.join(', ')} for ${lightsFor ?: 3}h"
+    logDebug "lighting ${on*.displayName.join(', ')} for ${lightsFor ?: 12}h (${due*.name.join(' and ')} tomorrow)"
     on*.on()
-    runIn(((lightsFor ?: 3) as Integer) * 3600, "lightsOff")
+    runIn(((lightsFor ?: 12) as Integer) * 3600, "lightsOff")
 }
 
 // Switch off everything we could have lit, not just this run's streams — cheaper than
 // remembering, and a light that is already off does not care.
 def lightsOff() { allLights()*.off() }
+
+// The streams due on that date, or null if it is not a collection day at all or nothing
+// is due on it.
+def dueOn(Date d) {
+    if (!isCollectionDay(d)) {
+        logDebug "${d.format('EEEE', location.timeZone)} is not collection day — quiet"
+        return null
+    }
+    def due = streams().findAll { isDue(d, it) }
+    if (!due) {
+        logDebug "collection day but nothing is due — quiet"
+        return null
+    }
+    return due
+}
 
 // ---------------------------------------------------------------- the calendar
 
@@ -284,15 +300,14 @@ def statusHtml() {
     rows << ["Reminders", times ? times.join(", ") : "<i>none set — nothing will be sent</i>"]
 
     if (allLights()) {
-        def lit = streams().findAll { isDue(n, it) && it.lights }
+        def lit  = streams().findAll { isDue(n, it) && it.lights }
+        def eve  = n - 1
+        def at   = lightsAt ? timeToday(lightsAt, location.timeZone).format('h:mm a', location.timeZone) : "?"
         rows << ["Lights", lit
-            ? "the evening before, <b>${lit.collectMany { it.lights }*.displayName.join(', ')}</b> " +
-              "(for ${lit*.name.join(' and ')}), off after ${lightsFor ?: 3}h"
-            : "<i>none of the due streams has a light</i>"]
-        if (!remindEve && !remindFinal) {
-            rows << ["<b>Warning</b>", "${dot('#e67e22')} the lights come on with an <b>evening-before</b> reminder, " +
-                                       "and you have not set one — they will never come on"]
-        }
+            ? "<b>${lit.collectMany { it.lights }*.displayName.join(', ')}</b> on at ${at} " +
+              "${eve.format('EEEE', location.timeZone)} (the day before), off after ${lightsFor ?: 12}h &nbsp;·&nbsp; " +
+              "for ${lit*.name.join(' and ')}"
+            : "<i>nothing due next collection has a light</i>"]
     }
 
     if (!notifiers && !speakers) rows << ["<b>Warning</b>", "${dot('#e67e22')} no notification device or speaker selected"]
