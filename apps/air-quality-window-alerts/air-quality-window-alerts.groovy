@@ -71,7 +71,12 @@ def mainPage() {
             }
         }
         section("Notify") {
-            input "notifiers", "capability.notification", title: "Notification devices", multiple: true, required: true
+            input "notifiers", "capability.notification",     title: "Notification devices", multiple: true, required: false, submitOnChange: true
+            input "speakers",  "capability.speechSynthesis",  title: "Speakers to announce on", multiple: true, required: false, submitOnChange: true
+            if (speakers) {
+                input "speakVolume", "number", title: "Speak at this volume (leave blank to not change it)", required: false
+            }
+            if (!notifiers && !speakers) paragraph "<b>Pick at least one</b> notification device or speaker, or nothing will be delivered."
             input "cooldown",  "number", title: "After an alert, stay quiet for at least this many minutes", defaultValue: 5, required: true
             paragraph "The cooldown applies to windows being <i>opened</i>. If the air itself gets worse " +
                       "while something is open, you are told straight away — that is the alert you actually " +
@@ -303,10 +308,20 @@ def sendAlert(String msg, Integer aqi, boolean gated = true) {
         return
     }
     log.info "alert: ${msg}"
-    notifiers*.deviceNotification(msg)
+    deliver(msg)
     state.alerted     = true
     state.alertedAqi  = aqi
     state.lastAlertAt = now()
+}
+
+def deliver(String msg) {
+    notifiers*.deviceNotification(msg)
+    // setVolume is not part of the speechSynthesis capability, so only call it where
+    // the driver actually offers it.
+    speakers?.each { s ->
+        if (speakVolume != null && s.hasCommand("setVolume")) s.setVolume(speakVolume)
+        s.speak(msg)
+    }
 }
 
 // A hard floor between notifications, however many sensors trip in the meantime.

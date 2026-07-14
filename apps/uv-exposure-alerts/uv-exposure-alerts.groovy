@@ -52,7 +52,12 @@ def mainPage() {
             input "msgExtreme",  "textarea", title: "Extreme (UV 11+)",   defaultValue: defaultMsg(4),     required: false
         }
         section("Notify") {
-            input "notifiers", "capability.notification", title: "Notification devices", multiple: true, required: true
+            input "notifiers", "capability.notification",    title: "Notification devices", multiple: true, required: false, submitOnChange: true
+            input "speakers",  "capability.speechSynthesis", title: "Speakers to announce on", multiple: true, required: false, submitOnChange: true
+            if (speakers) {
+                input "speakVolume", "number", title: "Speak at this volume (leave blank to not change it)", required: false
+            }
+            if (!notifiers && !speakers) paragraph "<b>Pick at least one</b> notification device or speaker, or nothing will be delivered."
             input "cooldown",  "number", title: "After an alert, stay quiet for at least this many minutes", defaultValue: 5, required: true
         }
         section(hideable: true, hidden: true, "Strobe (optional)") {
@@ -119,9 +124,19 @@ def stillOpen(data) {
     }
 
     log.info "alert: ${msg}"
-    notifiers*.deviceNotification(msg)
+    deliver(msg)
     state.lastAlertAt = now()
     maybeStrobe(band, uv)
+}
+
+def deliver(String msg) {
+    notifiers*.deviceNotification(msg)
+    // setVolume is not part of the speechSynthesis capability, so only call it where
+    // the driver actually offers it.
+    speakers?.each { s ->
+        if (speakVolume != null && s.hasCommand("setVolume")) s.setVolume(speakVolume)
+        s.speak(msg)
+    }
 }
 
 // A hard floor between notifications, however many doors open in the meantime.
