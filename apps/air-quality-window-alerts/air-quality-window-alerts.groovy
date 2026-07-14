@@ -78,6 +78,13 @@ def mainPage() {
             }
             if (!notifiers && !speakers) paragraph "<b>Pick at least one</b> notification device or speaker, or nothing will be delivered."
             input "cooldown",  "number", title: "After an alert, stay quiet for at least this many minutes", defaultValue: 5, required: true
+        }
+        section(hideable: true, hidden: true, "Quiet hours") {
+            paragraph "Speakers stay silent between these times. Push notifications still go out, " +
+                      "unless you tick the box below. Leave the times blank for no quiet hours."
+            input "quietStart",     "time", title: "Quiet from", required: false, submitOnChange: true
+            input "quietEnd",       "time", title: "Quiet until", required: false, submitOnChange: true
+            input "quietMutePush",  "bool", title: "Hold push notifications during quiet hours too", defaultValue: false
             paragraph "The cooldown applies to windows being <i>opened</i>. If the air itself gets worse " +
                       "while something is open, you are told straight away — that is the alert you actually " +
                       "want to hear, and it only repeats when the air moves into a worse band."
@@ -315,13 +322,34 @@ def sendAlert(String msg, Integer aqi, boolean gated = true) {
 }
 
 def deliver(String msg) {
-    notifiers*.deviceNotification(msg)
+    def quiet = inQuietHours()
+
+    if (quiet && quietMutePush) logDebug "quiet hours — holding the push notification"
+    else notifiers*.deviceNotification(msg)
+
+    if (quiet) {
+        logDebug "quiet hours — not speaking"
+        return
+    }
     // setVolume is not part of the speechSynthesis capability, so only call it where
     // the driver actually offers it.
     speakers?.each { s ->
         if (speakVolume != null && s.hasCommand("setVolume")) s.setVolume(speakVolume)
         s.speak(msg)
     }
+}
+
+// timeOfDayIsBetween cannot express a window that crosses midnight, so split it.
+def inQuietHours() {
+    if (!quietStart || !quietEnd) return false
+    def tz  = location.timeZone
+    def now = new Date()
+    def s   = timeToday(quietStart, tz)
+    def e   = timeToday(quietEnd, tz)
+
+    if (s <= e) return timeOfDayIsBetween(s, e, now, tz)
+    return timeOfDayIsBetween(s, timeToday("23:59", tz), now, tz) ||
+           timeOfDayIsBetween(timeToday("00:00", tz), e, now, tz)
 }
 
 // A hard floor between notifications, however many sensors trip in the meantime.
@@ -450,6 +478,7 @@ def alertStateHtml() {
         : "${dot('#27ae60')} nothing sent"]
     if (state.lastAlertAt) bits << "last ${new Date(state.lastAlertAt as Long).format('MMM d, h:mm a', location.timeZone)}"
     if (cooling()) bits << "<b>cooling down</b>, ${(((cooldown ?: 0) as Integer) * 60) - sinceLastAlert()}s left"
+    if (inQuietHours()) bits << "${dot('#8e44ad')} <b>quiet hours</b>${quietMutePush ? ' — push held too' : ' — speakers silent'}"
     return bits.join(" &nbsp;·&nbsp; ")
 }
 
