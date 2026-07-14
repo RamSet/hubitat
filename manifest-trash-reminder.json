@@ -1,0 +1,22 @@
+{
+  "packageName": "Trash Reminder",
+  "author": "RamSet",
+  "version": "1.0.0",
+  "releaseNotes": "Reminds you to put the bins out, and tells you which bin it is when your collection alternates between rubbish and recycling. Remind the evening before, again later that evening, on the morning of, or any combination. Messages are editable and can be sent as notifications, spoken on your speakers, or both, and a light can be switched on with the reminder and off again a few hours later. Alternating weeks are worked out by counting from a date you know recycling was collected, so the schedule cannot drift or flip over at New Year, and the app page shows the next four collections so a wrong anchor date is obvious immediately. No date or time device is needed, and nothing has to be refreshed on a schedule to keep it accurate.",
+  "category": "Convenience",
+  "tags": "Trash, Garbage, Recycling, Bins, Reminder, Notification",
+  "dateReleased": "2026-07-14",
+  "minimumHEVersion": "2.3.0",
+  "apps": [
+    {
+      "id": "f1bedea8-7cad-44c9-ae97-9ecad1007257",
+      "name": "Trash Reminder",
+      "namespace": "ramset",
+      "location": "https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/apps/trash-reminder/trash-reminder.groovy",
+      "required": true,
+      "oauth": false,
+      "primary": true,
+      "description": "Reminds you to take the bins out, tracking alternating rubbish and recycling weeks from an anchor date."
+    }
+  ]
+}
