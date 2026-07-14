@@ -69,6 +69,9 @@ def mainPage() {
         section("Notify") {
             input "notifiers", "capability.notification", title: "Notification devices", multiple: true, required: true
             input "cooldown",  "number", title: "After an alert, stay quiet for at least this many minutes", defaultValue: 5, required: true
+            paragraph "The cooldown applies to windows being <i>opened</i>. If the air itself gets worse " +
+                      "while something is open, you are told straight away — that is the alert you actually " +
+                      "want to hear, and it only repeats when the air moves into a worse band."
         }
         section(hideable: true, hidden: true, "Messages") {
             paragraph "Leave these alone for sensible defaults, or rewrite them. Tokens:<br>" + tokenHelp()
@@ -173,7 +176,7 @@ def airQualityHandler(evt) {
         return
     }
 
-    sendAlert(worsenMessage(aqi, prev, open), aqi)
+    sendAlert(worsenMessage(aqi, prev, open), aqi, false)
 }
 
 def powerHandler(evt) {
@@ -283,8 +286,10 @@ def aqiDetail(dev, Integer aqi) {
     return bits.join(", ")
 }
 
-def sendAlert(String msg, Integer aqi) {
-    if (cooling()) {
+// gated=false for air-quality changes: the air genuinely getting worse is news, and
+// the band latch already stops it repeating within the same band, so it is not spam.
+def sendAlert(String msg, Integer aqi, boolean gated = true) {
+    if (gated && cooling()) {
         logDebug "would alert (${msg}) but only ${sinceLastAlert()}s since the last one — cooling down"
         return
     }
