@@ -62,7 +62,7 @@ mappings {
     path("/calendar.ics")  { action: [GET: "apiCalendar"] }
 }
 
-String getAppVersion() { return "v0.13.4 (2026-06)" }
+String getAppVersion() { return "v0.14.0 (2026-07)" }
 
 // Simple vs Advanced interface. Simple shows only zones, schedule, weather and
 // hardware safety; Advanced exposes everything (moisture, learning, sensors,
@@ -208,6 +208,57 @@ preferences {
     page(name: "exposurePage")
 }
 
+// --- Live status shown at the top of the main page (snapshot on page open) ---
+private String sPill(String label, String color) {
+    "<span style='display:inline-block;margin:2px 5px 2px 0;padding:3px 10px;border-radius:11px;background:${color};color:#fff;font-size:12.5px;font-weight:600'>${label}</span>"
+}
+
+private String statusHtml() {
+    String GREEN="#2e7d32"; String RED="#c62828"; String AMBER="#e65100"; String BLUE="#1565c0"; String GREY="#607d8b"
+    def out = new StringBuilder()
+    boolean running = (state.running == true)
+    boolean paused  = (state.paused == true)
+    boolean held    = (state.deferredRunPending == true)
+
+    if (running) {
+        Integer zid = (state.currentZoneId ?: 0) as int
+        String zname = zid ? (settings."zone${zid}Name" ?: "Zone ${zid}") : "starting\u2026"
+        String phase = state.currentPhaseType ?: "water"
+        String phaseLbl = (phase == "soak") ? "soaking" : (phase == "gap" ? "between zones" : "watering")
+        String cyc = (state.currentZoneCycles && phase == "water") ? " \u00b7 cycle ${((state.currentZoneCycleIdx ?: 0) as int) + 1}/${state.currentZoneCycles}" : ""
+        out << sPill("\u25b6 RUNNING", GREEN) << sPill("${zname} \u2014 ${phaseLbl}${cyc}", BLUE)
+    } else if (paused) {
+        out << sPill("\u23f8 PAUSED", AMBER)
+        Integer zid = (state.currentZoneId ?: 0) as int
+        if (zid) out << sPill("at ${settings."zone${zid}Name" ?: "Zone ${zid}"}", GREY)
+        if (state.pausedReason) out << sPill("${state.pausedReason}", GREY)
+    } else if (held) {
+        out << sPill("\u23f3 HOLDING \u2014 waiting for a pause sensor to clear", AMBER)
+    } else {
+        out << sPill("\u25cf IDLE", GREY)
+    }
+    out << "<br>"
+
+    if (settings.pauseContacts || settings.pauseSwitches) {
+        boolean on = externalPauseActive()
+        out << sPill(on ? "PAUSE SENSOR ON \u2014 ${externalPauseReason()}" : "pause sensors clear \u2713", on ? RED : GREEN)
+    }
+    if (settings.rainSensorWaterDevices || settings.rainSensorContactDevices) {
+        boolean wet = rainSensorWet()
+        out << sPill(wet ? "RAIN \u2014 ${rainSensorReason()}" : "rain sensor dry \u2713", wet ? BLUE : GREEN)
+    }
+    if (settings.coordSwitch) {
+        boolean lockOn = (settings.coordSwitch.currentValue("switch") == "on")
+        if (lockOn && running)  out << sPill("coord lock held by THIS run", BLUE)
+        else if (lockOn)        out << sPill("COORD LOCK HELD \u2014 another schedule is running (a run now would defer)", AMBER)
+        else                    out << sPill("coord lock free \u2713", GREEN)
+    }
+    if (settings.seasonalEnabled && state.seasonalMult) {
+        out << sPill("seasonal \u00d7${state.seasonalMult}", GREY)
+    }
+    return out.toString()
+}
+
 def mainPage() {
     dynamicPage(name: "mainPage", title: "Zooz Sprinkler Scheduler — ${getAppVersion()}",
                 install: true, uninstall: true) {
@@ -221,6 +272,9 @@ def mainPage() {
                           banners.collect { "<li>${it}</li>" }.join("") +
                           "</ul></div>"
             }
+        }
+        section("Status") {
+            paragraph statusHtml()
         }
         section {
             label title: "Schedule name (shown in the Apps list)",
