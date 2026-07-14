@@ -74,6 +74,28 @@ def mainPage() {
                 input "lightsFor", "number", title: "and off again after (hours)", defaultValue: 12, required: true, width: 6
             }
         }
+        section("Holiday delays") {
+            input "holidayShift", "bool",
+                  title: "Collection is delayed by a holiday earlier in the week",
+                  description: "Most haulers push everything back a day when a holiday falls on or before your " +
+                               "collection day that week. Holidays later in the week do not affect it.",
+                  defaultValue: false, required: true, submitOnChange: true
+
+            if (holidayShift) {
+                input "holidays", "enum", title: "Holidays your hauler observes",
+                      options: HOLIDAYS().collectEntries { k, v -> [(k): v.name] },
+                      defaultValue: ["newYear","memorial","independence","labor","thanksgiving","christmas"],
+                      multiple: true, required: true, submitOnChange: true
+                input "shiftDays", "number", title: "Delayed by (days)", defaultValue: 1, range: "1..3", required: true
+                input "extraDates", "textarea",
+                      title: "Extra dates (optional)",
+                      description: "One yyyy-MM-dd per line, for anything the list above cannot work out.",
+                      required: false, submitOnChange: true
+                paragraph "Dates are worked out from the rules, not a fixed list, so this never needs updating. " +
+                          "<b>The alternation still counts by the nominal week</b>, so a delayed collection cannot " +
+                          "shunt recycling onto the wrong week."
+            }
+        }
         section("Remind me") {
             paragraph "Leave a time blank to skip that reminder. Nothing is sent if nothing goes out that week."
             input "remindEve",   "time", title: "The evening before", required: false
@@ -116,7 +138,7 @@ def initialize() {
     if (allLights() && lightsAt) schedule(cronFor(lightsAt), "lightsHandler")
 
     def n = nextCollection()
-    logDebug "initialized — next collection ${n?.format('EEEE d MMM', location.timeZone)}: ${whatText(n)}"
+    logDebug "initialized — next collection ${n?.actual?.format('EEEE d MMM', location.timeZone)}: ${whatText(n?.nominal)}"
 }
 
 // Quartz: sec min hour day-of-month month day-of-week
@@ -148,8 +170,10 @@ def isDue(Date d, Map s) {
     return Math.floorMod(weeks, (long) s.every) == 0L
 }
 
-def whatGoesOut(Date d) {
-    d == null ? [] : streams().findAll { isDue(d, it) }*.name
+// Takes a NOMINAL collection date. Alternation counts by the nominal week, never by the
+// date a holiday pushed the collection onto.
+def whatGoesOut(Date nominal) {
+    nominal == null ? [] : streams().findAll { isDue(nominal, it) }*.name
 }
 
 // "Garbage", "Garbage and Recycling", "Garbage, Recycling and Garden"
@@ -198,17 +222,22 @@ def lightsHandler() {
 // remembering, and a light that is already off does not care.
 def lightsOff() { allLights()*.off() }
 
-// The streams due on that date, or null if it is not a collection day at all or nothing
-// is due on it.
+// The streams due on that ACTUAL date, or null if no collection lands there or nothing is
+// due. Resolves back to the nominal collection first, so the alternation is unaffected by
+// a holiday delay.
 def dueOn(Date d) {
-    if (!isCollectionDay(d)) {
-        logDebug "${d.format('EEEE', location.timeZone)} is not collection day — quiet"
+    def nominal = nominalFor(d)
+    if (nominal == null) {
+        logDebug "${d.format('EEEE d MMM', location.timeZone)} is not a collection day — quiet"
         return null
     }
-    def due = streams().findAll { isDue(d, it) }
+    def due = streams().findAll { isDue(nominal, it) }
     if (!due) {
         logDebug "collection day but nothing is due — quiet"
         return null
+    }
+    if (!sameDay(nominal, d)) {
+        logDebug "collection delayed from ${nominal.format('EEEE', location.timeZone)} by ${delayReason(nominal)}"
     }
     return due
 }
@@ -218,16 +247,144 @@ def dueOn(Date d) {
 def today()    { new Date().clearTime() }
 def tomorrow() { today() + 1 }
 
-def isCollectionDay(Date d) {
+// The nominal day of the week bins go out on, before any holiday delay.
+def isNominalDay(Date d) {
     collectionDay && d.format("EEEE", location.timeZone) == collectionDay
 }
 
-// The next collection day, today included.
+// The date a nominal collection actually happens on: pushed back if a holiday falls on or
+// before it, in the same week.
+def actualFor(Date nominal) {
+    holidayInWeekUpTo(nominal) ? nominal + ((shiftDays ?: 1) as Integer) : nominal
+}
+
+// Given a real date, the nominal collection it belongs to — or null if nothing lands here.
+// Everything else keys off this, so alternation always counts by the nominal week and a
+// delayed collection cannot shunt recycling onto the wrong week.
+def nominalFor(Date d) {
+    def max = holidayShift ? ((shiftDays ?: 1) as Integer) : 0
+    for (int back = 0; back <= max; back++) {
+        def n = d - back
+        if (isNominalDay(n) && sameDay(actualFor(n), d)) return n
+    }
+    return null
+}
+
+def isCollectionDay(Date d) { nominalFor(d) != null }
+
+def sameDay(Date a, Date b) {
+    a != null && b != null && a.clearTime().time == b.clearTime().time
+}
+
+// The next nominal collection, today included. Returns [nominal: <Date>, actual: <Date>].
 def nextCollection() {
     if (!collectionDay) return null
     def d = today()
-    for (int i = 0; i < 8; i++) {
-        if (isCollectionDay(d)) return d
+    for (int i = 0; i < 15; i++) {
+        if (isNominalDay(d)) {
+            def a = actualFor(d)
+            // A collection already gone by is not the next one.
+            if (a >= today()) return [nominal: d, actual: a]
+        }
+        d = d + 1
+    }
+    return null
+}
+
+// ---------------------------------------------------------------- holidays
+
+// Worked out from the rules rather than a fixed list, so this never needs maintaining.
+// week: nth weekday of the month (-1 = last). Otherwise a fixed month/day.
+def HOLIDAYS() {
+    [
+        newYear:      [name: "New Year's Day",   month: 1,  day: 1],
+        mlk:          [name: "MLK Day",          month: 1,  dow: Calendar.MONDAY,   week: 3],
+        presidents:   [name: "Presidents' Day",  month: 2,  dow: Calendar.MONDAY,   week: 3],
+        memorial:     [name: "Memorial Day",     month: 5,  dow: Calendar.MONDAY,   week: -1],
+        juneteenth:   [name: "Juneteenth",       month: 6,  day: 19],
+        independence: [name: "Independence Day", month: 7,  day: 4],
+        labor:        [name: "Labor Day",        month: 9,  dow: Calendar.MONDAY,   week: 1],
+        columbus:     [name: "Columbus Day",     month: 10, dow: Calendar.MONDAY,   week: 2],
+        veterans:     [name: "Veterans Day",     month: 11, day: 11],
+        thanksgiving: [name: "Thanksgiving",     month: 11, dow: Calendar.THURSDAY, week: 4],
+        christmas:    [name: "Christmas Day",    month: 12, day: 25],
+    ]
+}
+
+def holidayOn(Date d) {
+    if (!holidayShift) return null
+
+    def c = Calendar.getInstance(location.timeZone)
+    c.setTime(d)
+    def year = c.get(Calendar.YEAR)
+
+    def hit = (holidays ?: []).find { k ->
+        def h = HOLIDAYS()[k]
+        h && sameDay(holidayDate(h, year), d)
+    }
+    if (hit) return HOLIDAYS()[hit].name
+
+    if (extraDates) {
+        def match = extraDates.readLines().find { line ->
+            def e = parseDate(line.trim())
+            e && sameDay(e, d)
+        }
+        if (match) return "holiday"
+    }
+    return null
+}
+
+def holidayDate(Map h, int year) {
+    def c = Calendar.getInstance(location.timeZone)
+    c.clear()
+
+    if (h.day) {
+        c.set(year, h.month - 1, h.day as Integer)
+        return c.getTime()
+    }
+
+    c.set(year, h.month - 1, 1)
+    if (h.week == -1) {
+        // Last <dow> of the month: walk back from the final day.
+        c.set(Calendar.DAY_OF_MONTH, c.getActualMaximum(Calendar.DAY_OF_MONTH))
+        while (c.get(Calendar.DAY_OF_WEEK) != h.dow) c.add(Calendar.DAY_OF_MONTH, -1)
+        return c.getTime()
+    }
+    while (c.get(Calendar.DAY_OF_WEEK) != h.dow) c.add(Calendar.DAY_OF_MONTH, 1)
+    c.add(Calendar.DAY_OF_MONTH, 7 * ((h.week as Integer) - 1))
+    return c.getTime()
+}
+
+// A holiday from Monday of this week up to and including the collection day itself.
+// Holidays after it do not delay this week's collection.
+def holidayInWeekUpTo(Date nominal) {
+    if (!holidayShift) return false
+
+    def c = Calendar.getInstance(location.timeZone)
+    c.setTime(nominal)
+    def dow  = c.get(Calendar.DAY_OF_WEEK)
+    def back = (dow == Calendar.SUNDAY) ? 6 : (dow - Calendar.MONDAY)
+
+    def d = nominal - back
+    while (d <= nominal) {
+        if (holidayOn(d)) return true
+        d = d + 1
+    }
+    return false
+}
+
+def delayReason(Date nominal) {
+    if (!holidayShift) return null
+
+    def c = Calendar.getInstance(location.timeZone)
+    c.setTime(nominal)
+    def dow  = c.get(Calendar.DAY_OF_WEEK)
+    def back = (dow == Calendar.SUNDAY) ? 6 : (dow - Calendar.MONDAY)
+
+    def d = nominal - back
+    while (d <= nominal) {
+        def h = holidayOn(d)
+        if (h) return h
         d = d + 1
     }
     return null
@@ -254,9 +411,10 @@ def defaultEve()   { 'Tomorrow is %what% day. Take it out.' }
 def defaultFinal() { 'Tomorrow is %what% day. Take it out (final reminder).' }
 def defaultDay()   { 'TODAY is %what% day. Take it out, if you have not already.' }
 
+// d is the ACTUAL collection date; %what% must resolve via the nominal one.
 def render(String tmpl, Date d) {
     (tmpl ?: '')
-        .replace('%what%', whatText(d))
+        .replace('%what%', whatText(nominalFor(d)))
         .replace('%day%',  d.format("EEEE", location.timeZone))
         .trim()
 }
@@ -266,16 +424,22 @@ def render(String tmpl, Date d) {
 def statusHtml() {
     if (!collectionDay) return "<i>Pick a collection day below.</i>"
 
-    def n = nextCollection()
-    if (n == null) return "<i>No collection day set.</i>"
+    def nc = nextCollection()
+    if (nc == null) return "<i>No collection day set.</i>"
+    def n = nc.actual
 
     def days = Math.round((n.time - today().time) / 86400000.0d) as Integer
     def when = days == 0 ? "<b>today</b>" : (days == 1 ? "<b>tomorrow</b>" : "in ${days} days")
-    def what = whatGoesOut(n)
+    def what = whatGoesOut(nc.nominal)
 
     def rows = []
-    rows << ["Next collection", "${dot(what ? '#27ae60' : '#95a5a6')} <b>${whatText(n)}</b> &nbsp;·&nbsp; " +
-                                "${n.format('EEEE d MMM', location.timeZone)} &nbsp;·&nbsp; ${when}"]
+    def line = "${dot(what ? '#27ae60' : '#95a5a6')} <b>${whatText(nc.nominal)}</b> &nbsp;·&nbsp; " +
+               "${n.format('EEEE d MMM', location.timeZone)} &nbsp;·&nbsp; ${when}"
+    if (!sameDay(nc.nominal, n)) {
+        line += "<br><span style='color:#e67e22'>delayed from ${nc.nominal.format('EEEE', location.timeZone)} " +
+                "by <b>${delayReason(nc.nominal)}</b></span>"
+    }
+    rows << ["Next collection", line]
 
     def needsAnchor = streams().findAll { it.every > 1 && it.anchor == null }
     if (needsAnchor) {
@@ -283,13 +447,18 @@ def statusHtml() {
                            "date to count from — set one below, or it will never be due"]
     }
 
-    // Print the run ahead: a wrong anchor is then obvious here, rather than discovered on
-    // the wrong morning.
+    // Print the run ahead: a wrong anchor, or a holiday rule that does not match what your
+    // hauler actually does, is then obvious here rather than discovered on the wrong morning.
     def upcoming = []
-    def d = n
-    6.times {
-        upcoming << "${d.format('EEE d MMM', location.timeZone)}: <b>${whatText(d)}</b>"
-        d = d + 7
+    def nom = nc.nominal
+    8.times {
+        def act = actualFor(nom)
+        def txt = "${act.format('EEE d MMM', location.timeZone)}: <b>${whatText(nom)}</b>"
+        if (!sameDay(nom, act)) {
+            txt += " <span style='color:#e67e22'>(+${(shiftDays ?: 1)}d, ${delayReason(nom)})</span>"
+        }
+        upcoming << txt
+        nom = nom + 7
     }
     rows << ["Coming up", upcoming.join("<br>")]
 
@@ -300,7 +469,7 @@ def statusHtml() {
     rows << ["Reminders", times ? times.join(", ") : "<i>none set — nothing will be sent</i>"]
 
     if (allLights()) {
-        def lit  = streams().findAll { isDue(n, it) && it.lights }
+        def lit  = streams().findAll { isDue(nc.nominal, it) && it.lights }
         def eve  = n - 1
         def at   = lightsAt ? timeToday(lightsAt, location.timeZone).format('h:mm a', location.timeZone) : "?"
         rows << ["Lights", lit
