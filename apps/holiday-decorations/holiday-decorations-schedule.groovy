@@ -36,7 +36,9 @@ def DAYS() { (1..31).collectEntries { [(it.toString()): it.toString()] } }
 def mainPage() {
     dynamicPage(name: "mainPage", title: "Decoration Schedule", install: true, uninstall: true) {
         section("Status") {
-            paragraph parent ? statusHtml() : "<i>Open this from the Holiday Decorations parent app.</i>"
+            paragraph configured()
+                ? statusHtml()
+                : "<i>Fill in the sections below and hit Done — live status appears here once this schedule is complete.</i>"
         }
         section("What") {
             label title: "Name this schedule (e.g. Halloween)", required: true
@@ -54,18 +56,21 @@ def mainPage() {
             input "onWhen", "enum", title: "Turn on",
                   options: ["dark": "When it gets dark", "sunset": "At sunset", "time": "At a fixed time"],
                   defaultValue: "dark", required: true, submitOnChange: true
-            if (onWhen == "sunset") {
+
+            // A defaultValue does not reach settings until the page is submitted, so read
+            // through the same fallback the logic uses or the dependent inputs never draw.
+            def mode = onWhen ?: "dark"
+
+            if (mode == "sunset") {
                 input "sunsetOffset", "number", title: "Minutes relative to sunset (negative = before)", defaultValue: -30, required: true
+                input "notBefore",    "time",   title: "But never before (optional)", required: false
             }
-            if (onWhen == "time") {
+            if (mode == "time") {
                 input "onTime", "time", title: "On at", required: true
             }
-            if (onWhen == "dark") {
+            if (mode == "dark") {
                 // Without a floor, "when it gets dark" is also true at 4am in December.
                 input "notBefore", "time", title: "But never before", defaultValue: "12:00", required: true
-            }
-            if (onWhen == "sunset") {
-                input "notBefore", "time", title: "But never before (optional)", required: false
             }
             input "offTime", "time", title: "Off at", required: true
         }
@@ -102,7 +107,18 @@ def initialize() {
 // Called by the parent every minute and on every sensor change. Everything is derived
 // from now(), so there is no stored state that can drift out of sync with reality.
 
+// A half-filled child must never touch a device, and must never blow up the parent's
+// page by having the parent call into it.
+def configured() {
+    if (!devices || !startMonth || !startDay || !endMonth || !endDay || !offTime) return false
+    if (mode() == "time" && !onTime) return false
+    return true
+}
+
+def mode() { onWhen ?: "dark" }
+
 def evaluate() {
+    if (!configured()) return
     def want = desired()
 
     devices?.each { d ->
@@ -167,11 +183,11 @@ def inWindow() {
 def onMoment() {
     def tz = location.timeZone
 
-    if (onWhen == "time") return timeToday(onTime, tz)
+    if (mode() == "time") return timeToday(onTime, tz)
 
     def earliest = notBefore ? timeToday(notBefore, tz) : null
 
-    if (onWhen == "sunset") {
+    if (mode() == "sunset") {
         def s = new Date(location.sunset.time + ((sunsetOffset ?: 0) as Integer) * 60000L)
         return (earliest != null && earliest > s) ? earliest : s
     }
@@ -186,9 +202,11 @@ def onMoment() {
 // ---------------------------------------------------------------- status
 
 def overlapsWith(other) {
+    if (!configured() || !other.configured()) return false
+
     def a1 = mmdd(startMonth, startDay), a2 = mmdd(endMonth, endDay)
     def b1 = other.rangeStart(),         b2 = other.rangeEnd()
-    return (1..1231).any { d ->
+    return (101..1231).any { d ->
         def inA = (a1 <= a2) ? (d >= a1 && d <= a2) : (d >= a1 || d <= a2)
         def inB = (b1 <= b2) ? (d >= b1 && d <= b2) : (d >= b1 || d <= b2)
         inA && inB
@@ -203,6 +221,8 @@ def rangeText() {
 }
 
 def summaryHtml() {
+    if (!configured()) return "<span style='color:#e67e22;font-size:1.1em'>&#9679;</span> <b>${app.label}</b> &nbsp;·&nbsp; <i>not finished — open it and complete the setup</i>"
+
     def want = desired()
     def col  = want ? "#27ae60" : "#95a5a6"
     def bits = ["<b>${app.label}</b>", rangeText()]
