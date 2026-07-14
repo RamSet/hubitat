@@ -238,19 +238,87 @@ def bandName(uv) {
     return n == null ? "unknown" : bands()[bandOf(n)][1]
 }
 
+// ---------------------------------------------------------------- status panel
+
 def statusHtml() {
-    if (!uvSensor) return "Pick a UV sensor below to see live readings here."
-    def uv = currentUv()
-    def rows = ["UV right now: <b>${uv == null ? 'no reading' : bandName(uv) + ' (' + uv + ')'}</b>"]
+    if (!uvSensor && !contacts) return "<i>Pick your sensors below — live readings appear here.</i>"
+
+    def rows = []
+    if (uvSensor) rows << ["UV", uvHtml()]
     if (outdoorAQ) {
         def aqi = toInt(outdoorAQ.currentValue("airQualityIndex"))
-        rows << "Outdoor air: <b>${aqi == null ? 'no reading' : aqLabel(aqi) + ' (' + aqDetail(aqi) + ')'}</b>"
+        rows << ["Outdoor air", aqi == null
+            ? "<i>no reading</i>"
+            : "${dot(aqColor(aqi))} <b>${aqLabel(aqi)}</b> &nbsp;·&nbsp; ${aqDetail(aqi)}"]
     }
-    def open = contacts?.findAll { it.currentValue("contact") == "open" } ?: []
-    rows << "Open right now: <b>${open ? open*.displayName.sort().join(', ') : 'nothing'}</b>"
-    if (cooling()) rows << "Cooling down: <b>${(((cooldown ?: 0) as Integer) * 60) - sinceLastAlert()}s left</b>"
-    return rows.join("<br>")
+
+    def uv = currentUv()
+    if (uv != null) {
+        def msg = messageFor(bandOf(uv))
+        rows << ["If a door opens", msg?.trim()
+            ? "${dot('#e67e22')} you would be told (${bandName(uv)})"
+            : "${dot('#95a5a6')} silent — no message set for ${bandName(uv)}"]
+    }
+
+    rows << ["Notifies at", bandsWithMessagesHtml()]
+    rows << ["Alerts", alertStateHtml()]
+
+    return tableHtml(rows) + contactsHtml()
 }
+
+def uvHtml() {
+    def uv = currentUv()
+    if (uv == null) return "<i>no reading</i>"
+    return "${dot(uvColor(uv))} <b>${bandName(uv)}</b> &nbsp;·&nbsp; index ${uv}"
+}
+
+def bandsWithMessagesHtml() {
+    def on = []
+    bands().eachWithIndex { b, i -> if (messageFor(i)?.trim()) on << b[1] }
+    return on ? on.join(", ") : "<i>nothing — every band's message is blank</i>"
+}
+
+def alertStateHtml() {
+    if (!state.lastAlertAt) return "${dot('#27ae60')} nothing sent yet"
+    def bits = ["last ${new Date(state.lastAlertAt as Long).format('MMM d, h:mm a', location.timeZone)}"]
+    if (cooling()) bits << "<b>cooling down</b>, ${(((cooldown ?: 0) as Integer) * 60) - sinceLastAlert()}s left"
+    return bits.join(" &nbsp;·&nbsp; ")
+}
+
+def contactsHtml() {
+    if (!contacts) return ""
+    def open = [], shut = []
+    contacts.toSorted { it.displayName }.each {
+        (it.currentValue("contact") == "open" ? open : shut) << it.displayName
+    }
+
+    def s = new StringBuilder()
+    s << "<div style='margin-top:10px'><b>${open.size()} open</b>, ${shut.size()} closed</div>"
+    open.each { s << "<div>${dot('#e74c3c')} ${it} — <b>open</b></div>" }
+    shut.each { s << "<div style='opacity:.6'>${dot('#27ae60')} ${it} — closed</div>" }
+    return s.toString()
+}
+
+def tableHtml(List rows) {
+    def s = new StringBuilder("<table style='border-collapse:collapse'>")
+    rows.each {
+        s << "<tr><td style='padding:3px 14px 3px 0;white-space:nowrap;vertical-align:top;opacity:.6'>${it[0]}</td>"
+        s << "<td style='padding:3px 0'>${it[1]}</td></tr>"
+    }
+    return s << "</table>"
+}
+
+def uvColor(uv) { ["#27ae60", "#f1c40f", "#e67e22", "#e74c3c", "#8e44ad"][bandOf(uv)] }
+
+def aqColor(Integer aqi) {
+    def cuts = [0, 51, 101, 151, 201, 301]
+    def cols = ["#27ae60", "#f1c40f", "#e67e22", "#e74c3c", "#8e44ad", "#7d3c1e"]
+    def i = 0
+    cuts.eachWithIndex { c, ndx -> if (aqi >= c) i = ndx }
+    return cols[i]
+}
+
+def dot(String color) { "<span style='color:${color};font-size:1.1em'>&#9679;</span>" }
 
 def toInt(v) {
     if (v == null) return null

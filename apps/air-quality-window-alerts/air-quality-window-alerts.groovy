@@ -352,24 +352,86 @@ def bandLabel(dev, aqi) {
     return plain ?: bandName(n)
 }
 
+// ---------------------------------------------------------------- status panel
+
 def statusHtml() {
-    if (!outdoorAQ || !contacts) return "Pick sensors below to see live readings here."
-    def open = openContacts()
-    def out  = currentAqi(outdoorAQ)
+    if (!outdoorAQ && !contacts) return "<i>Pick your sensors below — live readings appear here.</i>"
+
     def rows = []
-    rows << "Outdoor: <b>${out == null ? 'no reading' : bandLabel(outdoorAQ, out) + ' (' + aqiDetail(outdoorAQ, out) + ')'}</b>"
-    if (indoorAQ) {
-        def inn = currentAqi(indoorAQ)
-        rows << "Indoor: <b>${inn == null ? 'no reading' : bandLabel(indoorAQ, inn) + ' (' + aqiDetail(indoorAQ, inn) + ')'}</b>"
+    if (outdoorAQ) rows << ["Outdoor air", airHtml(outdoorAQ)]
+    if (indoorAQ)  rows << ["Indoor air",  airHtml(indoorAQ)]
+
+    if (outdoorAQ) {
+        def aqi = currentAqi(outdoorAQ)
+        rows << ["Verdict", aqi == null
+            ? "<i>no outdoor reading — nothing can fire</i>"
+            : (aqi >= thresholdAqi()
+                ? "${dot('#e74c3c')} outdoor air is <b>bad</b> (at or past ${bandName(thresholdAqi())})"
+                : "${dot('#27ae60')} outdoor air is <b>OK</b> (below ${bandName(thresholdAqi())})")]
     }
-    rows << "Open right now: <b>${open ? open*.displayName.sort().join(', ') : 'nothing'}</b>"
+
     if (exhaustMeter) {
-        rows << "Exhaust fan: <b>${suppressed() ? 'running — alerts held' : 'off'}</b> (${exhaustMeter.currentValue('power')}W)"
+        def w = exhaustMeter.currentValue("power")
+        rows << ["Exhaust fan", suppressed()
+            ? "${dot('#e67e22')} <b>running</b> — alerts held (${w} W)"
+            : "${dot('#95a5a6')} off (${w} W)"]
     }
-    rows << "Alert already sent: <b>${state.alerted ? 'yes' : 'no'}</b>"
-    if (cooling()) rows << "Cooling down: <b>${(((cooldown ?: 0) as Integer) * 60) - sinceLastAlert()}s left</b>"
-    return rows.join("<br>")
+
+    rows << ["Alerts", alertStateHtml()]
+
+    return tableHtml(rows) + contactsHtml()
 }
+
+def airHtml(dev) {
+    def aqi = currentAqi(dev)
+    if (aqi == null) return "<i>no reading</i>"
+    def bits = ["<b>${bandLabel(dev, aqi)}</b>", "AQI ${aqi}"]
+    def pm = dev.currentValue("pm25")
+    def t  = dev.currentValue("temperature")
+    def h  = dev.currentValue("humidity")
+    if (pm != null) bits << "PM2.5 ${pm} µg/m³"
+    if (t  != null) bits << "${t}°"
+    if (h  != null) bits << "${h}% RH"
+    return "${dot(bandColor(aqi))} ${bits.join(' &nbsp;·&nbsp; ')}"
+}
+
+def alertStateHtml() {
+    def bits = [state.alerted
+        ? "${dot('#e67e22')} already alerted for this spell"
+        : "${dot('#27ae60')} nothing sent"]
+    if (state.lastAlertAt) bits << "last ${new Date(state.lastAlertAt as Long).format('MMM d, h:mm a', location.timeZone)}"
+    if (cooling()) bits << "<b>cooling down</b>, ${(((cooldown ?: 0) as Integer) * 60) - sinceLastAlert()}s left"
+    return bits.join(" &nbsp;·&nbsp; ")
+}
+
+def contactsHtml() {
+    if (!contacts) return ""
+    def open = [], shut = []
+    contacts.toSorted { it.displayName }.each {
+        (it.currentValue("contact") == "open" ? open : shut) << it.displayName
+    }
+
+    def s = new StringBuilder()
+    s << "<div style='margin-top:10px'><b>${open.size()} open</b>, ${shut.size()} closed</div>"
+    open.each { s << "<div>${dot('#e74c3c')} ${it} — <b>open</b></div>" }
+    shut.each { s << "<div style='opacity:.6'>${dot('#27ae60')} ${it} — closed</div>" }
+    return s.toString()
+}
+
+def tableHtml(List rows) {
+    def s = new StringBuilder("<table style='border-collapse:collapse'>")
+    rows.each {
+        s << "<tr><td style='padding:3px 14px 3px 0;white-space:nowrap;vertical-align:top;opacity:.6'>${it[0]}</td>"
+        s << "<td style='padding:3px 0'>${it[1]}</td></tr>"
+    }
+    return s << "</table>"
+}
+
+def bandColor(aqi) {
+    ["#27ae60", "#f1c40f", "#e67e22", "#e74c3c", "#8e44ad", "#7d3c1e"][bandOf(aqi)]
+}
+
+def dot(String color) { "<span style='color:${color};font-size:1.1em'>&#9679;</span>" }
 
 def toInt(v) {
     if (v == null) return null
