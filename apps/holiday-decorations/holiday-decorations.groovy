@@ -1,20 +1,19 @@
 /**
  *  Holiday Decorations (parent)
  *
- *  Replaces four Rule Machine rules:
- *    - "1. Inflatables ON/OFF - seasons"  (date-range orchestrator, ~94 actions)
- *    - "1.1 Cauldron conditions"          (HSM + sunset)
- *    - "1.2. Inflatables Weather"         (wind / rain shutdown)
- *    - "1.3. Christmas Lights"            (darkness + sunset window)
+ *  Runs seasonal decorations — one child schedule per season or group. The parent owns
+ *  the sensing that every schedule shares: wind and rain, darkness, the security system
+ *  state, and where to send notifications. Each child decides what to do with it.
  *
- *  The seasons rule paused and resumed the other three by hard-coded rule ID. That
- *  coupling is why the family is fragile. Here the parent owns the sensing — weather,
- *  darkness, HSM, notifications — and each child is one schedule that reads those as
- *  conditions. Nothing pauses anything.
+ *  Weather protection is a condition a schedule reads, not something that disables a
+ *  schedule. So a decoration held off by wind resumes on its own once the wind settles —
+ *  there is no paused state anything has to remember to undo.
  *
  *  The parent re-evaluates every child once a minute, and immediately on any weather,
- *  light or HSM change, so a child needs no schedules of its own and a missed event
- *  cannot strand a decoration in the wrong state.
+ *  light or security change. Children therefore hold no schedules of their own, and
+ *  every decision is re-derived from the current time and the current sensor readings.
+ *  There is no stored state to drift, and a missed event cannot strand a decoration in
+ *  the wrong state — the next tick corrects it.
  */
 
 definition(
@@ -53,8 +52,7 @@ def mainPage() {
             paragraph "Used by any schedule set to come on <i>when it gets dark</i>. " +
                       "For scale: full daylight is thousands of lux, an overcast day still hundreds, " +
                       "civil twilight is around 3&ndash;40, and full night is under 1. " +
-                      "<b>40 is a sensible threshold for decorations</b> &mdash; it trips as dusk finishes, " +
-                      "and it is what the old Christmas Lights rule used."
+                      "<b>40 is a sensible threshold for decorations</b> &mdash; it trips as dusk finishes."
             input "luxSensors", "capability.illuminanceMeasurement", title: "Light sensors", multiple: true, required: false, submitOnChange: true
             input "darkBelow",  "number", title: "Dark when the brightest sensor is at or below (lux)",
                   range: "0..100000", defaultValue: 40, required: true
@@ -205,7 +203,7 @@ def statusHtml() {
 }
 
 // Two schedules claiming the same calendar day will fight over any device they share.
-// The old rules did exactly this: Turkey ended Dec 1 and Christmas began Dec 1.
+// Easy to do by accident when one season is set to end on the day the next begins.
 def overlaps(kids) {
     def clashes = []
     kids.each { a ->

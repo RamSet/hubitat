@@ -1,9 +1,8 @@
 /**
  *  Holiday Decorations Schedule (child of "Holiday Decorations")
  *
- *  One instance per decoration group — Halloween, Turkey, Christmas, the Cauldron.
- *  Each says: which devices, which calendar range, when in the evening, and what
- *  conditions veto it (weather, security state).
+ *  One instance per decoration group. Each says: which devices, which calendar range it
+ *  is live for, when in the evening it should be on, and what conditions veto it.
  *
  *  The parent evaluates every child once a minute and on every sensor change, so this
  *  app holds no schedules of its own. Everything is derived from the current time and
@@ -81,7 +80,7 @@ def mainPage() {
         section("Vetoes") {
             input "weatherProtect", "bool",
                   title: "Force off in wind or rain",
-                  description: "On for anything outdoors (inflatables). Off for anything indoors — the Cauldron does not care about the weather.",
+                  description: "On for anything outdoors, such as inflatables. Off for anything indoors — indoor decorations do not care about the weather.",
                   defaultValue: true
             input "hsmOff", "enum", title: "Force off when the security system is in any of these states",
                   options: ["armedAway": "Armed Away", "armedNight": "Armed Night", "armedHome": "Armed Home"],

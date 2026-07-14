@@ -1,17 +1,20 @@
 /**
  *  Air Quality Window Alerts
  *
- *  Replaces three Rule Machine rules:
- *    - "10.6 Windows Air Quality alerts"                    (open while air is bad)
- *    - "10.11 Air quality alerts if windows are already open" (air turns bad while open)
- *    - "Disable air quality monitoring if microwave is on"    (exhaust fan suppression)
+ *  Tells you when a window or door is open and the air outside is bad. Two independent
+ *  alerts:
+ *    - a window is opened while the air is already bad
+ *    - the air turns bad, or gets worse, while a window is already open
  *
- *  The exhaust-fan suppression is a check inside this app, not a rule that pauses
- *  other rules by ID — that ID coupling is what broke the original.
+ *  Alerts are held while an extractor fan is drawing power, since it is already pulling
+ *  cooking fumes out and a spike is expected. Once the fan stops, the app re-checks and
+ *  delivers the alert it withheld if the air is still bad.
  *
  *  Air quality is read straight off the selected devices, so no Hub Variables are
- *  required. Reads airQualityIndex (EPA 0-500) for the decision, and pm25 /
- *  airQualityPlain / airQuality for message detail when the device exposes them.
+ *  required. The decision is made on airQualityIndex (EPA 0-500 scale). A device's index
+ *  commonly reflects a single pollutant, so several devices may be selected per location
+ *  and the worst reading governs — which is how an overall AQI is derived. pm25 /
+ *  airQualityPlain / airQuality are used for message detail where a device exposes them.
  */
 
 definition(
@@ -60,11 +63,11 @@ def mainPage() {
             input "alertOnOpen",   "bool", title: "Alert when a window/door is opened while the air is already bad", defaultValue: true
             input "alertOnWorsen", "bool", title: "Alert when the air turns bad (or gets worse) while a window/door is already open", defaultValue: true
         }
-        section("Exhaust fan suppression (cooking)") {
-            paragraph "While the range hood / microwave fan is drawing power it is pulling cooking fumes out, " +
-                      "so indoor spikes are expected and alerts are held. When it stops, the app re-checks and " +
-                      "will alert if the air is still bad and something is still open."
-            input "exhaustMeter", "capability.powerMeter", title: "Microwave / range hood power meter", required: false, submitOnChange: true
+        section("Extractor fan suppression (cooking)") {
+            paragraph "While an extractor fan is drawing power it is pulling cooking fumes out, so a spike is " +
+                      "expected and alerts are held. When it stops, the app re-checks and will alert if the air " +
+                      "is still bad and something is still open."
+            input "exhaustMeter", "capability.powerMeter", title: "Extractor fan power meter", required: false, submitOnChange: true
             if (exhaustMeter) {
                 input "exhaustWatts", "number", title: "Consider the fan running above (watts)", defaultValue: 50, required: true
                 input "exhaustLag",   "number", title: "Keep holding alerts for this many minutes after it stops", defaultValue: 5, required: true
@@ -409,8 +412,8 @@ def bandName(aqi) {
     return n == null ? "unknown" : bands()[bandOf(n)][1]
 }
 
-// Prefer the device's own wording (IKEA publishes airQualityPlain) over our band name,
-// but only for that device's current reading — never for a historical value.
+// Prefer the device's own wording, where it publishes airQualityPlain, over our band
+// name — but only for that device's current reading, never for a historical value.
 def bandLabel(dev, aqi) {
     def n = toInt(aqi)
     if (n == null) return "unknown"

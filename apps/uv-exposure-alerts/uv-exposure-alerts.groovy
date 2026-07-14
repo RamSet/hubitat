@@ -1,14 +1,14 @@
 /**
  *  UV Exposure Alerts
  *
- *  Replaces Rule Machine rule "10.8 UV Measurement and warnings".
+ *  When a door someone actually walks out of stays open for a moment, look up the
+ *  current UV index and — if it is high enough to matter — say so, optionally strobing
+ *  an alarm on the worst bands. Messages can carry the outdoor air quality too.
  *
- *  When a door you actually walk out of stays open for a moment, look up the current
- *  UV index and — if it is high enough to matter — say so, optionally strobing a siren
- *  on the worst bands. Messages carry the outdoor air quality too, like the rule did.
- *
- *  The UV index is read from a sensor's illuminance attribute (rule 10.8 used the
- *  "UV" Virtual Illuminance Sensor, whose illuminance value IS the UV index).
+ *  The UV index is read from the illuminance attribute of the sensor you select, since
+ *  UV sources are commonly surfaced on the hub as a virtual illuminance sensor whose
+ *  value IS the UV index. Bands follow the WHO scale: Low 0-2, Moderate 3-5, High 6-7,
+ *  Very High 8-10, Extreme 11+.
  */
 
 definition(
