@@ -1,7 +1,7 @@
 {
   "packageName": "Holiday Decorations",
   "author": "RamSet",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "releaseNotes": "Runs seasonal decorations on a schedule, with shared wind and rain protection. Each season is its own schedule: the decorations it drives, the days of the year it is live (a range may wrap the new year), and when in the evening it should come on, whether that is at sunset, at a fixed time, or as soon as it gets dark. Anything you mark as weather-protected is switched off while it is wet or windy, and comes back once the weather has been clear for a settle time you choose. Schedules can also be held off by the security system's state, for decorations you do not want running when the house is armed. The app page shows every schedule, the weather, the light level, and warns you if two seasons claim the same days of the calendar. Wind and rain protection is set per schedule, so outdoor decorations shut down in bad weather while indoor ones, like a cauldron, carry on regardless. The 'never before' time is now optional, defaulting to noon, and each schedule set to come on when it gets dark explains what dark currently means and what your light sensor reads right now.",
   "category": "Convenience",
   "tags": "Holiday, Decorations, Seasonal, Christmas, Halloween, Weather, Inflatables",

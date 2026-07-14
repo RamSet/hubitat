@@ -90,8 +90,10 @@ def mainPage() {
         section(hideable: true, hidden: true, "Advanced") {
             input "reassert", "bool",
                   title: "Keep re-asserting the desired state every minute",
-                  description: "Heals a decoration someone switched by hand or that missed a Z-Wave command — " +
-                               "but it will fight any other app that also drives these devices.",
+                  description: "OFF: switch only when the decision changes (dusk, weather, end of season), then leave " +
+                               "the devices alone — a manual tap or another app can override until the next change. " +
+                               "ON: drive them to the wanted state every minute, which heals a dropped Z-Wave command " +
+                               "or a hand-flipped switch, but will fight any other app driving the same devices.",
                   defaultValue: false
             input "announceChanges", "bool", title: "Announce when this schedule switches", defaultValue: true
         }
@@ -126,16 +128,24 @@ def mode() { onWhen ?: "dark" }
 
 def evaluate() {
     if (!configured()) return
-    def want = desired()
 
-    devices?.each { d ->
-        def isOn = d.currentValue("switch") == "on"
-        if (want && !isOn)      d.on()
-        else if (!want && isOn) d.off()
-        else if (want == isOn && reassert) { want ? d.on() : d.off() }
+    def want    = desired()
+    def changed = (want != state.lastWanted)
+
+    // Without re-assert we act only when the decision itself changes, so another app
+    // (All Decorations, a manual tap) can override us until the next real transition.
+    // With it, we drive the devices to the wanted state every minute — which heals a
+    // dropped Z-Wave command, and will also fight anything else driving these devices.
+    if (changed || reassert) {
+        devices?.each { d ->
+            def isOn = d.currentValue("switch") == "on"
+            if (want && !isOn)      d.on()
+            else if (!want && isOn) d.off()
+            else if (reassert)      { want ? d.on() : d.off() }
+        }
     }
 
-    if (want != state.lastWanted) {
+    if (changed) {
         if (state.lastWanted != null && announceChanges != false) {
             parent.announce("${app.label}: turning ${want ? 'on' : 'off'}${want ? '' : ' — ' + offReason()}")
         }
