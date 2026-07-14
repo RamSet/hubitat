@@ -1,0 +1,319 @@
+/**
+ *  Air Quality Window Alerts
+ *
+ *  Replaces three Rule Machine rules:
+ *    - "10.6 Windows Air Quality alerts"                    (open while air is bad)
+ *    - "10.11 Air quality alerts if windows are already open" (air turns bad while open)
+ *    - "Disable air quality monitoring if microwave is on"    (exhaust fan suppression)
+ *
+ *  The exhaust-fan suppression is a check inside this app, not a rule that pauses
+ *  other rules by ID — that ID coupling is what broke the original.
+ *
+ *  Air quality is read straight off the selected devices, so no Hub Variables are
+ *  required. Reads airQualityIndex (EPA 0-500) for the decision, and pm25 /
+ *  airQualityPlain / airQuality for message detail when the device exposes them.
+ */
+
+definition(
+    name:        "Air Quality Window Alerts",
+    namespace:   "ramset",
+    author:      "RamSet",
+    description: "Notifies when windows/doors are open and outdoor air quality is bad, with exhaust-fan suppression",
+    category:    "Convenience",
+    iconUrl:     "",
+    iconX2Url:   "",
+    importUrl:   "https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/apps/air-quality-window-alerts/air-quality-window-alerts.groovy"
+)
+
+preferences {
+    page(name: "mainPage")
+}
+
+// EPA AQI bands, worst last: [lower bound, label]
+def bands() {
+    [[0, "Good"], [51, "Moderate"], [101, "Unhealthy for Sensitive Groups"],
+     [151, "Unhealthy"], [201, "Very Unhealthy"], [301, "Hazardous"]]
+}
+
+def mainPage() {
+    dynamicPage(name: "mainPage", title: "Air Quality Window Alerts", install: true, uninstall: true) {
+        section("Status") {
+            paragraph statusHtml()
+        }
+        section("Sensors") {
+            input "contacts",  "capability.contactSensor", title: "Windows / doors to watch", multiple: true, required: true, submitOnChange: true
+            input "outdoorAQ", "capability.airQuality",    title: "Outdoor air quality sensor", required: true, submitOnChange: true
+            input "indoorAQ",  "capability.airQuality",    title: "Indoor air quality sensor (for message context, optional)", required: false, submitOnChange: true
+        }
+        section("When is the air 'bad'?") {
+            input "threshold", "enum", title: "Alert when outdoor air quality reaches",
+                  options: bands().collectEntries { [(it[0].toString()): it[1]] },
+                  defaultValue: "51", required: true, submitOnChange: true
+            paragraph "Judged on the sensor's <b>airQualityIndex</b> (EPA 0-500 scale). " +
+                      "Picking <i>Moderate</i> alerts on anything that is not Good."
+        }
+        section("Alerts") {
+            input "alertOnOpen",   "bool", title: "Alert when a window/door is opened while the air is already bad", defaultValue: true
+            input "alertOnWorsen", "bool", title: "Alert when the air turns bad (or gets worse) while a window/door is already open", defaultValue: true
+        }
+        section("Exhaust fan suppression (cooking)") {
+            paragraph "While the range hood / microwave fan is drawing power it is pulling cooking fumes out, " +
+                      "so indoor spikes are expected and alerts are held. When it stops, the app re-checks and " +
+                      "will alert if the air is still bad and something is still open."
+            input "exhaustMeter", "capability.powerMeter", title: "Microwave / range hood power meter", required: false, submitOnChange: true
+            if (exhaustMeter) {
+                input "exhaustWatts", "number", title: "Consider the fan running above (watts)", defaultValue: 50, required: true
+                input "exhaustLag",   "number", title: "Keep holding alerts for this many minutes after it stops", defaultValue: 5, required: true
+            }
+        }
+        section("Notify") {
+            input "notifiers", "capability.notification", title: "Notification devices", multiple: true, required: true
+        }
+        section("Options") {
+            input "logEnable", "bool", title: "Enable debug logging", defaultValue: true
+            label title: "Name this app", required: false
+        }
+    }
+}
+
+def installed() { initialize() }
+
+def updated() {
+    unsubscribe()
+    unschedule()
+    initialize()
+}
+
+def initialize() {
+    state.alerted    = false
+    state.alertedAqi = null
+    state.lastAqi    = currentAqi(outdoorAQ)
+    state.fanStopped = null
+
+    subscribe(contacts,  "contact",         contactHandler)
+    subscribe(outdoorAQ, "airQualityIndex", airQualityHandler)
+    if (exhaustMeter) subscribe(exhaustMeter, "power", powerHandler)
+
+    logDebug "initialized — ${contacts?.size()} contacts, outdoor AQI ${state.lastAqi}, threshold ${thresholdAqi()}"
+}
+
+// ---------------------------------------------------------------- handlers
+
+def contactHandler(evt) {
+    if (evt.value == "closed") {
+        if (!openContacts()) {
+            logDebug "all contacts closed — alert latch reset"
+            state.alerted    = false
+            state.alertedAqi = null
+        }
+        return
+    }
+
+    if (!alertOnOpen) return
+
+    def aqi = currentAqi(outdoorAQ)
+    if (aqi == null) {
+        log.warn "${outdoorAQ?.displayName} has no airQualityIndex value — cannot evaluate ${evt.displayName} opening"
+        return
+    }
+    if (aqi < thresholdAqi()) {
+        logDebug "${evt.displayName} opened but outdoor AQI ${aqi} is below threshold ${thresholdAqi()} — no alert"
+        return
+    }
+    if (state.alerted) {
+        logDebug "${evt.displayName} opened, air is bad, but an alert was already sent — staying quiet"
+        return
+    }
+    if (suppressed()) {
+        logDebug "${evt.displayName} opened and air is bad, but exhaust fan is running — holding alert"
+        return
+    }
+
+    sendAlert(openMessage(evt.displayName, aqi), aqi)
+}
+
+def airQualityHandler(evt) {
+    def aqi  = toInt(evt.value)
+    def prev = state.lastAqi
+    state.lastAqi = aqi
+    if (aqi == null) return
+
+    // Reset the latch on recovery regardless of which alerts are enabled, so a later
+    // spike is reported again.
+    if (aqi < thresholdAqi()) {
+        if (state.alerted) {
+            logDebug "outdoor AQI dropped to ${aqi}, below threshold — alert latch reset"
+            state.alerted    = false
+            state.alertedAqi = null
+        }
+        return
+    }
+
+    if (!alertOnWorsen) return
+
+    def open = openContacts()
+    if (!open) {
+        logDebug "outdoor AQI ${aqi} but nothing is open — no alert"
+        return
+    }
+    // Bad air, something is open. Alert on the first crossing, and again each time
+    // it degrades into a worse band than the one we last reported.
+    if (state.alerted && bandOf(aqi) <= bandOf(state.alertedAqi)) {
+        logDebug "outdoor AQI ${aqi} still in band '${bandName(aqi)}' already reported — staying quiet"
+        return
+    }
+    if (suppressed()) {
+        logDebug "outdoor AQI ${aqi} with ${open.size()} open, but exhaust fan is running — holding alert"
+        return
+    }
+
+    sendAlert(worsenMessage(aqi, prev, open), aqi)
+}
+
+def powerHandler(evt) {
+    def watts   = toBigDecimal(evt.value)
+    def running = watts != null && watts > (exhaustWatts ?: 50)
+
+    if (running) {
+        state.fanStopped = null
+        unschedule("fanSettled")
+        return
+    }
+    if (state.fanStopped != null) return   // already counting down
+
+    state.fanStopped = now()
+    def lag = (exhaustLag ?: 0) as Integer
+    logDebug "exhaust fan stopped (${watts}W) — re-checking in ${lag} minute(s)"
+    if (lag > 0) runIn(lag * 60, "fanSettled") else fanSettled()
+}
+
+// After cooking, re-evaluate: if the air is still bad and something is still open,
+// say so now — the alert we swallowed during cooking was never delivered.
+def fanSettled() {
+    state.fanStopped = null
+
+    def aqi = currentAqi(outdoorAQ)
+    if (aqi == null || aqi < thresholdAqi()) return
+    if (state.alerted) return
+
+    def open = openContacts()
+    if (!open) return
+
+    logDebug "exhaust fan settled, air is still bad (AQI ${aqi}) with ${open.size()} open — sending held alert"
+    sendAlert(worsenMessage(aqi, null, open), aqi)
+}
+
+// ---------------------------------------------------------------- messages
+
+def openMessage(String device, Integer aqi) {
+    def msg = "${device} is open and the outdoor air quality is ${bandLabel(outdoorAQ, aqi)} (${aqiDetail(outdoorAQ, aqi)})."
+    def inside = indoorSummary()
+    if (inside) msg += " ${inside}"
+    return msg
+}
+
+def worsenMessage(Integer aqi, Integer prev, List open) {
+    // prev is a past reading, so it gets the band name, not the device's current wording.
+    def msg = (prev != null && bandOf(prev) < bandOf(aqi))
+        ? "Outdoor air quality has worsened from ${bandName(prev)} to ${bandLabel(outdoorAQ, aqi)} (${aqiDetail(outdoorAQ, aqi)})."
+        : "Outdoor air quality is ${bandLabel(outdoorAQ, aqi)} (${aqiDetail(outdoorAQ, aqi)})."
+
+    msg += " Please close: ${open*.displayName.sort().join(', ')}."
+    def inside = indoorSummary()
+    if (inside) msg += " ${inside}"
+    return msg
+}
+
+def indoorSummary() {
+    if (!indoorAQ) return null
+    def aqi = currentAqi(indoorAQ)
+    if (aqi == null) return null
+    return "Indoors it is ${bandLabel(indoorAQ, aqi)} (${aqiDetail(indoorAQ, aqi)})."
+}
+
+// "AQI 158, PM2.5 68 µg/m³" — drops the PM2.5 half if the device does not report it.
+def aqiDetail(dev, Integer aqi) {
+    def bits = ["AQI ${aqi}"]
+    def pm25 = dev?.currentValue("pm25")
+    if (pm25 != null) bits << "PM2.5 ${pm25} µg/m³"
+    return bits.join(", ")
+}
+
+def sendAlert(String msg, Integer aqi) {
+    log.info "alert: ${msg}"
+    notifiers*.deviceNotification(msg)
+    state.alerted    = true
+    state.alertedAqi = aqi
+}
+
+// ---------------------------------------------------------------- helpers
+
+def openContacts() {
+    contacts?.findAll { it.currentValue("contact") == "open" } ?: []
+}
+
+def suppressed() {
+    if (!exhaustMeter) return false
+    def watts = toBigDecimal(exhaustMeter.currentValue("power"))
+    if (watts != null && watts > (exhaustWatts ?: 50)) return true
+    if (state.fanStopped == null) return false
+    return (now() - state.fanStopped) < ((exhaustLag ?: 0) as Integer) * 60000L
+}
+
+def thresholdAqi() { toInt(threshold) ?: 51 }
+
+def currentAqi(dev) { toInt(dev?.currentValue("airQualityIndex")) }
+
+// Index into bands(), so severity can be compared with < and >.
+def bandOf(aqi) {
+    def n = toInt(aqi)
+    if (n == null) return -1
+    def b = bands()
+    def i = 0
+    b.eachWithIndex { band, ndx -> if (n >= band[0]) i = ndx }
+    return i
+}
+
+def bandName(aqi) {
+    def n = toInt(aqi)
+    return n == null ? "unknown" : bands()[bandOf(n)][1]
+}
+
+// Prefer the device's own wording (IKEA publishes airQualityPlain) over our band name,
+// but only for that device's current reading — never for a historical value.
+def bandLabel(dev, aqi) {
+    def n = toInt(aqi)
+    if (n == null) return "unknown"
+    def plain = (n == currentAqi(dev)) ? dev?.currentValue("airQualityPlain") : null
+    return plain ?: bandName(n)
+}
+
+def statusHtml() {
+    if (!outdoorAQ || !contacts) return "Pick sensors below to see live readings here."
+    def open = openContacts()
+    def out  = currentAqi(outdoorAQ)
+    def rows = []
+    rows << "Outdoor: <b>${out == null ? 'no reading' : bandLabel(outdoorAQ, out) + ' (' + aqiDetail(outdoorAQ, out) + ')'}</b>"
+    if (indoorAQ) {
+        def inn = currentAqi(indoorAQ)
+        rows << "Indoor: <b>${inn == null ? 'no reading' : bandLabel(indoorAQ, inn) + ' (' + aqiDetail(indoorAQ, inn) + ')'}</b>"
+    }
+    rows << "Open right now: <b>${open ? open*.displayName.sort().join(', ') : 'nothing'}</b>"
+    if (exhaustMeter) {
+        rows << "Exhaust fan: <b>${suppressed() ? 'running — alerts held' : 'off'}</b> (${exhaustMeter.currentValue('power')}W)"
+    }
+    rows << "Alert already sent: <b>${state.alerted ? 'yes' : 'no'}</b>"
+    return rows.join("<br>")
+}
+
+def toInt(v) {
+    if (v == null) return null
+    try { return (v as BigDecimal).intValue() } catch (e) { return null }
+}
+
+def toBigDecimal(v) {
+    if (v == null) return null
+    try { return v as BigDecimal } catch (e) { return null }
+}
+
+def logDebug(msg) { if (logEnable) log.debug msg }
