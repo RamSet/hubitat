@@ -1,0 +1,32 @@
+{
+  "packageName": "Holiday Decorations",
+  "author": "RamSet",
+  "version": "1.0.0",
+  "releaseNotes": "Runs seasonal decorations on a schedule, with shared wind and rain protection. Each season is its own schedule: the decorations it drives, the days of the year it is live (a range may wrap the new year), and when in the evening it should come on, whether that is at sunset, at a fixed time, or as soon as it gets dark. Anything you mark as weather-protected is switched off while it is wet or windy, and comes back once the weather has been clear for a settle time you choose. Schedules can also be held off by the security system's state, for decorations you do not want running when the house is armed. The app page shows every schedule, the weather, the light level, and warns you if two seasons claim the same days of the calendar.",
+  "category": "Convenience",
+  "tags": "Holiday, Decorations, Seasonal, Christmas, Halloween, Weather, Inflatables",
+  "dateReleased": "2026-07-14",
+  "minimumHEVersion": "2.3.0",
+  "apps": [
+    {
+      "id": "40833066-ea99-4e5c-bdd9-e1e9d2eeba15",
+      "name": "Holiday Decorations",
+      "namespace": "ramset",
+      "location": "https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/apps/holiday-decorations/holiday-decorations.groovy",
+      "required": true,
+      "oauth": false,
+      "primary": true,
+      "description": "Parent app: shared wind/rain protection, darkness sensing, and notifications for seasonal decorations."
+    },
+    {
+      "id": "302dd9c0-5eb3-413f-8998-bf2a5cbcdadd",
+      "name": "Holiday Decorations Schedule",
+      "namespace": "ramset",
+      "location": "https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/apps/holiday-decorations/holiday-decorations-schedule.groovy",
+      "required": true,
+      "oauth": false,
+      "primary": false,
+      "description": "Child app: one decoration schedule (devices, season, evening window, weather and security vetoes)."
+    }
+  ]
+}

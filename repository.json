@@ -67,6 +67,12 @@
       "category": "Safety",
       "location": "https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/manifest-uv-alerts.json",
       "description": "Warns about UV exposure when an exterior door is opened, with editable per-band messages and an optional siren strobe."
+    },
+    {
+      "name": "Holiday Decorations",
+      "category": "Convenience",
+      "location": "https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/manifest-holiday-decorations.json",
+      "description": "Seasonal decoration schedules with shared wind and rain protection, darkness sensing, and a security-state veto."
     }
   ]
 }
