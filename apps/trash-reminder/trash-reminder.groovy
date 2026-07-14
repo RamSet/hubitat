@@ -4,7 +4,7 @@
  *  Reminds you to put the bins out, and tells you which bins.
  *
  *  Collections are modelled as independent streams sharing a collection day. Each stream
- *  has its own frequency: rubbish might go out every week while recycling goes out every
+ *  has its own frequency: garbage might go out every week while recycling goes out every
  *  second week, in which case a recycling week means both bins, not one instead of the
  *  other. Change a frequency and the reminders follow.
  *
@@ -45,16 +45,16 @@ def mainPage() {
             input "collectionDay", "enum", title: "Bins go out on", options: DAYS(), required: true, submitOnChange: true
         }
         section("What goes out, and how often") {
-            paragraph "Each stream is independent. If rubbish is every week and recycling every second week, " +
+            paragraph "Each stream is independent. If garbage is every week and recycling every second week, " +
                       "then on a recycling week <b>both</b> go out — and the reminder says so."
 
-            input "trashOn", "bool", title: "Rubbish", defaultValue: true, submitOnChange: true
+            input "trashOn", "bool", title: "Garbage", defaultValue: true, submitOnChange: true
             if (trashOn != false) {
                 input "trashEvery", "enum", title: "collected", options: EVERY(), defaultValue: "1", required: true, submitOnChange: true, width: 6
                 if ((trashEvery ?: "1") != "1") {
                     input "trashAnchor", "date", title: "...counting from this collection date", required: true, submitOnChange: true, width: 6
                 }
-                input "trashLights", "capability.switch", title: "Light for rubbish (optional)", multiple: true, required: false, submitOnChange: true
+                input "trashLights", "capability.switch", title: "Light for garbage (optional)", multiple: true, required: false, submitOnChange: true
             }
 
             input "recycleOn", "bool", title: "Recycling", defaultValue: true, submitOnChange: true
@@ -69,7 +69,7 @@ def mainPage() {
             if (allLights()) {
                 paragraph "Lights come on <b>the day before</b> collection, on their own schedule — independent of the " +
                           "reminders below. Each stream's light comes on only when <b>that</b> stream is actually due, " +
-                          "so on a rubbish-only week the recycling light stays off, and on a double week both come on."
+                          "so on a garbage-only week the recycling light stays off, and on a double week both come on."
                 input "lightsAt",  "time",   title: "Switch the lights on at (the day before)", defaultValue: "07:00", required: true, width: 6
                 input "lightsFor", "number", title: "and off again after (hours)", defaultValue: 12, required: true, width: 6
             }
@@ -81,7 +81,7 @@ def mainPage() {
             input "remindDay",   "time", title: "On the morning of", required: false
         }
         section(hideable: true, hidden: true, "Messages") {
-            paragraph "Tokens: <b>%what%</b> what goes out, e.g. <i>Rubbish and Recycling</i> &nbsp; " +
+            paragraph "Tokens: <b>%what%</b> what goes out, e.g. <i>Garbage and Recycling</i> &nbsp; " +
                       "<b>%day%</b> e.g. <i>Thursday</i>"
             input "msgEve",   "textarea", title: "Evening before", defaultValue: defaultEve(),   required: false
             input "msgFinal", "textarea", title: "Final reminder", defaultValue: defaultFinal(), required: false
@@ -130,7 +130,7 @@ def cronFor(timeSetting) {
 // Each stream: what it is, how often, the date to count from, and its own light.
 def streams() {
     def out = []
-    if (trashOn   != false) out << [name: "Rubbish",   every: ((trashEvery   ?: "1") as Integer), anchor: parseDate(trashAnchor),   lights: trashLights]
+    if (trashOn   != false) out << [name: "Garbage",   every: ((trashEvery   ?: "1") as Integer), anchor: parseDate(trashAnchor),   lights: trashLights]
     if (recycleOn != false) out << [name: "Recycling", every: ((recycleEvery ?: "2") as Integer), anchor: parseDate(recycleAnchor), lights: recycleLights]
     return out
 }
@@ -152,7 +152,7 @@ def whatGoesOut(Date d) {
     d == null ? [] : streams().findAll { isDue(d, it) }*.name
 }
 
-// "Rubbish", "Rubbish and Recycling", "Rubbish, Recycling and Garden"
+// "Garbage", "Garbage and Recycling", "Garbage, Recycling and Garden"
 def whatText(Date d) {
     def w = whatGoesOut(d)
     if (!w)            return "nothing"

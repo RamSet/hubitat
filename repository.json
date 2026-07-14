@@ -84,7 +84,7 @@
       "name": "Trash Reminder",
       "category": "Convenience",
       "location": "https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/manifest-trash-reminder.json",
-      "description": "Reminds you to take the bins out, tracking alternating rubbish and recycling weeks without needing a date/time device."
+      "description": "Reminds you to take the bins out, tracking alternating garbage and recycling weeks without needing a date/time device."
     }
   ]
 }
