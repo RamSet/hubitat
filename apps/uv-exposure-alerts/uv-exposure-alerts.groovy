@@ -9,9 +9,6 @@
  *
  *  The UV index is read from a sensor's illuminance attribute (rule 10.8 used the
  *  "UV" Virtual Illuminance Sensor, whose illuminance value IS the UV index).
- *
- *  The rule also mirrored the reading into the "UV" Hub Variable; other rules and
- *  dashboards may depend on that, so this app can keep doing it.
  */
 
 definition(
@@ -67,12 +64,6 @@ def mainPage() {
                 input "strobeFor", "number", title: "Then turn it off after (minutes)", defaultValue: 2, required: true
             }
         }
-        section(hideable: true, hidden: true, "Hub Variable (optional)") {
-            paragraph "Rule 10.8 copied the UV reading into a Hub Variable. If anything else " +
-                      "still reads that variable, keep it updated here. The variable must already " +
-                      "exist (Settings &gt; Hub Variables); this app cannot create it."
-            input "uvVar", "enum", title: "Publish the UV index to", options: varOptions(), required: false
-        }
         section("Options") {
             input "logEnable", "bool", title: "Enable debug logging", defaultValue: true
             label title: "Name this app", required: false
@@ -85,33 +76,15 @@ def installed() { initialize() }
 def updated() {
     unsubscribe()
     unschedule()
-    removeAllInUseGlobalVar()
     initialize()
 }
 
-def uninstalled() { removeAllInUseGlobalVar() }
-
 def initialize() {
     subscribe(contacts, "contact.open", contactHandler)
-    if (uvVar) {
-        if ((getAllGlobalVars() ?: [:]).containsKey(uvVar)) addInUseGlobalVar(uvVar)
-        else log.warn "Hub Variable '${uvVar}' does not exist — create it under Settings > Hub Variables. Skipping."
-        subscribe(uvSensor, "illuminance", uvHandler)
-        uvHandler()
-    }
     logDebug "initialized — ${contacts?.size()} doors, UV ${currentUv()}"
 }
 
 // ---------------------------------------------------------------- handlers
-
-// Keep the Hub Variable current, independently of any door opening.
-def uvHandler(evt = null) {
-    def uv = currentUv()
-    if (uv == null || !uvVar) return
-    if (getGlobalVar(uvVar)?.value?.toString() == uv.toString()) return
-    setGlobalVar(uvVar, uv)
-    logDebug "Hub Variable ${uvVar} = ${uv}"
-}
 
 def contactHandler(evt) {
     def wait = (openFor ?: 0) as Integer
@@ -247,10 +220,6 @@ def bandOf(uv) {
 def bandName(uv) {
     def n = toInt(uv)
     return n == null ? "unknown" : bands()[bandOf(n)][1]
-}
-
-def varOptions() {
-    (getAllGlobalVars() ?: [:]).keySet().sort().collectEntries { [(it): it] }
 }
 
 def statusHtml() {
