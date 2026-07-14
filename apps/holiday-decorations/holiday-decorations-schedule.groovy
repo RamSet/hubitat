@@ -62,7 +62,9 @@ def mainPage() {
             def mode = onWhen ?: "dark"
 
             if (mode == "sunset") {
-                input "sunsetOffset", "number", title: "Minutes relative to sunset (negative = before)", defaultValue: -30, required: true
+                // Without an explicit range, Hubitat's number input refuses negatives.
+                input "sunsetOffset", "number", title: "Minutes relative to sunset (negative = before sunset)",
+                      range: "-240..240", defaultValue: -30, required: true
                 input "notBefore",    "time",   title: "But never before (optional)", required: false
             }
             if (mode == "time") {
