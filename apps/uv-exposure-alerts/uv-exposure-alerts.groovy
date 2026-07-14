@@ -53,6 +53,7 @@ def mainPage() {
         }
         section("Notify") {
             input "notifiers", "capability.notification", title: "Notification devices", multiple: true, required: true
+            input "cooldown",  "number", title: "After an alert, stay quiet for at least this many minutes", defaultValue: 5, required: true
         }
         section(hideable: true, hidden: true, "Strobe (optional)") {
             paragraph "The original rule strobed a siren on the worst bands and turned it off after 2 minutes."
@@ -112,10 +113,25 @@ def stillOpen(data) {
         logDebug "${data.device} opened, UV ${uv} (${bandName(uv)}) — no message configured for this band, staying quiet"
         return
     }
+    if (cooling()) {
+        logDebug "${data.device} opened, UV ${uv} (${bandName(uv)}) but only ${sinceLastAlert()}s since the last alert — cooling down"
+        return
+    }
 
     log.info "alert: ${msg}"
     notifiers*.deviceNotification(msg)
+    state.lastAlertAt = now()
     maybeStrobe(band, uv)
+}
+
+// A hard floor between notifications, however many doors open in the meantime.
+def cooling() {
+    if (state.lastAlertAt == null) return false
+    return sinceLastAlert() < ((cooldown ?: 0) as Integer) * 60
+}
+
+def sinceLastAlert() {
+    state.lastAlertAt == null ? null : ((now() - state.lastAlertAt) / 1000L) as Long
 }
 
 def maybeStrobe(Integer band, Integer uv) {
@@ -232,6 +248,7 @@ def statusHtml() {
     }
     def open = contacts?.findAll { it.currentValue("contact") == "open" } ?: []
     rows << "Open right now: <b>${open ? open*.displayName.sort().join(', ') : 'nothing'}</b>"
+    if (cooling()) rows << "Cooling down: <b>${(((cooldown ?: 0) as Integer) * 60) - sinceLastAlert()}s left</b>"
     return rows.join("<br>")
 }
 

@@ -68,6 +68,7 @@ def mainPage() {
         }
         section("Notify") {
             input "notifiers", "capability.notification", title: "Notification devices", multiple: true, required: true
+            input "cooldown",  "number", title: "After an alert, stay quiet for at least this many minutes", defaultValue: 5, required: true
         }
         section(hideable: true, hidden: true, "Messages") {
             paragraph "Leave these alone for sensible defaults, or rewrite them. Tokens:<br>" + tokenHelp()
@@ -283,10 +284,25 @@ def aqiDetail(dev, Integer aqi) {
 }
 
 def sendAlert(String msg, Integer aqi) {
+    if (cooling()) {
+        logDebug "would alert (${msg}) but only ${sinceLastAlert()}s since the last one — cooling down"
+        return
+    }
     log.info "alert: ${msg}"
     notifiers*.deviceNotification(msg)
-    state.alerted    = true
-    state.alertedAqi = aqi
+    state.alerted     = true
+    state.alertedAqi  = aqi
+    state.lastAlertAt = now()
+}
+
+// A hard floor between notifications, however many sensors trip in the meantime.
+def cooling() {
+    if (state.lastAlertAt == null) return false
+    return sinceLastAlert() < ((cooldown ?: 0) as Integer) * 60
+}
+
+def sinceLastAlert() {
+    state.lastAlertAt == null ? null : ((now() - state.lastAlertAt) / 1000L) as Long
 }
 
 // ---------------------------------------------------------------- helpers
@@ -346,6 +362,7 @@ def statusHtml() {
         rows << "Exhaust fan: <b>${suppressed() ? 'running — alerts held' : 'off'}</b> (${exhaustMeter.currentValue('power')}W)"
     }
     rows << "Alert already sent: <b>${state.alerted ? 'yes' : 'no'}</b>"
+    if (cooling()) rows << "Cooling down: <b>${(((cooldown ?: 0) as Integer) * 60) - sinceLastAlert()}s left</b>"
     return rows.join("<br>")
 }
 
