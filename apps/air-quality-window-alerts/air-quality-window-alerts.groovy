@@ -427,11 +427,13 @@ def bandName(aqi) {
 
 // Prefer the device's own wording, where it publishes airQualityPlain, over our band
 // name — but only for that device's current reading, never for a historical value.
+// The label MUST come from the same scale the threshold is defined on (bands()), never
+// from the device's own airQualityPlain — a sensor whose "good" runs higher than EPA's
+// would otherwise print "good" on an alert that only fired because the number crossed the
+// threshold. Same-scale word and trigger, no contradiction.
 def bandLabel(dev, aqi) {
     def n = toInt(aqi)
-    if (n == null) return "unknown"
-    def plain = (n == currentAqi(dev)) ? dev?.currentValue("airQualityPlain") : null
-    return plain ?: bandName(n)
+    return n == null ? "unknown" : bandName(n)
 }
 
 // ---------------------------------------------------------------- status panel
