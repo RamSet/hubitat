@@ -236,19 +236,31 @@ def fanSettled() {
 // ---------------------------------------------------------------- messages
 
 def defaultOpenMsg() {
-    '%device% is open and the outdoor air quality is %outdoorLevel% (%outdoorDetail%). %indoorSummary%'
+    '%device% is open and the air outside is %outdoorLevel% — %outdoorAdvice% (%outdoorDetail%). %indoorSummary%'
 }
 
 def defaultWorsenMsg() {
-    'Outdoor air quality is now %outdoorLevel% (%outdoorDetail%). Please close: %openSensors%. %indoorSummary%'
+    'The air outside is now %outdoorLevel% — %outdoorAdvice%. Please close: %openSensors% (%outdoorDetail%). %indoorSummary%'
+}
+
+// Plain-English "so what should I do", one per air-quality band, for whoever reads the
+// alert rather than the numbers. Keyed by band index (see bands()).
+def adviceFor(aqi) {
+    [ "the air is clean",                        // Good
+      "fine for most people",                    // Moderate
+      "not ideal if anyone is sensitive",        // Unhealthy for Sensitive Groups
+      "keep the windows shut",                   // Unhealthy
+      "keep everything closed",                  // Very Unhealthy
+      "keep it closed up and stay inside",       // Hazardous
+    ][bandOf(aqi)]
 }
 
 def tokenHelp() {
     [ "<b>%device%</b> the sensor that just opened",
       "<b>%openSensors%</b> every sensor currently open, comma separated",
       "<b>%openCount%</b> how many are open",
-      "<b>%outdoorLevel%</b> e.g. Unhealthy &nbsp; <b>%outdoorDetail%</b> e.g. AQI 158, PM2.5 68 µg/m³",
-      "<b>%outdoorSource%</b> which sensor is driving the reading, e.g. Outside Air Quality TVOC",
+      "<b>%outdoorLevel%</b> e.g. Unhealthy &nbsp; <b>%outdoorAdvice%</b> plain English, e.g. keep the windows shut",
+      "<b>%outdoorDetail%</b> e.g. AQI 158, PM2.5 68 µg/m³ &nbsp; <b>%outdoorSource%</b> which sensor is driving it",
       "<b>%outdoorAQI%</b> &nbsp; <b>%outdoorPM25%</b> &nbsp; <b>%previousLevel%</b> the band before this change",
       "<b>%indoorSummary%</b> a whole sentence about indoors, empty if no indoor sensor",
       "<b>%indoorLevel%</b> &nbsp; <b>%indoorDetail%</b> &nbsp; <b>%indoorSource%</b> &nbsp; <b>%indoorAQI%</b> &nbsp; <b>%indoorPM25%</b>"
@@ -271,6 +283,7 @@ def tokens(String device, Integer aqi, Integer prev, List open) {
         '%openSensors%'  : open ? open*.displayName.sort().join(', ') : '',
         '%openCount%'    : (open?.size() ?: 0).toString(),
         '%outdoorLevel%' : out == null ? '' : bandLabel(out.dev, aqi ?: out.aqi),
+        '%outdoorAdvice%': out == null ? '' : adviceFor(aqi ?: out.aqi),
         '%outdoorDetail%': out == null ? '' : aqiDetail(out.dev, aqi ?: out.aqi),
         '%outdoorSource%': out == null ? '' : out.dev.displayName,
         '%outdoorAQI%'   : aqi == null ? '' : aqi.toString(),
