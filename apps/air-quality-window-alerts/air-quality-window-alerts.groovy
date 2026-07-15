@@ -113,10 +113,13 @@ def updated() {
 }
 
 def initialize() {
-    state.alerted    = false
-    state.alertedAqi = null
-    state.lastAqi    = outdoorWorst()?.aqi
-    state.fanStopped = null
+    // The highest air-quality band already announced this spell (index into bands()), or
+    // null when the air is OK. One alert per band: it re-fires only when the air crosses
+    // into a WORSE category, and re-arms only when the air recovers below the threshold —
+    // not merely because windows were closed and reopened.
+    state.alertedBand = null
+    state.lastAqi     = outdoorWorst()?.aqi
+    state.fanStopped  = null
 
     subscribe(contacts,  "contact",         contactHandler)
     subscribe(outdoorAQ, "airQualityIndex", airQualityHandler)
@@ -128,14 +131,10 @@ def initialize() {
 // ---------------------------------------------------------------- handlers
 
 def contactHandler(evt) {
-    if (evt.value == "closed") {
-        if (!openContacts()) {
-            logDebug "all contacts closed — alert latch reset"
-            state.alerted    = false
-            state.alertedAqi = null
-        }
-        return
-    }
+    // Closing windows does NOT re-arm the latch: if you were already told the air is bad,
+    // shutting and reopening a window should not fetch the same alert again. Only the air
+    // recovering re-arms (see airQualityHandler).
+    if (evt.value == "closed") return
 
     if (!alertOnOpen) return
 
@@ -148,8 +147,8 @@ def contactHandler(evt) {
         logDebug "${evt.displayName} opened but outdoor AQI ${aqi} is below threshold ${thresholdAqi()} — no alert"
         return
     }
-    if (state.alerted) {
-        logDebug "${evt.displayName} opened, air is bad, but an alert was already sent — staying quiet"
+    if (!bandIsNew(aqi)) {
+        logDebug "${evt.displayName} opened, air is ${bandName(aqi)}, but that category was already reported — staying quiet"
         return
     }
     if (suppressed()) {
@@ -160,6 +159,12 @@ def contactHandler(evt) {
     sendAlert(openMessage(evt.displayName, aqi), aqi)
 }
 
+// True only when this reading is a category we have not announced this spell — the first
+// bad reading, or a step up into a worse band. Same or lower band → already covered.
+def bandIsNew(Integer aqi) {
+    state.alertedBand == null || bandOf(aqi) > state.alertedBand
+}
+
 def airQualityHandler(evt) {
     // Recompute across every sensor rather than trusting evt.value: a clean PM2.5
     // reading arriving after a bad TVOC one must not overwrite the verdict.
@@ -168,13 +173,12 @@ def airQualityHandler(evt) {
     state.lastAqi = aqi
     if (aqi == null) return
 
-    // Reset the latch on recovery regardless of which alerts are enabled, so a later
-    // spike is reported again.
+    // Recovery re-arms the latch, regardless of which alerts are enabled, so a later spike
+    // is reported again. This is the ONLY thing that re-arms it.
     if (aqi < thresholdAqi()) {
-        if (state.alerted) {
+        if (state.alertedBand != null) {
             logDebug "outdoor AQI dropped to ${aqi}, below threshold — alert latch reset"
-            state.alerted    = false
-            state.alertedAqi = null
+            state.alertedBand = null
         }
         return
     }
@@ -186,9 +190,9 @@ def airQualityHandler(evt) {
         logDebug "outdoor AQI ${aqi} but nothing is open — no alert"
         return
     }
-    // Bad air, something is open. Alert on the first crossing, and again each time
-    // it degrades into a worse band than the one we last reported.
-    if (state.alerted && bandOf(aqi) <= bandOf(state.alertedAqi)) {
+    // Bad air, something is open. Alert on the first crossing, and again only when it
+    // degrades into a worse category than the one already reported.
+    if (!bandIsNew(aqi)) {
         logDebug "outdoor AQI ${aqi} still in band '${bandName(aqi)}' already reported — staying quiet"
         return
     }
@@ -224,7 +228,7 @@ def fanSettled() {
 
     def aqi = outdoorWorst()?.aqi
     if (aqi == null || aqi < thresholdAqi()) return
-    if (state.alerted) return
+    if (!bandIsNew(aqi)) return
 
     def open = openContacts()
     if (!open) return
@@ -332,8 +336,8 @@ def sendAlert(String msg, Integer aqi, boolean gated = true) {
     }
     log.info "alert: ${msg}"
     deliver(msg)
-    state.alerted     = true
-    state.alertedAqi  = aqi
+    // Latch this category so it will not fire again until the air worsens or recovers.
+    state.alertedBand = bandOf(aqi)
     state.lastAlertAt = now()
 }
 
@@ -491,8 +495,8 @@ def airHtml(dev, governing = null) {
 }
 
 def alertStateHtml() {
-    def bits = [state.alerted
-        ? "${dot('#e67e22')} already alerted for this spell"
+    def bits = [state.alertedBand != null
+        ? "${dot('#e67e22')} already alerted at <b>${bands()[state.alertedBand][1]}</b> — quiet until it worsens or clears"
         : "${dot('#27ae60')} nothing sent"]
     if (state.lastAlertAt) bits << "last ${new Date(state.lastAlertAt as Long).format('MMM d, h:mm a', location.timeZone)}"
     if (cooling()) bits << "<b>cooling down</b>, ${(((cooldown ?: 0) as Integer) * 60) - sinceLastAlert()}s left"
