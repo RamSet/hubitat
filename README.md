@@ -37,7 +37,7 @@ package's manifest link from the table.
 | **IKEA Air Quality to Hub Variables** | Publishes IKEA Vindstyrka (E2112) PM2.5, air quality, temperature, and humidity into Hub Variables for indoor and outdoor sensors. | [manifest](https://raw.githubusercontent.com/RamSet/hubitat/main/manifest-ikea-aqi.json) |
 | **Air Quality Window Alerts** | Notifies when windows/doors are open and outdoor air quality is bad, naming every open sensor; holds alerts while a range hood or microwave fan is exhausting cooking fumes. | [manifest](https://raw.githubusercontent.com/RamSet/hubitat/main/manifest-aq-window-alerts.json) |
 | **Virtual AQI Driver** | Virtual Air Quality Index (AQI) driver for Hubitat. | [manifest](https://raw.githubusercontent.com/RamSet/hubitat/main/manifest-aqi.json) |
-| **Acuparse Weather Station** | Weather driver for polling Acuparse JSON data with capability integration, timestamp parsing, and optional extra fields. | [manifest](https://raw.githubusercontent.com/RamSet/hubitat/main/manifest-acuparse.json) |
+| **[Acuparse Weather Station](https://community.hubitat.com/t/release-acuparse-weather-station-driver-for-hubitat/152966?u=ramset)** | Weather driver for polling Acuparse JSON data with capability integration, timestamp parsing, and optional extra fields. | [manifest](https://raw.githubusercontent.com/RamSet/hubitat/main/manifest-acuparse.json) |
 
 ### Irrigation
 | Package | What it does | Install |
