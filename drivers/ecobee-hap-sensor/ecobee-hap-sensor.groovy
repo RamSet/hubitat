@@ -8,10 +8,14 @@
  *   on its own.
  *
  * Author: RamSet
- * Version: 0.12.0
- * Date: 2026-07-07
+ * Version: 0.13.0
+ * Date: 2026-07-15
  *
  * Changelog:
+ *  v0.13.0 - Added timeSinceMotion / timeSinceOccupancy: a human-readable form of the secondsSince* activity
+ *           timers (e.g. "3h 50m", "13d 4h", "1mo 2d"), so a sensor's activity age reads at a glance while the
+ *           numeric secondsSince* attributes stay available for rules. Shows "unknown" when the ecobee reports
+ *           its -1 sentinel. Populated by the parent thermostat driver 0.19.1+.
  *  v0.12.0 - Removed the Battery capability + lowBattery attribute. ecobee SmartSensor battery over HomeKit
  *           reads 100% / not-low until the sensor dies (confirmed on multiple ecobees) — misleading, not useful.
  *           The thermostat's alert flags a low/lost sensor reliably. Commented out (not deleted) for easy restore.
@@ -51,6 +55,8 @@ metadata {
         attribute "ecobeeId", "string"
         attribute "secondsSinceMotion", "number"      // ecobee vendor timer (inferred): seconds since last motion; polled ~5-min
         attribute "secondsSinceOccupancy", "number"   // ecobee vendor timer (inferred): seconds since last occupancy; polled ~5-min
+        attribute "timeSinceMotion", "string"         // human-readable form of secondsSinceMotion (e.g. "3h 50m", "13d 4h"); "unknown" if the ecobee reports its -1 sentinel
+        attribute "timeSinceOccupancy", "string"      // human-readable form of secondsSinceOccupancy
     }
 }
 // Values are pushed by the parent thermostat device on refresh; nothing to do here.

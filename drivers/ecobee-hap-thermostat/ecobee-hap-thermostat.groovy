@@ -17,12 +17,16 @@
  *   this driver (HPM does it automatically).
  *
  * Author: RamSet
- * Version: 0.19.0
+ * Version: 0.19.1
  * Date: 2026-07-15
  *
  * REQUIRES library: RamSet.hapCore (installed automatically by Hubitat Package Manager).
  *
  * Changelog:
+ *  v0.19.1 - Sensor children now also get timeSinceMotion / timeSinceOccupancy — a human-readable form of the
+ *           secondsSince* activity timers (e.g. "3h 50m", "13d 4h", "1mo 2d"), for reading a sensor's activity
+ *           age at a glance. The numeric secondsSince* attributes stay for rules; this is the companion display.
+ *           Requires the Ecobee HAP Remote Sensor child driver 0.13.0+.
  *  v0.19.0 - New preference "Live-session safety-reconnect window (seconds)": how long the live HomeKit session
  *           may go with no pushed event before the driver reconnects to re-sync (re-subscribe + fresh read). An
  *           idle ecobee (HVAC off, temperature steady) pushes nothing for minutes, which tripped the old fixed
@@ -329,6 +333,18 @@ def setSchedule(s){}
 
 // ===== unit conversion (device-specific) =====
 BigDecimal round1(BigDecimal v){ return (v*10).setScale(0, java.math.RoundingMode.HALF_UP)/10 }
+// humanize an elapsed-seconds value into a compact top-2-unit string (e.g. "3h 50m", "13d 4h", "1mo 2d").
+// null/negative -> "unknown" (-1 is the ecobee's "unknown" sentinel). Approximate: month=30d, year=365d.
+String humanizeDuration(v){
+    if(v==null) return "unknown"
+    long s = v as long
+    if(s < 0) return "unknown"
+    if(s == 0) return "0s"
+    def units = [[31536000L,"y"],[2592000L,"mo"],[86400L,"d"],[3600L,"h"],[60L,"m"],[1L,"s"]]
+    def parts = []
+    for(u in units){ long q=(long)(s/(u[0] as long)); if(q>0){ parts << "${q}${u[1]}"; s-=q*(u[0] as long) }; if(parts.size()==2) break }
+    return parts.join(" ")
+}
 boolean isF(){ return (location?.temperatureScale ?: "F") == "F" }
 def hubToC(BigDecimal t){ isF()? ((t-32)*5/9) : t }
 def cToHub(v){ if(v==null) return null; def c=(v as BigDecimal); return isF()? round1(c*9/5+32) : round1(c) }
@@ -522,7 +538,7 @@ void onCharacteristics(j){
         // if(val(s.batt)!=null) cd.sendEvent(name:"battery", value: val(s.batt) as int, unit:"%")
         // else if(s.isMain) cd.sendEvent(name:"battery", value: 100, unit:"%")   // thermostat is wired — report full
         // if(val(s.lowbatt)!=null) cd.sendEvent(name:"lowBattery", value: ((val(s.lowbatt) as int)==1?"true":"false"))
-        if(val(s.motionSince)!=null) cd.sendEvent(name:"secondsSinceMotion", value: val(s.motionSince) as int, unit:"s")   // ecobee vendor timer (inferred); polled, ~5-min granularity
-        if(val(s.occSince)!=null) cd.sendEvent(name:"secondsSinceOccupancy", value: val(s.occSince) as int, unit:"s")
+        if(val(s.motionSince)!=null){ int ms=val(s.motionSince) as int; cd.sendEvent(name:"secondsSinceMotion", value: ms, unit:"s"); cd.sendEvent(name:"timeSinceMotion", value: humanizeDuration(ms)) }   // ecobee vendor timer (inferred); polled, ~5-min granularity. timeSince* = human-readable companion.
+        if(val(s.occSince)!=null){ int os=val(s.occSince) as int; cd.sendEvent(name:"secondsSinceOccupancy", value: os, unit:"s"); cd.sendEvent(name:"timeSinceOccupancy", value: humanizeDuration(os)) }
     }
 }

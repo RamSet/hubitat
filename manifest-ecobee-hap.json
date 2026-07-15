@@ -1,8 +1,8 @@
 {
   "packageName": "Ecobee HAP Thermostat (Local)",
   "author": "RamSet",
-  "version": "0.19.0",
-  "releaseNotes": "0.19.0 - Stops the log filling up with 'HAP: no update in Ns — reconnecting to reconcile' on an idle thermostat. When the HVAC is off and the temperature is steady, the ecobee sends no HomeKit updates for a few minutes; that tripped a fixed 2-minute 'is the session still alive?' timer and forced a reconnect over and over. There's now a configurable window (new 'Live-session safety-reconnect window' preference, default 6 minutes — above the background refresh) so a quiet, healthy thermostat stays connected instead of reconnecting on a loop, and that message is now an info note rather than a warning (hapCore 0.10.3). Nothing was malfunctioning before — it was noisy, not broken. After updating, open the thermostat device once and click Save Preferences for the new window to take effect.",
+  "version": "0.19.1",
+  "releaseNotes": "0.19.1 - Remote sensors now also show their 'time since last motion/occupancy' in a human-readable form (timeSinceMotion / timeSinceOccupancy, e.g. '3h 50m' or '13d 4h'), so you can read a sensor's activity age at a glance — handy for spotting a stale or offline sensor. The original numeric seconds values remain for use in rules. (0.19.0 - Stopped the log filling up with 'HAP: no update in Ns — reconnecting' on an idle thermostat: added a configurable Live-session safety-reconnect window, default 6 minutes, and demoted that routine message from warning to info. After updating, open the thermostat device once and click Save Preferences.)",
   "category": "Thermostats",
   "tags": "Thermostat, ecobee, HomeKit, HAP, Local, Sensor",
   "dateReleased": "2026-07-15",
