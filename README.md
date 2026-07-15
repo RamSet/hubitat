@@ -23,13 +23,13 @@ package's manifest link from the table.
 ### Thermostats / Climate
 | Package | What it does | Install |
 |---|---|---|
-| **Ecobee HAP Thermostat (Local)** | Control an ecobee 100% locally over the HomeKit Accessory Protocol (HAP) — no cloud, no Apple hardware, no bridge. In-driver pairing, mode/setpoints/humidity/operating state, remote room sensors as child devices, real-time HomeKit event push. | [manifest](https://raw.githubusercontent.com/RamSet/hubitat/main/manifest-ecobee-hap.json) |
-| **Local Ecobee Helpers** | Offline helper apps for the Ecobee HAP Thermostat: per-room vent control, open-contact HVAC pause with notifications, and humidifier control. Add as many helpers as needed under one parent. | [manifest](https://raw.githubusercontent.com/RamSet/hubitat/main/manifest-ecobee-helpers.json) |
+| **[Ecobee HAP Thermostat (Local)](https://community.hubitat.com/t/release-any-hub-c5-c7-c8-ecobee-no-cloud-hap-thermostat-local-direct-control-of-an-ecobee-thermostat-no-apple-hardware/164746?u=ramset)** | Control an ecobee 100% locally over the HomeKit Accessory Protocol (HAP) — no cloud, no Apple hardware, no bridge. In-driver pairing, mode/setpoints/humidity/operating state, remote room sensors as child devices, real-time HomeKit event push. | [manifest](https://raw.githubusercontent.com/RamSet/hubitat/main/manifest-ecobee-hap.json) |
+| **[Local Ecobee Helpers](https://community.hubitat.com/t/release-local-ecobee-helpers-offline-companion-apps-for-the-hap-thermostat-vents-contact-pause-humidity/164776?u=ramset)** | Offline helper apps for the Ecobee HAP Thermostat: per-room vent control, open-contact HVAC pause with notifications, and humidifier control. Add as many helpers as needed under one parent. | [manifest](https://raw.githubusercontent.com/RamSet/hubitat/main/manifest-ecobee-helpers.json) |
 
 ### Integrations
 | Package | What it does | Install |
 |---|---|---|
-| **HomeKit Import (Local)** | Import any LAN/Wi-Fi HomeKit (HAP) accessory into Hubitat — pair with a setup code and the driver auto-maps it to a Hubitat device. No cloud, no Apple hardware, no Homebridge. Runs on any hub (C5/C7/C8). | [manifest](https://raw.githubusercontent.com/RamSet/hubitat/main/manifest-homekit-import.json) |
+| **[HomeKit Import (Local)](https://community.hubitat.com/t/release-homekit-import-local-bring-any-lan-homekit-accessory-into-hubitat-no-cloud-no-apple-hardware-no-homebridge/164815?u=ramset)** | Import any LAN/Wi-Fi HomeKit (HAP) accessory into Hubitat — pair with a setup code and the driver auto-maps it to a Hubitat device. No cloud, no Apple hardware, no Homebridge. Runs on any hub (C5/C7/C8). | [manifest](https://raw.githubusercontent.com/RamSet/hubitat/main/manifest-homekit-import.json) |
 
 ### Air Quality / Weather
 | Package | What it does | Install |
@@ -42,13 +42,13 @@ package's manifest link from the table.
 ### Irrigation
 | Package | What it does | Install |
 |---|---|---|
-| **Zooz Sprinkler Scheduler** | Fully-local irrigation controller for Zooz ZEN16/ZEN17 relays — weather-aware scheduling, cycle & soak, moisture, pause-and-resume, and a verified hardware auto-off failsafe. | [manifest](https://raw.githubusercontent.com/RamSet/hubitat/main/manifest-zooz-sprinkler.json) |
+| **[Zooz Sprinkler Scheduler](https://community.hubitat.com/t/release-zooz-sprinkler-scheduler-local-hub-independent-irrigation-for-zen16-zen17/164582?u=ramset)** | Fully-local irrigation controller for Zooz ZEN16/ZEN17 relays — weather-aware scheduling, cycle & soak, moisture, pause-and-resume, and a verified hardware auto-off failsafe. | [manifest](https://raw.githubusercontent.com/RamSet/hubitat/main/manifest-zooz-sprinkler.json) |
 
 ### Safety / Monitoring
 | Package | What it does | Install |
 |---|---|---|
 | **UV Exposure Alerts** | Warns about UV exposure when an exterior door is opened, with editable per-band messages and an optional siren strobe. | [manifest](https://raw.githubusercontent.com/RamSet/hubitat/main/manifest-uv-alerts.json) |
-| **Network Monitor Health Check** | Monitors device availability via ping and status reporting. | [manifest](https://raw.githubusercontent.com/RamSet/hubitat/main/manifest-networkmonitor.json) |
+| **[Network Monitor Health Check](https://community.hubitat.com/t/release-network-monitor-healthcheck-http/152767?u=ramset)** | Monitors device availability via ping and status reporting. | [manifest](https://raw.githubusercontent.com/RamSet/hubitat/main/manifest-networkmonitor.json) |
 
 ### Convenience
 | Package | What it does | Install |
@@ -66,7 +66,7 @@ Full local control of an ecobee over HAP. Pair in the driver with the thermostat
 8-digit HomeKit setup code; the driver holds a persistent encrypted LAN session for
 mode, setpoints, temperature, humidity, operating state, fan, comfort profiles, and
 remote sensors (created automatically as child devices). Forum thread:
-[Ecobee HAP Thermostat (Local)](https://community.hubitat.com/t/release-any-hub-c5-c7-c8-ecobee-no-cloud-hap-thermostat-local-direct-control-of-an-ecobee-thermostat-no-apple-hardware/164746).
+[Ecobee HAP Thermostat (Local)](https://community.hubitat.com/t/release-any-hub-c5-c7-c8-ecobee-no-cloud-hap-thermostat-local-direct-control-of-an-ecobee-thermostat-no-apple-hardware/164746?u=ramset).
 
 ### Comfort profiles, holds & Home/Away automation
 
