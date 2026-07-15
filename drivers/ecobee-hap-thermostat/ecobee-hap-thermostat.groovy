@@ -17,12 +17,21 @@
  *   this driver (HPM does it automatically).
  *
  * Author: RamSet
- * Version: 0.18.2
- * Date: 2026-07-07
+ * Version: 0.19.0
+ * Date: 2026-07-15
  *
  * REQUIRES library: RamSet.hapCore (installed automatically by Hubitat Package Manager).
  *
  * Changelog:
+ *  v0.19.0 - New preference "Live-session safety-reconnect window (seconds)": how long the live HomeKit session
+ *           may go with no pushed event before the driver reconnects to re-sync (re-subscribe + fresh read). An
+ *           idle ecobee (HVAC off, temperature steady) pushes nothing for minutes, which tripped the old fixed
+ *           120-second window and forced a reconnect every 2-3 minutes — flooding the log with "HAP: no update in
+ *           Ns — reconnecting to reconcile". Default is now 360s, ABOVE the 5-minute background refresh, so the
+ *           periodic refresh keeps the session warm and the reconnect only fires on a genuinely stalled session.
+ *           Keep it above your background refresh interval. Requires one "Save Preferences" after updating
+ *           (Hubitat doesn't re-run setup on a package update). Pairs with hapCore 0.10.3, which drops that
+ *           message from warn to info so it no longer reads as a fault (or triggers phone notifications).
  *  v0.18.2 - Clears the now-removed battery/lowBattery readings off existing sensor children on the next
  *           discovery (Save Preferences), so the stale value from older versions doesn't linger.
  *  v0.18.1 - Removed battery reporting from the sensor children. The ecobee reports every SmartSensor's battery
@@ -208,6 +217,9 @@ metadata {
         input "refreshInterval", "enum", title: "Background refresh interval",
             description: "How often to re-read the values HomeKit can't push (comfort profile, on-hold, hold-end, per-profile setpoints, alert, sensor activity timers). Faster = fresher but more local traffic; 5 minutes is recommended. If the session ever gets flaky, back it off.",
             options: ["30 seconds","1 minute","2 minutes","5 minutes","10 minutes","15 minutes","30 minutes"], defaultValue: "5 minutes"
+        input "safetyRefreshSecs", "number", title: "Live-session safety-reconnect window (seconds)",
+            description: "If the thermostat pushes no HomeKit event for this long, the live session is reconnected to re-sync. An idle thermostat (HVAC off, temperature steady) sends no events, so keep this ABOVE the background refresh interval — otherwise a healthy but quiet thermostat reconnects every couple of minutes and logs 'HAP: no update in Ns'. Recommended: refresh interval + 60s (default 360). 0 = off (falls back to a 30-minute watchdog).",
+            defaultValue: 360, range: "0..3600"
     }
 }
 

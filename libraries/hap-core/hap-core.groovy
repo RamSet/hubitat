@@ -24,9 +24,15 @@
  * Include in a driver with:  #include RamSet.hapCore
  *
  * Author: RamSet
- * Version: 0.10.2
+ * Version: 0.10.3
  *
  * Changelog:
+ *  v0.10.3 - Log level: the silence-triggered safety reconnect ("no update in Ns — reconnecting to reconcile")
+ *            now logs at INFO, not WARN. It is the expected auto-refresh for a quiet/idle accessory (nothing to
+ *            push), and the reconnect always succeeds — a WARN implied a fault where there was none, and on some
+ *            setups it pushed a phone notification. A genuinely failed reconnect still logs separately. Pairs with
+ *            a driver exposing safetyRefreshSecs so the silence window can sit above the background-refresh
+ *            interval (then this fires only on a real stall). Behavior is otherwise unchanged.
  *  v0.10.2 - Quiet the expected self-healing desync. An AEADBadTag/Tag-mismatch on the live session is a known
  *            re-key event the driver already recovers from (reconnect for fresh keys), so it now logs at WARN,
  *            not ERROR — only genuinely unexpected exceptions log at error. Fixes the frequent scary red
@@ -681,7 +687,7 @@ def liveKeepalive(){
         long silentMs = now() - (state.lastRx?:0L)
         long limitMs = (win>0 ? win : SILENCE_RECONNECT_SEC) * 1000L
         if(silentMs >= limitMs){
-            log.warn "HAP: no update in ${(int)(silentMs/1000)}s — reconnecting to reconcile (re-subscribe + read)"
+            logInfo "HAP: no update in ${(int)(silentMs/1000)}s — reconnecting to reconcile (re-subscribe + read)"
             state.live=false; unschedule("liveKeepalive"); try{ interfaces.rawSocket.close() }catch(e){}; state.connInFlight=null
             runIn(4,"liveConnect"); return
         }

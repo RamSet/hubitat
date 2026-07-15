@@ -1,11 +1,11 @@
 {
   "packageName": "Ecobee HAP Thermostat (Local)",
   "author": "RamSet",
-  "version": "0.18.3",
-  "releaseNotes": "0.18.3 - Quieter logs (hapCore 0.10.2): the occasional 'parse: AEADBadTagException: Tag mismatch' error is an expected, self-healing session re-key that the driver already recovers from automatically. It now logs at warn instead of error, so busy multi-sensor thermostats no longer spam a scary red error in the log. No functional change — the reconnect-for-fresh-keys recovery is unchanged.",
+  "version": "0.19.0",
+  "releaseNotes": "0.19.0 - Stops the log filling up with 'HAP: no update in Ns — reconnecting to reconcile' on an idle thermostat. When the HVAC is off and the temperature is steady, the ecobee sends no HomeKit updates for a few minutes; that tripped a fixed 2-minute 'is the session still alive?' timer and forced a reconnect over and over. There's now a configurable window (new 'Live-session safety-reconnect window' preference, default 6 minutes — above the background refresh) so a quiet, healthy thermostat stays connected instead of reconnecting on a loop, and that message is now an info note rather than a warning (hapCore 0.10.3). Nothing was malfunctioning before — it was noisy, not broken. After updating, open the thermostat device once and click Save Preferences for the new window to take effect.",
   "category": "Thermostats",
   "tags": "Thermostat, ecobee, HomeKit, HAP, Local, Sensor",
-  "dateReleased": "2026-07-07",
+  "dateReleased": "2026-07-15",
   "drivers": [
     {
       "id": "511b25e3-4ca2-413e-a1f7-351ff50cd3b1",
