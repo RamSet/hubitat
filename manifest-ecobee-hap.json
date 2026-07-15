@@ -1,8 +1,8 @@
 {
   "packageName": "Ecobee HAP Thermostat (Local)",
   "author": "RamSet",
-  "version": "0.19.1",
-  "releaseNotes": "0.19.1 - Remote sensors now also show their 'time since last motion/occupancy' in a human-readable form (timeSinceMotion / timeSinceOccupancy, e.g. '3h 50m' or '13d 4h'), so you can read a sensor's activity age at a glance — handy for spotting a stale or offline sensor. The original numeric seconds values remain for use in rules. (0.19.0 - Stopped the log filling up with 'HAP: no update in Ns — reconnecting' on an idle thermostat: added a configurable Live-session safety-reconnect window, default 6 minutes, and demoted that routine message from warning to info. After updating, open the thermostat device once and click Save Preferences.)",
+  "version": "0.19.2",
+  "releaseNotes": "0.19.2 - Timed fan runs (Set Fan Run Time) now return the thermostat to its schedule when they finish. Turning an ecobee's fan On creates a Hold, and switching it back to Auto doesn't clear that Hold on its own — so a timed blower run could leave the thermostat stuck on Hold (indefinitely, if your ecobee's Hold Action is set to 'until I change it'). The timed run now resumes the program automatically after the fan goes back to Auto. If you turn the fan on with your own rule instead of Set Fan Run Time, add a Resume Program step after it, or set the thermostat's Hold Action to 'until next scheduled activity'. (0.19.1 added human-readable timeSinceMotion/timeSinceOccupancy on remote sensors.)",
   "category": "Thermostats",
   "tags": "Thermostat, ecobee, HomeKit, HAP, Local, Sensor",
   "dateReleased": "2026-07-15",

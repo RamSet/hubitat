@@ -17,12 +17,19 @@
  *   this driver (HPM does it automatically).
  *
  * Author: RamSet
- * Version: 0.19.1
+ * Version: 0.19.2
  * Date: 2026-07-15
  *
  * REQUIRES library: RamSet.hapCore (installed automatically by Hubitat Package Manager).
  *
  * Changelog:
+ *  v0.19.2 - Timed fan run now returns to the schedule. Turning the ecobee's fan On (HAP) creates a HOLD, and
+ *           returning it to Auto does NOT clear that hold — so setFanRunTime(N) used to leave the thermostat
+ *           stuck on hold at whatever temps were active, indefinitely if the ecobee's Hold Action is "until I
+ *           change it". fanRunTimeEnd() now calls resumeProgram() after returning the fan to Auto, so a timed
+ *           blower run cleans up its own hold (verified on hardware). Plain fanOn/fanAuto still don't auto-resume
+ *           by design — a manual fan-on is a hold; add resumeProgram() in your rule, or set the thermostat's
+ *           Hold Action to "until next scheduled activity".
  *  v0.19.1 - Sensor children now also get timeSinceMotion / timeSinceOccupancy — a human-readable form of the
  *           secondsSince* activity timers (e.g. "3h 50m", "13d 4h", "1mo 2d"), for reading a sensor's activity
  *           age at a glance. The numeric secondsSince* attributes stay for rules; this is the companion display.
@@ -316,7 +323,10 @@ def fanCirculate(){ setThermostatFanMode("on") }
 // macgyver: the ecobee's per-hour fan minimum isn't exposed over HAP, so emulate a timed blower run —
 // turn the fan On, then back to Auto after N minutes (driver-timed). Drive it from a rule/webCoRE per hour.
 def setFanRunTime(minutes){ int n=(minutes as int); if(n<=0){ setThermostatFanMode("auto"); return }; setThermostatFanMode("on"); runIn(n*60, "fanRunTimeEnd") }
-def fanRunTimeEnd(){ setThermostatFanMode("auto") }
+// return the fan to Auto AND resume the schedule: turning the ecobee's fan On creates a HOLD, and setting the
+// fan back to Auto does NOT clear it — without the resume, a timed blower run leaves the thermostat stuck on
+// hold (indefinitely if the ecobee's Hold Action is "until I change it"). Verified on hardware.
+def fanRunTimeEnd(){ setThermostatFanMode("auto"); resumeProgram() }
 // macgyver: temporary override -> set a comfort profile or a temp now, then auto-resume the schedule after N minutes
 def holdUntil(String target, minutes){
     String t=target?.trim()
