@@ -12,7 +12,7 @@
   "dateReleased": "2025-04-25",
   "drivers": [
     {
-      "id": "virtual-aqi-driver",
+      "id": "1ec92130-2350-4b9a-af5d-58628eef6dc7",
       "name": "Virtual Air Quality (AQI) Driver",
       "namespace": "RamSet",
       "location": "https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/drivers/VirtualAQIDriver/VirtualAQIDriver.groovy",
