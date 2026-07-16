@@ -17,12 +17,18 @@
  *   this driver (HPM does it automatically).
  *
  * Author: RamSet
- * Version: 0.19.2
- * Date: 2026-07-15
+ * Version: 0.19.3
+ * Date: 2026-07-16
  *
  * REQUIRES library: RamSet.hapCore (installed automatically by Hubitat Package Manager).
  *
  * Changelog:
+ *  v0.19.3 - Timed fan run no longer clobbers a PRE-EXISTING hold. 0.19.2's resume-after-run was unconditional,
+ *           so if a hold was already active before the timed run started, ending the run wiped it. Now it records
+ *           whether a hold was active at the start and only resumes the schedule if the run itself created the
+ *           hold; a run started from an existing hold just returns the fan to Auto and leaves the hold intact.
+ *           (A comfort override like Away reads onHold=false, so a run started from one still resumes to schedule
+ *           — distinguishing scheduled vs overridden climate over HAP is ambiguous, so that edge is left as-is.)
  *  v0.19.2 - Timed fan run now returns to the schedule. Turning the ecobee's fan On (HAP) creates a HOLD, and
  *           returning it to Auto does NOT clear that hold — so setFanRunTime(N) used to leave the thermostat
  *           stuck on hold at whatever temps were active, indefinitely if the ecobee's Hold Action is "until I
@@ -322,11 +328,12 @@ def fanAuto(){ setThermostatFanMode("auto") }
 def fanCirculate(){ setThermostatFanMode("on") }
 // macgyver: the ecobee's per-hour fan minimum isn't exposed over HAP, so emulate a timed blower run —
 // turn the fan On, then back to Auto after N minutes (driver-timed). Drive it from a rule/webCoRE per hour.
-def setFanRunTime(minutes){ int n=(minutes as int); if(n<=0){ setThermostatFanMode("auto"); return }; setThermostatFanMode("on"); runIn(n*60, "fanRunTimeEnd") }
-// return the fan to Auto AND resume the schedule: turning the ecobee's fan On creates a HOLD, and setting the
-// fan back to Auto does NOT clear it — without the resume, a timed blower run leaves the thermostat stuck on
-// hold (indefinitely if the ecobee's Hold Action is "until I change it"). Verified on hardware.
-def fanRunTimeEnd(){ setThermostatFanMode("auto"); resumeProgram() }
+def setFanRunTime(minutes){ int n=(minutes as int); if(n<=0){ setThermostatFanMode("auto"); return }; state.fanPriorHold = (device.currentValue("onHold")=="true"); setThermostatFanMode("on"); runIn(n*60, "fanRunTimeEnd") }
+// Return the fan to Auto, and resume the schedule ONLY if this run created the hold. Turning the ecobee's fan On
+// creates a HOLD that fan->Auto doesn't clear, so a run started from the schedule must resume to clean up after
+// itself. But if a hold was ALREADY active when the run started (state.fanPriorHold), fan-on just folded into
+// that hold — so we leave it alone (a blanket resume would wipe the user's pre-existing hold). Verified on hardware.
+def fanRunTimeEnd(){ setThermostatFanMode("auto"); if(state.fanPriorHold != true) resumeProgram(); state.remove("fanPriorHold") }
 // macgyver: temporary override -> set a comfort profile or a temp now, then auto-resume the schedule after N minutes
 def holdUntil(String target, minutes){
     String t=target?.trim()
