@@ -1,7 +1,7 @@
 {
   "packageName": "Trash Reminder",
   "author": "RamSet",
-  "version": "1.2.0",
+  "version": "1.4.0",
   "releaseNotes": "Reminds you to put the bins out, and tells you which bins. Garbage and recycling are tracked separately, each on its own frequency, so if garbage goes out every week and recycling every second week, a recycling week means both bins go out and the reminder says so. Change either frequency later and everything follows. Each stream can have its own light, switched on the evening before and only when that stream is actually due, so on a garbage-only week the recycling light stays off, and on a double week both come on. Remind the evening before, again later that evening, on the morning of, or any combination, with editable messages sent as notifications, spoken on your speakers, or both. A stream that repeats every few weeks is worked out by counting from a collection date you know happened, so the schedule cannot drift or flip over at New Year, and the app page lists the next six collections so a mistake is obvious immediately. No date or time device is needed, and nothing has to be refreshed on a schedule to keep it accurate.",
   "category": "Convenience",
   "tags": "Trash, Garbage, Recycling, Bins, Reminder, Notification",

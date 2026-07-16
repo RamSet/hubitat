@@ -255,8 +255,10 @@ def defaultFinal() { 'Tomorrow is %what% day. Take it out (final reminder).' }
 def defaultDay()   { 'TODAY is %what% day. Take it out, if you have not already.' }
 
 def render(String tmpl, Date d) {
+    def what = whatText(d)
     (tmpl ?: '')
-        .replace('%what%', whatText(d))
+        .replace('%what%', what)
+        .replace('%type%', what)   // legacy alias: earlier versions used %type%
         .replace('%day%',  d.format("EEEE", location.timeZone))
         .trim()
 }
