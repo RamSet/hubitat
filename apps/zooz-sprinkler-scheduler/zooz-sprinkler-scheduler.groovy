@@ -62,7 +62,7 @@ mappings {
     path("/calendar.ics")  { action: [GET: "apiCalendar"] }
 }
 
-String getAppVersion() { return "v0.14.0 (2026-07)" }
+String getAppVersion() { return "v0.14.1 (2026-07)" }
 
 // Simple vs Advanced interface. Simple shows only zones, schedule, weather and
 // hardware safety; Advanced exposes everything (moisture, learning, sensors,
@@ -227,10 +227,32 @@ private String statusHtml() {
         String phaseLbl = (phase == "soak") ? "soaking" : (phase == "gap" ? "between zones" : "watering")
         String cyc = (state.currentZoneCycles && phase == "water") ? " \u00b7 cycle ${((state.currentZoneCycleIdx ?: 0) as int) + 1}/${state.currentZoneCycles}" : ""
         out << sPill("\u25b6 RUNNING", GREEN) << sPill("${zname} \u2014 ${phaseLbl}${cyc}", BLUE)
+        Long sMs = ((state.currentRunRecord?.startedMs) ?: 0L) as long
+        if (sMs > 0L) {
+            int elapsed = (int)((now() - sMs) / 1000L)
+            String rem = ""
+            try {
+                int total = estimateRunSeconds((state.zonesPlan ?: []) as List, (state.seasonalMult ?: "1.0") as BigDecimal).total as int
+                if (total > 0) rem = " \u00b7 ~${fmtDuration(Math.max(0, total - elapsed))} left of ${fmtDuration(total)}"
+            } catch (ignored) {}
+            out << sPill("elapsed ${fmtDuration(elapsed)}${rem}", GREY)
+        }
+        Long pStart = (state.currentPhaseStartMs ?: 0L) as long
+        Integer pDur = (state.currentPhaseDurationSec ?: 0) as int
+        if (pStart > 0L && pDur > 0) {
+            int phaseLeft = Math.max(0, pDur - (int)((now() - pStart) / 1000L))
+            out << sPill("${phaseLbl}: ${fmtDuration(phaseLeft)} left", BLUE)
+        }
     } else if (paused) {
         out << sPill("\u23f8 PAUSED", AMBER)
         Integer zid = (state.currentZoneId ?: 0) as int
         if (zid) out << sPill("at ${settings."zone${zid}Name" ?: "Zone ${zid}"}", GREY)
+        Integer remSec = (state.pausedRemainingSec ?: 0) as int
+        if (remSec > 0) {
+            String ppt = state.pausedPhaseType ?: "water"
+            String pptLbl = (ppt == "soak") ? "soak" : (ppt == "gap" ? "gap" : "watering")
+            out << sPill("${fmtDuration(remSec)} left in ${pptLbl} on resume", GREY)
+        }
         if (state.pausedReason) out << sPill("${state.pausedReason}", GREY)
     } else if (held) {
         out << sPill("\u23f3 HOLDING \u2014 waiting for a pause sensor to clear", AMBER)
