@@ -1,8 +1,8 @@
 {
   "packageName": "Ecobee HAP Thermostat (Local)",
   "author": "RamSet",
-  "version": "0.19.4",
-  "releaseNotes": "0.19.4 - Ships hapCore 0.10.4: the live connection is now self-correcting. A session could previously half-die silently — the device still showed 'live' but stopped receiving updates, and only opening the device and clicking Save Preferences would recover it (a couple of users hit this after their thermostats rebooted). The engine now sends a tiny keepalive probe on a short interval and requires an answer; if the link is dead despite the 'live' flag, it reconnects on its own within about a minute instead of sitting stale. No settings change — just update and you're covered. (0.19.3 stopped a timed fan run from clearing a pre-existing hold; 0.19.2 made timed fan runs clean up their own hold; 0.19.1 added human-readable timeSinceMotion/timeSinceOccupancy on remote sensors.)",
+  "version": "0.19.5",
+  "releaseNotes": "0.19.5 - Adds a healthStatus attribute (online/offline) you can alert on. It reports 'offline' when a thermostat becomes unreachable (power or network) and the driver can't recover it, and 'online' when it's connected and data is flowing — with a built-in delay so it doesn't flip on a routine reconnect. Create a notification on healthStatus = offline to be told the moment a thermostat drops off. Builds on the self-healing connection from 0.19.4 (hapCore 0.10.4): a transient wedge now recovers on its own, and a real outage shows up as offline. After updating, open the device once and click Save Preferences so the new engine arms.",
   "category": "Thermostats",
   "tags": "Thermostat, ecobee, HomeKit, HAP, Local, Sensor",
   "dateReleased": "2026-07-15",

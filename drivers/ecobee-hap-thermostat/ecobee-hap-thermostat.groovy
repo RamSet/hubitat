@@ -17,12 +17,17 @@
  *   this driver (HPM does it automatically).
  *
  * Author: RamSet
- * Version: 0.19.3
- * Date: 2026-07-16
+ * Version: 0.19.5
+ * Date: 2026-07-21
  *
  * REQUIRES library: RamSet.hapCore (installed automatically by Hubitat Package Manager).
  *
  * Changelog:
+ *  v0.19.5 - New healthStatus attribute (online/offline) for alerting. Reports "offline" when the thermostat
+ *           becomes unreachable (power/network) and the driver can't recover it, and "online" when it's connected
+ *           and data is flowing — backed by hapCore 0.10.5's data-flow health check with hysteresis, so it doesn't
+ *           flap on a routine reconnect. Gate a notification on healthStatus = "offline" to be told when a
+ *           thermostat drops. (0.19.4 shipped hapCore 0.10.4's self-correcting live session.)
  *  v0.19.3 - Timed fan run no longer clobbers a PRE-EXISTING hold. 0.19.2's resume-after-run was unconditional,
  *           so if a hold was already active before the timed run started, ending the run wiped it. Now it records
  *           whether a hold was active at the start and only resumes the schedule if the run itself created the
@@ -218,6 +223,7 @@ metadata {
         attribute "sleepCoolSetpoint", "number"
         attribute "customParams", "string"
         attribute "hapStatus", "string"
+        attribute "healthStatus", "string"   // online/offline — a stable, alertable device-health signal (hapCore 0.10.5); gate a notification on "offline"
         attribute "diag", "string"
         attribute "manufacturer", "string"   // from the thermostat's HAP AccessoryInformation service
         attribute "model", "string"          // e.g. ecobee4 / EB-STATE5

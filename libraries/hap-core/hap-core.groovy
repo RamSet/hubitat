@@ -24,9 +24,17 @@
  * Include in a driver with:  #include RamSet.hapCore
  *
  * Author: RamSet
- * Version: 0.10.4
+ * Version: 0.10.5
  *
  * Changelog:
+ *  v0.10.5 - New healthStatus attribute (online/offline): a stable, alertable device-health signal. Because the
+ *            0.10.4 liveness probe keeps the last-received-frame timestamp fresh on a healthy held session, a
+ *            STALE timestamp is a reliable "accessory unreachable" signal that doesn't false-trip on an idle
+ *            accessory (the probe answers). A background check emits online/offline with hysteresis — offline only
+ *            after ~4 missed probe intervals (floor 3 min; on-demand mode allows >2 poll cycles; probing-disabled
+ *            uses the long-silence window) — so a routine reconnect blip doesn't flap it. Complements the self-
+ *            heal: a transient wedge recovers silently, a genuine power/network outage shows offline for alerting.
+ *            The INCLUDING DRIVER should declare:  attribute "healthStatus", "string".
  *  v0.10.4 - SELF-CORRECTING HELD SESSION (never trust the live flag). A silent half-open death leaves
  *            state.live=true forever and fires no socketStatus, so the old "reconnect after N seconds of
  *            silence" both (a) trusted a possibly-dead flag and (b) on an idle single-service device — e.g. a
@@ -508,6 +516,7 @@ def refresh(){
 // discover topology if needed, then either open a persistent session or set up polling
 def startSession(){
     if(!isPaired()){ log.warn "HAP: not paired"; return }
+    armHealth()   // start (or restart) the online/offline health tracker whenever a session is (re)established
     if(onDemand()){
         unschedule("liveKeepalive"); unschedule("kaWatch"); state.live=false
         sendEvent(name:"hapStatus", value:"on-demand")
@@ -722,6 +731,32 @@ void reconnectLive(String why){
 }
 // smallest possible keepalive/liveness target: the first mapped characteristic (one aid.iid)
 String primaryReadId(){ String r=readIds(); if(!r) return null; return r.split(',')[0] }
+
+// ===== device health (online/offline): a stable, alertable signal derived from real data flow =====
+// The 0.10.4 liveness probe keeps state.lastRx fresh every safetySecs on a healthy held session, so a STALE
+// lastRx is a reliable "accessory unreachable" signal that won't false-trip on a merely-idle accessory (the
+// probe answers). Hysteresis: offline only after several missed intervals so a routine reconnect blip doesn't
+// flap it. With self-heal, a transient wedge recovers silently; a genuine power/network outage reads offline.
+@Field static int HEALTH_CHECK_SEC = 60
+Integer offlineAfterSecs(){
+    if(onDemand()) return Math.max(180, pollSecs()*2 + 60)          // on-demand: allow >2 poll cycles first
+    int iv = safetySecs()
+    if(iv<=0) return SILENCE_RECONNECT_SEC + 120                    // probing disabled: only after the long-silence reconnect
+    return Math.max(180, iv*4)                                      // held session w/ probe: ~4 intervals, floor 3 min
+}
+void armHealth(){ unschedule("healthCheck"); runIn(90,"healthCheck") }   // 90s grace so the first connect can land before we judge
+def healthCheck(){
+    if(!isPaired()){ setHealth("offline"); return }                // unpaired -> offline; stops until re-armed by startSession
+    runIn(HEALTH_CHECK_SEC, "healthCheck")                          // re-arm FIRST so a hiccup can't break the chain
+    long stale = now() - (state.lastRx ?: 0L)
+    setHealth(stale <= offlineAfterSecs()*1000L ? "online" : "offline")
+}
+void setHealth(String s){
+    if(state.health == s) return
+    state.health = s; sendEvent(name:"healthStatus", value:s)
+    if(s=="offline") log.warn "HAP: accessory OFFLINE — no data in >${offlineAfterSecs()}s (self-heal still retrying)"
+    else logInfo "HAP: accessory online"
+}
 void processLiveStream(){
     String s = new String(hex(plainbuf().toString()), "ISO-8859-1"); int consumed=0
     while(true){
