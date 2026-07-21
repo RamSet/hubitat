@@ -1,8 +1,8 @@
 {
   "packageName": "Ecobee HAP Thermostat (Local)",
   "author": "RamSet",
-  "version": "0.19.3",
-  "releaseNotes": "0.19.3 - Fixes a Set Fan Run Time side effect from 0.19.2: if you already had a hold running when a timed fan run started, ending the run would clear that hold too. Now the timed run only returns to the schedule if it created the hold itself — a run started while a hold is already active just switches the fan back to Auto and leaves your hold in place. (0.19.2 made timed fan runs clean up the hold that turning the fan On creates; 0.19.1 added human-readable timeSinceMotion/timeSinceOccupancy on remote sensors.)",
+  "version": "0.19.4",
+  "releaseNotes": "0.19.4 - Ships hapCore 0.10.4: the live connection is now self-correcting. A session could previously half-die silently — the device still showed 'live' but stopped receiving updates, and only opening the device and clicking Save Preferences would recover it (a couple of users hit this after their thermostats rebooted). The engine now sends a tiny keepalive probe on a short interval and requires an answer; if the link is dead despite the 'live' flag, it reconnects on its own within about a minute instead of sitting stale. No settings change — just update and you're covered. (0.19.3 stopped a timed fan run from clearing a pre-existing hold; 0.19.2 made timed fan runs clean up their own hold; 0.19.1 added human-readable timeSinceMotion/timeSinceOccupancy on remote sensors.)",
   "category": "Thermostats",
   "tags": "Thermostat, ecobee, HomeKit, HAP, Local, Sensor",
   "dateReleased": "2026-07-15",
