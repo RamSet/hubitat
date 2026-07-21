@@ -24,9 +24,17 @@
  * Include in a driver with:  #include RamSet.hapCore
  *
  * Author: RamSet
- * Version: 0.10.5
+ * Version: 0.10.6
  *
  * Changelog:
+ *  v0.10.6 - RECOVERY LATCH FIX (the real overnight killer). ensureUp — the backstop that re-establishes a
+ *            dropped session — guarded on a bare `!state.connInFlight`, so a STALE connInFlight left by a connect
+ *            that died without clearing the flag blocked recovery FOREVER (observed live: a device dead ~4h with
+ *            connInFlight stuck on "discover" and nothing scheduled to retry — the driver "believed" it was mid-
+ *            connect). ensureUp now clears a connInFlight older than 20s and reconnects, so a wedged latch self-
+ *            heals within one heartbeat instead of needing a manual Save. Also: pair-verify reconnect backoff
+ *            capped at 120s (was 300s) so a door isn't unreported for minutes after the accessory frees its slot.
+ *            Pairs with driver 0.13.2 (ensureUp heartbeat 10min -> 5min).
  *  v0.10.5 - New healthStatus attribute (online/offline): a stable, alertable device-health signal. Because the
  *            0.10.4 liveness probe keeps the last-received-frame timestamp fresh on a healthy held session, a
  *            STALE timestamp is a reliable "accessory unreachable" signal that doesn't false-trip on an idle
@@ -527,9 +535,17 @@ def startSession(){
     }
 }
 def discoverOnce(){ mdnsThen("discover") }   // -> hapStart(discover) -> onAccessories -> finish -> startSession
-// persistent-mode recovery heartbeat: if paired but not live and nothing in flight, re-establish.
-// Auto-recovers after the accessory frees a wedged slot (e.g. post-reboot) without any user action.
-def ensureUp(){ if(isPaired() && !onDemand() && state.live!=true && !state.connInFlight){ dlog("ensureUp -> reconnect"); startSession() } }
+// persistent-mode recovery heartbeat: if paired but not live, re-establish. CRITICAL: a connInFlight older
+// than ~20s is a STALE latch left by a connect that died without clearing the flag (a discover/verify that
+// neither closed cleanly nor tripped its watchdog). The old guard was a bare `!state.connInFlight`, so a stale
+// latch blocked this backstop FOREVER — turning a transient death into "dead until the user hits Save". Now we
+// clear a stale latch and reconnect; only an actually-in-progress connect (<20s old) is left alone.
+def ensureUp(){
+    if(!isPaired() || onDemand() || state.live==true) return
+    if(state.connInFlight && (now()-(state.connAt?:0) < 20000)) return
+    if(state.connInFlight){ dlog("ensureUp: clearing stale connInFlight=${state.connInFlight}"); state.connInFlight=null }
+    dlog("ensureUp -> reconnect"); startSession()
+}
 def schedulePoll(){ unschedule("pollRead"); runIn(pollSecs(),"pollRead") }
 def pollRead(){ if(isPaired() && onDemand()){ if(state.services==null) discoverOnce() else refresh(); schedulePoll() } }
 def hapStart(String op, String body){
@@ -689,9 +705,9 @@ void liveConnect(){
 // re-resolving the port via mDNS each time (the port and the single connection slot can both go stale).
 def verifyWatch(){
     if(!state.sess){
-        // exponential-ish backoff to 5 min: a wedged accessory needs QUIET time to recover its HAP
-        // server, not a reconnect every minute (hammering keeps its single connection slot churning)
-        state.vtry=(state.vtry?:0)+1; int b=Math.min(300, 30*(state.vtry as int))
+        // backoff to 2 min (was 5): a wedged accessory needs some quiet time, but 5-min gaps meant a door
+        // could sit unreported for minutes after the slot freed. Cap at 120s so retries stay reasonably frequent.
+        state.vtry=(state.vtry?:0)+1; int b=Math.min(120, 30*(state.vtry as int))
         log.warn "HAP: pair-verify timed out (no M2) — retry ${state.vtry} in ${b}s"
         try{ interfaces.rawSocket.close() }catch(e){}; state.connInFlight=null
         runIn(b,"startLive")

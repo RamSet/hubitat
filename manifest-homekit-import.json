@@ -1,8 +1,8 @@
 {
   "packageName": "HomeKit Import (Local)",
   "author": "RamSet",
-  "version": "0.9.9",
-  "releaseNotes": "0.9.9 - Self-correcting held session: the garage door / accessory driver now holds one HomeKit session and proves it's alive with a tiny keepalive probe every ~30s, reconnecting the instant the link goes silently dead instead of trusting a stale 'connected' flag. Fixes cheap chips (e.g. Meross) that idle-drop the session and stop updating. Update BOTH the library (hapCore) and the driver; set the Keepalive/probe preference to 30.",
+  "version": "0.9.10",
+  "releaseNotes": "0.9.10 - Recovery latch fix: after a bad drop, a stale internal flag could block the driver's reconnect backstop indefinitely, leaving the accessory dead until you hit Save (the real cause of overnight 'stopped updating'). It now self-heals within a few minutes. Update BOTH the hapCore library and the driver.",
   "category": "Integrations",
   "tags": "HomeKit, HAP, Local, Import, No Cloud",
   "dateReleased": "2026-07-21",

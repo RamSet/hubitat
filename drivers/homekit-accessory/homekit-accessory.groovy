@@ -18,9 +18,13 @@
  *   Contact/Motion/Occupancy/Temperature/Humidity/Light sensors, Battery. Unmapped -> Dump Accessories.
  *
  * Author: RamSet
- * Version: 0.13.1
+ * Version: 0.13.2
  *
  * Changelog:
+ *  v0.13.2 - Recovery latch fix (hapCore 0.10.6): a stale internal connInFlight flag could block the reconnect
+ *           backstop indefinitely, so after a bad drop the accessory stayed dead until you hit Save (the real
+ *           cause of overnight "stopped updating"). The backstop now clears a stale flag and reconnects on its
+ *           own, and its heartbeat runs every 5 min (was 10). Requires hapCore >= 0.10.6.
  *  v0.13.1 - Self-correcting held session (hapCore 0.10.4): the driver no longer trusts a "live" flag from a
  *           successful handshake. It holds one session and probes it every N seconds with a tiny 1-characteristic
  *           read — keeping a cheap chip (Meross) from silently dropping an idle connection and reconnecting the
@@ -97,7 +101,7 @@
  *   "location": "https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/drivers/homekit-accessory/homekit-accessory.groovy",
  *   "description": "Imports a LAN HomeKit accessory into Hubitat: pairs, discovers services, auto-creates child devices, live updates.",
  *   "required": true,
- *   "version": "0.13.1"
+ *   "version": "0.13.2"
  * }
  *
  * Copyright 2026 RamSet — Apache License 2.0, provided as-is, no warranty.
@@ -199,7 +203,7 @@ def updated(){
         else log.warn "HAP: couldn't decode that payload — paste the full X-HM://… string from the accessory's HomeKit QR"
     }
     if(settings.setupCode && !isPaired()){ logInfo "HAP: setup code entered — pairing"; runIn(1,"pair") }
-    else if(isPaired()){ runIn(2,"startSession"); runEvery10Minutes("ensureUp") }   // backstop only; verifyWatch backoff is the primary retry
+    else if(isPaired()){ runIn(2,"startSession"); runEvery5Minutes("ensureUp") }   // backstop (now clears stale connInFlight); verifyWatch backoff is the primary retry
 }
 // Decode a HomeKit setup QR payload (X-HM://<9 base36 chars><setup id>) to the 8-digit setup code. The
 // low 27 bits of the base36 payload are the code. Lets you pair accessories that only expose a QR / a
