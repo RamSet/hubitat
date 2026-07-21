@@ -24,9 +24,19 @@
  * Include in a driver with:  #include RamSet.hapCore
  *
  * Author: RamSet
- * Version: 0.10.3
+ * Version: 0.10.4
  *
  * Changelog:
+ *  v0.10.4 - SELF-CORRECTING HELD SESSION (never trust the live flag). A silent half-open death leaves
+ *            state.live=true forever and fires no socketStatus, so the old "reconnect after N seconds of
+ *            silence" both (a) trusted a possibly-dead flag and (b) on an idle single-service device — e.g. a
+ *            garage door that emits no events — degenerated into a perpetual reconnect-every-N loop that never
+ *            actually held a session. Now the live watchdog holds ONE session and every interval sends a MINIMAL
+ *            one-characteristic keepalive read: it keeps the pipe warm so a cheap chip (Meross mt7687) doesn't
+ *            idle-close it (the effect Apple gets from TCP keepalive) AND proves liveness — an unanswered probe
+ *            means the link is dead despite state.live, so it reconnects immediately. Instant ev:true events are
+ *            unaffected; the probe reply also refreshes the primary characteristic as a bonus. settings.safetyRefreshSecs
+ *            is now the PROBE INTERVAL (default 30s, floor 15s; 0 = disable probing -> legacy long-silence reconnect).
  *  v0.10.3 - Log level: the silence-triggered safety reconnect ("no update in Ns — reconnecting to reconcile")
  *            now logs at INFO, not WARN. It is the expected auto-refresh for a quiet/idle accessory (nothing to
  *            push), and the reconnect always succeeds — a WARN implied a fault where there was none, and on some
@@ -119,7 +129,10 @@ int pollSecs(){ return Math.max(1,(settings?.pollMins ?: 5) as int)*60 }
 // fresh read of every characteristic) instead of doing a bare GET — a GET on the held session is what makes
 // cheap chips (Meross) drop the link. 0 = off (fall back to the long SILENCE_RECONNECT_SEC watchdog).
 // Floored at 20s: each reconnect is a full pair-verify handshake (hub CPU) on the accessory's single slot.
-int safetySecs(){ def v=settings?.safetyRefreshSecs; if(v==null) return 120; int s=(v as int); return s<=0 ? 0 : Math.max(20,s) }
+// Probe/keepalive interval (seconds). Held-session liveness: every interval we send ONE tiny characteristic
+// read to keep the pipe warm and PROVE the session still works. Default 30s (safely under the ~45-60s a cheap
+// chip idle-closes at). 0 = disable probing -> legacy long-silence reconnect only. Floor 15s.
+int safetySecs(){ def v=settings?.safetyRefreshSecs; if(v==null) return 30; int s=(v as int); return s<=0 ? 0 : Math.max(15,s) }
 int kaEvery(){ int w=safetySecs(); return w>0 ? w : KEEPALIVE_SEC }
 
 // AccessoryInformation (HomeKit service 3E) -> logical key. Universal metadata present on every accessory;
@@ -604,7 +617,7 @@ void doM4(Map tv){
         state.live=true; state.vtry=0; state.kaMiss=0; state.connInFlight=null; unschedule("verifyWatch")
         sendEvent(name:"hapStatus", value:"live"); logInfo "HAP: live session up — subscribing to events"
         dlog("session up (live) -> subscribe + get")
-        unschedule("liveKeepalive"); runIn(kaEvery(),"liveKeepalive")   // hold warm; first safety-refresh check at the configured window
+        unschedule("liveKeepalive"); state.probeAt=null; runIn(kaEvery(),"liveKeepalive")   // hold + liveness-probe the one session (probeAt reset so first tick doesn't false-fail)
         sendEncrypted(subscribeBody())
         String gids=readIds(); dlog("TX get(connect) ids=${gids.split(',').size()}")
         sendEncrypted("GET /characteristics?id=${gids} HTTP/1.1\r\nHost: ${settings.ip}\r\n\r\n")
@@ -675,25 +688,40 @@ def verifyWatch(){
         runIn(b,"startLive")
     }
 }
-// PURE LISTEN + optional SAFETY REFRESH. We never do a bare GET on the held session (that's what makes cheap
-// chips like Meross drop the link); the ev:true subscription delivers real-time updates. This watchdog only
-// RECONNECTS (re-subscribe + fresh read of every char on connect) when no frame has arrived within the safety
-// window (settings.safetyRefreshSecs, default 120s; 0 = off -> long SILENCE_RECONNECT_SEC fallback). It is
-// silence-gated: a live event stream keeps lastRx fresh so it stays quiet; an idle accessory (e.g. a garage
-// door with nothing changing) sends no events, so it reconnects every window — a gentle periodic auto-refresh.
+// HELD SESSION + LIVENESS PROBE (self-correcting — never trust the flag). A real HomeKit controller holds ONE
+// session and gets instant ev:true events. On a cheap single-slot chip (Meross mt7687) an idle connection can
+// silently die while state.live still reads true — pair-verify succeeding is NOT proof the session still works,
+// and a silent half-open death fires no socketStatus close. So every interval we send a MINIMAL read of ONE
+// characteristic (not the whole set — the heavy poll is what stressed cheap chips) and REQUIRE an inbound frame
+// back. That keeps the pipe warm so the chip doesn't idle-close it (what Apple gets from TCP keepalive), AND
+// proves liveness: an unanswered probe means the link is dead despite state.live, so we reconnect IMMEDIATELY
+// instead of sitting on a stale flag until some far-off timer. Events still push instantly; the probe reply also
+// happens to refresh the primary characteristic as a bonus. safetyRefreshSecs = probe interval (0 = disable).
 def liveKeepalive(){
-    if(state.live && state.sess){
-        int win = safetySecs()
-        long silentMs = now() - (state.lastRx?:0L)
-        long limitMs = (win>0 ? win : SILENCE_RECONNECT_SEC) * 1000L
-        if(silentMs >= limitMs){
-            logInfo "HAP: no update in ${(int)(silentMs/1000)}s — reconnecting to reconcile (re-subscribe + read)"
-            state.live=false; unschedule("liveKeepalive"); try{ interfaces.rawSocket.close() }catch(e){}; state.connInFlight=null
-            runIn(4,"liveConnect"); return
-        }
-        runIn(kaEvery(),"liveKeepalive")
-    } else { startLive() }
+    if(!(state.live && state.sess)){ startLive(); return }
+    int iv = safetySecs()
+    if(iv<=0){   // probing disabled -> only reconnect after a very long total silence (legacy pure-listen)
+        if((now()-(state.lastRx?:0L)) >= SILENCE_RECONNECT_SEC*1000L){ reconnectLive("silent ${SILENCE_RECONNECT_SEC}s"); return }
+        runIn(KEEPALIVE_SEC,"liveKeepalive"); return
+    }
+    // Was the PREVIOUS probe answered? ANY inbound frame (probe reply OR a real event) since we sent it proves life.
+    if(state.probeAt && (state.lastRx?:0L) < (state.probeAt as long)){
+        reconnectLive("keepalive unanswered ${(int)((now()-(state.probeAt as long))/1000)}s — session dead despite live flag"); return
+    }
+    // Alive (or first tick): send one tiny keepalive read, then re-check next interval.
+    String pid = primaryReadId()
+    if(pid){ state.probeAt = now(); sendEncrypted("GET /characteristics?id=${pid} HTTP/1.1\r\nHost: ${settings.ip}\r\n\r\n"); dlog("KA probe ${pid}") }
+    runIn(iv,"liveKeepalive")
 }
+// central live teardown + reconnect (used by the probe watchdog and any evidence of a dead session)
+void reconnectLive(String why){
+    log.warn "HAP: ${why} — reconnecting"
+    state.live=false; state.probeAt=null; unschedule("liveKeepalive")
+    try{ interfaces.rawSocket.close() }catch(e){}; state.connInFlight=null
+    runIn(4,"liveConnect")
+}
+// smallest possible keepalive/liveness target: the first mapped characteristic (one aid.iid)
+String primaryReadId(){ String r=readIds(); if(!r) return null; return r.split(',')[0] }
 void processLiveStream(){
     String s = new String(hex(plainbuf().toString()), "ISO-8859-1"); int consumed=0
     while(true){

@@ -18,9 +18,15 @@
  *   Contact/Motion/Occupancy/Temperature/Humidity/Light sensors, Battery. Unmapped -> Dump Accessories.
  *
  * Author: RamSet
- * Version: 0.13.0
+ * Version: 0.13.1
  *
  * Changelog:
+ *  v0.13.1 - Self-correcting held session (hapCore 0.10.4): the driver no longer trusts a "live" flag from a
+ *           successful handshake. It holds one session and probes it every N seconds with a tiny 1-characteristic
+ *           read — keeping a cheap chip (Meross) from silently dropping an idle connection and reconnecting the
+ *           instant a probe goes unanswered. The old "Safety refresh" preference is now "Keepalive/liveness probe
+ *           (seconds)", default 30. If you're upgrading, set it to 30 (a stale 120 is too slow to hold the link).
+ *           Instant HomeKit-style event push is unchanged. Requires hapCore >= 0.10.4.
  *  v0.13.0 - Persistent-mode safety refresh (new "Safety refresh (seconds)" preference, default 120s): if the
  *           held event session goes silent for the window, the driver reconnects and re-reads every
  *           characteristic, so state no longer goes stale when the session silently dies overnight. Set it
@@ -91,7 +97,7 @@
  *   "location": "https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/drivers/homekit-accessory/homekit-accessory.groovy",
  *   "description": "Imports a LAN HomeKit accessory into Hubitat: pairs, discovers services, auto-creates child devices, live updates.",
  *   "required": true,
- *   "version": "0.13.0"
+ *   "version": "0.13.1"
  * }
  *
  * Copyright 2026 RamSet — Apache License 2.0, provided as-is, no warranty.
@@ -126,7 +132,7 @@ metadata {
         input "sessionMode", "enum", title: "Connection mode", options: ["Persistent (event push)","On-demand (poll)"], defaultValue: "Persistent (event push)",
               description: "Persistent = instant updates via a held session (best for well-behaved accessories). On-demand = connect only to read/write + poll (use for flaky accessories like Meross that hard-close the connection)."
         input "pollMins", "number", title: "Poll interval (minutes) — On-demand mode only", defaultValue: 5
-        input "safetyRefreshSecs", "number", title: "Safety refresh (seconds) — Persistent mode only: reconnect & re-read every characteristic if no update arrives within this window (0 = off, min 20). Keeps state fresh when the event session silently dies (e.g. overnight).", defaultValue: 120
+        input "safetyRefreshSecs", "number", title: "Keepalive/liveness probe (seconds) — Persistent mode: hold one session and every N seconds send a tiny 1-characteristic read to keep the link warm and prove it's alive; an unanswered probe reconnects immediately. Keeps a cheap chip (e.g. Meross) from silently idle-dropping the session. 30 recommended; floor 15; 0 = disable probing.", defaultValue: 30
         input "infoLog", "bool", title: "Enable info logging", defaultValue: true
         input "debugLog", "bool", title: "Enable debug logging", defaultValue: false
     }
