@@ -24,9 +24,13 @@
  * Include in a driver with:  #include RamSet.hapCore
  *
  * Author: RamSet
- * Version: 0.10.6
+ * Version: 0.10.7
  *
  * Changelog:
+ *  v0.10.7 - Log level: the "session desynced (decrypt failed) — reconnecting for fresh keys" line is now DEBUG,
+ *            not WARN. It's a known self-healing re-key event (0.10.2 already moved it ERROR->WARN) that fires
+ *            often on busy multi-sensor thermostats and needs no user action — the driver reconnects and recovers,
+ *            and a reconnect that actually FAILS still logs separately. Turn on debug logging to see it again.
  *  v0.10.6 - RECOVERY LATCH FIX (the real overnight killer). ensureUp — the backstop that re-establishes a
  *            dropped session — guarded on a bare `!state.connInFlight`, so a STALE connInFlight left by a connect
  *            that died without clearing the flag blocked recovery FOREVER (observed live: a device dead ~4h with
@@ -611,7 +615,7 @@ def parse(String message){
     // chances to be mid-stream on a re-key, so on busy thermostats this fires often but harmlessly.)
     String es=e.toString()
     if(state.live && (es.contains("AEADBadTag") || es.contains("Tag mismatch") || es.contains("BadPadding"))){
-        log.warn "HAP: session desynced (decrypt failed) — reconnecting for fresh keys"
+        dlog("HAP: session desynced (decrypt failed) — reconnecting for fresh keys")   // benign self-healing re-key; debug-only (fires often on busy multi-sensor thermostats)
         rep("ERR parse ${state.op}/${state.vstage}: ${e.class.simpleName}: ${e.message}")
         state.live=false; state.sess=false; try{ interfaces.rawSocket.close() }catch(ig){}; state.connInFlight=null
         unschedule("liveKeepalive"); unschedule("kaWatch"); runIn(2,"startLive")
