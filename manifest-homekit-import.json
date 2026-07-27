@@ -1,8 +1,8 @@
 {
   "packageName": "HomeKit Import (Local)",
   "author": "RamSet",
-  "version": "0.9.10",
-  "releaseNotes": "0.9.10 - Recovery latch fix: after a bad drop, a stale internal flag could block the driver's reconnect backstop indefinitely, leaving the accessory dead until you hit Save (the real cause of overnight 'stopped updating'). It now self-heals within a few minutes. Update BOTH the hapCore library and the driver.",
+  "version": "0.9.11",
+  "releaseNotes": "0.9.11 - Quieter logs (hapCore 0.10.7): the 'session desynced (decrypt failed) — reconnecting for fresh keys' line is now debug-only instead of a warning. It's a normal self-healing re-key that fires often on busy accessories and needs no action, so it no longer clutters the log. Turn on debug logging if you want to see it. (0.9.10 - Recovery latch fix: a stale internal flag could block the reconnect backstop indefinitely, leaving an accessory dead until you hit Save; it now self-heals within a few minutes.)",
   "category": "Integrations",
   "tags": "HomeKit, HAP, Local, Import, No Cloud",
   "dateReleased": "2026-07-21",
