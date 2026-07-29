@@ -1,8 +1,8 @@
 {
   "packageName": "Ecobee HAP Thermostat (Local)",
   "author": "RamSet",
-  "version": "0.19.8",
-  "releaseNotes": "0.19.8 - Important fix: reverts the TCP keepalive change from 0.19.7. On Hubitat 2.5.1 the new socket keepalive options can't be used from a driver (the platform blocks them with a security error), which caused the thermostat connection to fail and the device to appear stuck 'connecting' after a reconnect. This release restores the previous, reliable connection behavior. If you installed 0.19.7, please update. (Keepalive will return once Hubitat makes that option usable from drivers.)",
+  "version": "0.19.9",
+  "releaseNotes": "0.19.9 - Quieter logs: routine live-session reconnects are now info-level instead of warnings. Many ecobees silently drop the HomeKit session every several minutes and the driver reconnects within seconds — packet capture confirmed this is normal, harmless self-healing, not a fault, so it no longer logs a wall of warnings ('session dead… reconnecting' / 'live socket dropped… reconnecting'). A genuinely unreachable thermostat is still reported as a warning via the healthStatus attribute. Turn on info logging if you want to see the reconnects. (0.19.8 reverted the 2.5.1 keepalive change that couldn't run from a driver.)",
   "category": "Thermostats",
   "tags": "Thermostat, ecobee, HomeKit, HAP, Local, Sensor",
   "dateReleased": "2026-07-29",

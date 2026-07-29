@@ -24,9 +24,17 @@
  * Include in a driver with:  #include RamSet.hapCore
  *
  * Author: RamSet
- * Version: 0.10.9
+ * Version: 0.10.10
  *
  * Changelog:
+ *  v0.10.10 - Log level: the routine live-session reconnect lines are now INFO, not WARN — "…session dead
+ *            despite live flag — reconnecting" (keepalive-unanswered / long-silence) and "live socket dropped
+ *            (…); reconnecting". Packet capture confirmed these are NORMAL self-healing events: some accessories
+ *            (e.g. ecobee4) silently stop servicing the HAP session every ~8-10 min — no decrypt error, no TCP
+ *            close — and the driver reconnects within ~10s each time. On an idle multi-sensor thermostat that's
+ *            a WARN every few minutes for a link that's actually fine. Genuine unreachability is still surfaced
+ *            (and stays a WARN) via healthStatus=offline, which only trips after several missed intervals. Turn
+ *            on info logging to see the reconnects; the real fix (prevent the drop) needs TCP keepalive (blocked).
  *  v0.10.9 - REVERT of 0.10.8. Passing 2.5.1's TCP-keepalive options (tcpKeepIdle/Interval/Count) to
  *            interfaces.rawSocket.connect throws `java.lang.SecurityException: getMethod method not allowed`
  *            on the actual connect (2.5.1.138): the platform sets the extended socket options via reflection,
@@ -599,7 +607,7 @@ void sendEncrypted(String req){ byte[] plain=req.getBytes("UTF-8"); def o=new ja
 def socketStatus(String s){
     String l = s?.toLowerCase() ?: ""
     if(l.contains("close") || l.contains("error")) state.connInFlight=null
-    if(state.live && (l.contains("close") || l.contains("error"))){ state.live=false; sendEvent(name:"hapStatus", value:"reconnecting"); log.warn "HAP: live socket dropped (${s}); reconnecting"; runIn(8,"startLive") }
+    if(state.live && (l.contains("close") || l.contains("error"))){ state.live=false; sendEvent(name:"hapStatus", value:"reconnecting"); logInfo "HAP: live socket dropped (${s}); reconnecting"; runIn(8,"startLive") }
     else if(!l.contains("close")) log.warn "socket: $s"
 }
 
@@ -753,7 +761,7 @@ def liveKeepalive(){
 }
 // central live teardown + reconnect (used by the probe watchdog and any evidence of a dead session)
 void reconnectLive(String why){
-    log.warn "HAP: ${why} — reconnecting"
+    logInfo "HAP: ${why} — reconnecting"
     state.live=false; state.probeAt=null; unschedule("liveKeepalive")
     try{ interfaces.rawSocket.close() }catch(e){}; state.connInFlight=null
     runIn(4,"liveConnect")

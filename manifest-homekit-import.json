@@ -1,8 +1,8 @@
 {
   "packageName": "HomeKit Import (Local)",
   "author": "RamSet",
-  "version": "0.9.13",
-  "releaseNotes": "0.9.13 - Important fix: reverts the TCP keepalive change from 0.9.12 (hapCore 0.10.9). On Hubitat 2.5.1 the new socket keepalive options can't be used from a driver — the platform blocks them with a security error — which caused any accessory doing a fresh persistent connect to fail and appear stuck 'connecting'. This release restores the previous, reliable connection behavior. If you installed 0.9.12, please update. (Keepalive will return once Hubitat makes that socket option usable from drivers.)",
+  "version": "0.9.14",
+  "releaseNotes": "0.9.14 - Quieter logs (hapCore 0.10.10): routine live-session reconnects are now info-level instead of warnings. Some accessories silently drop the HomeKit session periodically and the driver reconnects within seconds — packet capture confirmed this is normal self-healing, not a fault, so it no longer logs a wall of warnings ('session dead… reconnecting' / 'live socket dropped… reconnecting'). A genuinely unreachable accessory is still reported as a warning via the healthStatus attribute. Turn on info logging to see the reconnects. (0.9.13 reverted the 2.5.1 keepalive change that couldn't run from a driver.)",
   "category": "Integrations",
   "tags": "HomeKit, HAP, Local, Import, No Cloud",
   "dateReleased": "2026-07-29",
