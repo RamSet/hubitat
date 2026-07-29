@@ -1,11 +1,11 @@
 {
   "packageName": "HomeKit Import (Local)",
   "author": "RamSet",
-  "version": "0.9.11",
-  "releaseNotes": "0.9.11 - Quieter logs (hapCore 0.10.7): the 'session desynced (decrypt failed) — reconnecting for fresh keys' line is now debug-only instead of a warning. It's a normal self-healing re-key that fires often on busy accessories and needs no action, so it no longer clutters the log. Turn on debug logging if you want to see it. (0.9.10 - Recovery latch fix: a stale internal flag could block the reconnect backstop indefinitely, leaving an accessory dead until you hit Save; it now self-heals within a few minutes.)",
+  "version": "0.9.12",
+  "releaseNotes": "0.9.12 - More resilient accessory connections on Hubitat 2.5.1 and newer (hapCore 0.10.8). Persistent connections to your HomeKit accessories now use TCP keepalive with a short idle timer. This holds a cheap Wi-Fi accessory's single connection slot open and cleanly tears down a connection that has silently half-died in about a minute — instead of that one slot staying wedged for up to ~50 minutes and the device going unresponsive. Fully backward compatible: on hubs older than 2.5.1 the connection behaves exactly as before. (0.9.11 quieted a benign 're-key' warning; 0.9.10 fixed a stale flag that could block the reconnect backstop.)",
   "category": "Integrations",
   "tags": "HomeKit, HAP, Local, Import, No Cloud",
-  "dateReleased": "2026-07-21",
+  "dateReleased": "2026-07-29",
   "minimumHEVersion": "2.3.0",
   "drivers": [
     {

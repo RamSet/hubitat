@@ -24,9 +24,15 @@
  * Include in a driver with:  #include RamSet.hapCore
  *
  * Author: RamSet
- * Version: 0.10.7
+ * Version: 0.10.8
  *
  * Changelog:
+ *  v0.10.8 - TCP keepalive on the session socket (Hubitat 2.5.1+). The persistent + one-shot rawSocket connects now
+ *            request SO_KEEPALIVE with a short idle (tcpKeepIdle/Interval/Count), so the OS holds a warm connection
+ *            and tears down a silently half-dead one in ~1 min instead of letting it wedge a single-slot accessory's
+ *            only connection for ~50 min (the classic cheap-HAP-chip failure). Fully backward compatible: the
+ *            keepalive keys are added ONLY when the hub is 2.5.1+ (hubAtLeast), so on 2.5.0 the connect options are
+ *            byte-for-byte unchanged. The app-level liveKeepalive() probe is retained as the pre-2.5.1 fallback.
  *  v0.10.7 - Log level: the "session desynced (decrypt failed) — reconnecting for fresh keys" line is now DEBUG,
  *            not WARN. It's a known self-healing re-key event (0.10.2 already moved it ERROR->WARN) that fires
  *            often on busy multi-sensor thermostats and needs no user action — the driver reconnects and recovers,
@@ -566,7 +572,7 @@ def hapStart(String op, String body){
     state.sess=false; state.vstage="m2"
     def ek=genEph(); state.ephPriv=ek.priv; state.ephPub=ek.pub
     sendEvent(name:"hapStatus", value:"connecting")
-    try { interfaces.rawSocket.connect([byteInterface:true], settings.ip, hapPort()) }
+    try { interfaces.rawSocket.connect(connOpts(), settings.ip, hapPort()) }
     catch(e){ log.error "connect: $e"; rep("ERR connect $e"); return }
     sendHttpTlv("/pair-verify", tlv([[6,[1] as byte[]],[3,hex(state.ephPub)]]))
     unschedule("oneshotWatch"); runIn(12,"oneshotWatch")   // if verify hangs, close so we don't leave a half-open socket (which wedges single-slot accessories)
@@ -692,6 +698,26 @@ void finish(){
 }
 
 // ===== live event mode (persistent session + subscriptions) =====
+// True if the hub firmware is >= want (dotted, e.g. "2.5.1"). Defaults false on any parse failure, so a
+// firmware-gated feature stays OFF unless we can positively confirm the version — keeps pre-2.5.1 behavior intact.
+private boolean hubAtLeast(String want){
+    try{
+        def cur=(location?.hub?.firmwareVersionString ?: "0").tokenize('.')*.toInteger()
+        def tgt=want.tokenize('.')*.toInteger()
+        for(int i=0;i<Math.max(cur.size(),tgt.size());i++){
+            int c=(i<cur.size()?cur[i]:0), t=(i<tgt.size()?tgt[i]:0)
+            if(c!=t) return c>t
+        }
+        return true
+    }catch(e){ return false }
+}
+// rawSocket.connect options. 2.5.1 added settable TCP keepalive; on older builds the extra keys would be
+// unknown, so we add them ONLY when confirmed >=2.5.1 (map is then identical to the historic [byteInterface:true]).
+private Map connOpts(){
+    def o=[byteInterface:true]
+    if(hubAtLeast("2.5.1")) o << [keepAlive:true, tcpKeepIdle:25, tcpKeepInterval:10, tcpKeepCount:3]
+    return o
+}
 def startLive(){ if(!isPaired()){ log.warn "HAP: not paired"; return }; unschedule("liveKeepalive"); unschedule("kaWatch"); mdnsThen(state.services==null ? "discover" : "live") }
 void liveConnect(){
     if(hapPort()<=0){ log.warn "HAP: no port"; return }
@@ -700,7 +726,7 @@ void liveConnect(){
     state.op="live"; state.inCtr=0; state.outCtr=0; rxbuf().setLength(0); plainbuf().setLength(0); state.sess=false; state.vstage="m2"; state.live=false
     def ek=genEph(); state.ephPriv=ek.priv; state.ephPub=ek.pub
     sendEvent(name:"hapStatus", value:"connecting (live)")
-    try { interfaces.rawSocket.connect([byteInterface:true], settings.ip, hapPort()) }
+    try { interfaces.rawSocket.connect(connOpts(), settings.ip, hapPort()) }
     catch(e){ log.error "live connect: $e"; state.connInFlight=null; runIn(30,"startLive"); return }
     sendHttpTlv("/pair-verify", tlv([[6,[1] as byte[]],[3,hex(state.ephPub)]]))
     unschedule("verifyWatch"); runIn(12,"verifyWatch")   // pair-verify must complete in 10s or we retry (Meross often stalls at M2)

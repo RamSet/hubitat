@@ -1,11 +1,11 @@
 {
   "packageName": "Ecobee HAP Thermostat (Local)",
   "author": "RamSet",
-  "version": "0.19.6",
-  "releaseNotes": "0.19.6 - Quiets a benign warning that busy multi-sensor thermostats logged often — 'session desynced (decrypt failed) — reconnecting for fresh keys'. That's a normal self-healing re-key (the encrypted connection re-keys and the driver reconnects automatically); it needs no action, so it's now a debug-only message instead of a warning. This update also delivers the engine's recovery-latch fix: a connection that died mid-connect could previously leave the driver stuck 'connecting' and never retry (seen as a device dead for hours) — it now self-heals within one heartbeat. Turn on debug logging if you ever want to see the re-key messages. (0.19.5 added the healthStatus online/offline attribute.)",
+  "version": "0.19.7",
+  "releaseNotes": "0.19.7 - More resilient connection to the thermostat on Hubitat 2.5.1 and newer. The driver now turns on TCP keepalive with a short idle timer, so a connection that quietly dies is detected and re-established within about a minute instead of possibly hanging. This is fully backward compatible: on hubs older than 2.5.1 the connection behaves exactly as it did before — nothing changes for you. (0.19.6 quieted a benign 're-key' warning and delivered the recovery-latch fix that kept a dead connection from retrying; 0.19.5 added the healthStatus online/offline attribute.)",
   "category": "Thermostats",
   "tags": "Thermostat, ecobee, HomeKit, HAP, Local, Sensor",
-  "dateReleased": "2026-07-15",
+  "dateReleased": "2026-07-29",
   "drivers": [
     {
       "id": "511b25e3-4ca2-413e-a1f7-351ff50cd3b1",
