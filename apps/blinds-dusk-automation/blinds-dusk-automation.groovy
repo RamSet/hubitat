@@ -163,61 +163,61 @@ private String currentStatus() {
     def rows = []
 
     boolean armed = !(state.actedTonight)
-    rows << row("✅", "Armed for tonight",
+    rows << row("Armed for tonight",
                 armed ? pill("yes", "green") : pill("no — already acted", "grey"))
 
     boolean dark = lightSensors ? isDark() : false
-    rows << row("🌙", "Dark now (dusk gate)",
+    rows << row("Dark now (dusk gate)",
                 lightSensors ? (dark ? pill("yes", "indigo") : pill("no", "amber")) : pill("—", "grey"))
 
-    rows << row("⏳", "Waiting for window to close",
+    rows << row("Waiting for window to close",
                 state.waitingForWindow ? pill("yes", "amber") : pill("no", "grey"))
 
     if (lightSensors) {
         lightSensors.each { s ->
-            rows << row("💡", "Light — ${s.displayName}",
+            rows << row("Light — ${s.displayName}",
                         pill("${s.currentValue('illuminance')} lux", "blue") +
                         " <small>acts at &le; ${luxThreshold}</small>")
         }
     } else {
-        rows << row("💡", "Light sensor", pill("not selected", "grey"))
+        rows << row("Light sensor", pill("not selected", "grey"))
     }
 
     if (blinds) {
         blinds.each { b ->
             def st = b.currentValue('windowShade') ?: b.currentValue('switch') ?: 'unknown'
-            rows << row("🪟", "Blind — ${b.displayName}",
+            rows << row("Blind — ${b.displayName}",
                         pill(st, st in ['closed', 'off'] ? 'green' : (st == 'unknown' ? 'grey' : 'amber')))
         }
     } else {
-        rows << row("🪟", "Blind", pill("not selected", "grey"))
+        rows << row("Blind", pill("not selected", "grey"))
     }
 
     if (windowSensor) {
         def contact = windowSensor.currentValue('contact')
-        rows << row("🚪", "Window contact — ${windowSensor.displayName}",
+        rows << row("Window contact — ${windowSensor.displayName}",
                     pill(contact, contact == 'open' ? 'red' : 'green'))
     } else {
-        rows << row("🚪", "Window contact", pill("not selected", "grey"))
+        rows << row("Window contact", pill("not selected", "grey"))
     }
 
     if (motionSensor) {
         def motion = motionSensor.currentValue('motion')
-        rows << row("🏃", "Motion — ${motionSensor.displayName}",
+        rows << row("Motion — ${motionSensor.displayName}",
                     pill(motion, motion == 'active' ? 'green' : 'grey'))
     }
     if (roomLight) {
         def sw = roomLight.currentValue('switch')
-        rows << row("💡", "Room light — ${roomLight.displayName}",
+        rows << row("Room light — ${roomLight.displayName}",
                     pill(sw, sw == 'on' ? 'amber' : 'grey'))
     }
 
     return rows.join("<br>")
 }
 
-// One status line: icon + label + a value (usually a colored pill).
-private String row(String icon, String label, String value) {
-    "${icon} <b>${label}:</b> ${value}"
+// One status line: label + a value (usually a colored pill).
+private String row(String label, String value) {
+    "<b>${label}:</b> ${value}"
 }
 
 // A rounded colored badge. Colors chosen for readability on Hubitat's light UI.
