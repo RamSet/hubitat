@@ -38,6 +38,9 @@ preferences {
 
 def mainPage() {
     dynamicPage(name: "mainPage", title: "<b>Blinds Dusk Automation</b>", install: true, uninstall: true) {
+        section("<b>Current status</b>") {
+            paragraph currentStatus()
+        }
         section("<b>Name</b>") {
             label title: "Name this instance (one per room)", required: true,
                   defaultValue: "Room Blinds Dusk"
@@ -153,6 +156,48 @@ def resetHandler() {
 }
 
 // --- helpers ---
+
+// Live device/state readout for the app's config page. Re-evaluated every time
+// the page is opened, so it always reflects the current values.
+private String currentStatus() {
+    def rows = []
+
+    boolean armed = !(state.actedTonight)
+    rows << "<b>Armed for tonight:</b> ${armed ? 'yes' : 'no — already acted'}"
+    rows << "<b>Dark now (dusk gate):</b> ${(lightSensors ? (isDark() ? 'yes' : 'no') : '—')}"
+    rows << "<b>Waiting for window to close:</b> ${state.waitingForWindow ? 'yes' : 'no'}"
+
+    if (lightSensors) {
+        lightSensors.each { s ->
+            rows << "<b>Light — ${s.displayName}:</b> ${s.currentValue('illuminance')} lux (acts at &le; ${luxThreshold})"
+        }
+    } else {
+        rows << "<b>Light sensor:</b> not selected"
+    }
+
+    if (blinds) {
+        blinds.each { b ->
+            rows << "<b>Blind — ${b.displayName}:</b> ${b.currentValue('windowShade') ?: b.currentValue('switch') ?: 'unknown'}"
+        }
+    } else {
+        rows << "<b>Blind:</b> not selected"
+    }
+
+    if (windowSensor) {
+        rows << "<b>Window contact — ${windowSensor.displayName}:</b> ${windowSensor.currentValue('contact')}"
+    } else {
+        rows << "<b>Window contact:</b> not selected"
+    }
+
+    if (motionSensor) {
+        rows << "<b>Motion — ${motionSensor.displayName}:</b> ${motionSensor.currentValue('motion')}"
+    }
+    if (roomLight) {
+        rows << "<b>Room light — ${roomLight.displayName}:</b> ${roomLight.currentValue('switch')}"
+    }
+
+    return rows.join("<br>")
+}
 
 void lowerBlinds() {
     // Issue close twice, matching the original rule (reliability for the shades).
