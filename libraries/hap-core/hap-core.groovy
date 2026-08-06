@@ -24,9 +24,18 @@
  * Include in a driver with:  #include RamSet.hapCore
  *
  * Author: RamSet
- * Version: 0.10.10
+ * Version: 0.10.11
  *
  * Changelog:
+ *  v0.10.11 - AUTO-RECOVERY FIX (forum #202: session died, never recovered, dead until a manual Save). The
+ *            reconnect backstop `ensureUp` bailed on `state.live==true` — but a zombie session leaves that flag
+ *            stuck TRUE while no data flows, so the backstop skipped the dead session on every 10-min tick and
+ *            nothing ever reconnected it. Proven live: on a healthy device the probe loop (liveKeepalive) is torn
+ *            down on every death and recovery rides on a SINGLE liveConnect runIn backed only by ensureUp; if that
+ *            liveConnect fizzles and the live flag is left true, ensureUp was blind to it. Now ensureUp treats
+ *            "live" as real ONLY if data is also fresh (lastRx within offlineAfterSecs); a stale-despite-live
+ *            session is reconnected. Also: liveConnect's "no port" exit used to return with nothing scheduled
+ *            (a wedge) — it now re-resolves the port via mDNS and retries. Both changes are additive/defensive.
  *  v0.10.10 - Log level: the routine live-session reconnect lines are now INFO, not WARN — "…session dead
  *            despite live flag — reconnecting" (keepalive-unanswered / long-silence) and "live socket dropped
  *            (…); reconnecting". Packet capture confirmed these are NORMAL self-healing events: some accessories
@@ -562,10 +571,16 @@ def discoverOnce(){ mdnsThen("discover") }   // -> hapStart(discover) -> onAcces
 // latch blocked this backstop FOREVER — turning a transient death into "dead until the user hits Save". Now we
 // clear a stale latch and reconnect; only an actually-in-progress connect (<20s old) is left alone.
 def ensureUp(){
-    if(!isPaired() || onDemand() || state.live==true) return
+    if(!isPaired() || onDemand()) return
+    // Do NOT blindly trust state.live: a zombie session leaves the flag TRUE while no data flows, and the old
+    // `state.live==true` bail made this backstop skip such a session on every tick — turning a missed reconnect
+    // into "dead until the user hits Save" (forum #202). Treat live as REAL only if data is also fresh; a stale
+    // lastRx despite live=true is a dead session the probe loop missed, so reconnect it.
+    long stale = now() - (state.lastRx ?: 0L)
+    if(state.live==true && stale < offlineAfterSecs()*1000L) return
     if(state.connInFlight && (now()-(state.connAt?:0) < 20000)) return
     if(state.connInFlight){ dlog("ensureUp: clearing stale connInFlight=${state.connInFlight}"); state.connInFlight=null }
-    dlog("ensureUp -> reconnect"); startSession()
+    dlog("ensureUp -> reconnect (live=${state.live}, ${(int)(stale/1000)}s since rx)"); startSession()
 }
 def schedulePoll(){ unschedule("pollRead"); runIn(pollSecs(),"pollRead") }
 def pollRead(){ if(isPaired() && onDemand()){ if(state.services==null) discoverOnce() else refresh(); schedulePoll() } }
@@ -711,7 +726,7 @@ void finish(){
 // ===== live event mode (persistent session + subscriptions) =====
 def startLive(){ if(!isPaired()){ log.warn "HAP: not paired"; return }; unschedule("liveKeepalive"); unschedule("kaWatch"); mdnsThen(state.services==null ? "discover" : "live") }
 void liveConnect(){
-    if(hapPort()<=0){ log.warn "HAP: no port"; return }
+    if(hapPort()<=0){ log.warn "HAP: no port — re-resolving via mDNS"; runIn(30,"startLive"); return }
     if(state.connInFlight && (now()-(state.connAt?:0) < 14000)){ rep("liveConnect skip: ${state.connInFlight} in-flight"); return }   // don't stack overlapping connects (wedges single-slot accessories)
     state.connInFlight="live"; state.connAt=now()
     state.op="live"; state.inCtr=0; state.outCtr=0; rxbuf().setLength(0); plainbuf().setLength(0); state.sess=false; state.vstage="m2"; state.live=false

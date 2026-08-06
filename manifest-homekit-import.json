@@ -1,8 +1,8 @@
 {
   "packageName": "HomeKit Import (Local)",
   "author": "RamSet",
-  "version": "0.9.14",
-  "releaseNotes": "0.9.14 - Quieter logs (hapCore 0.10.10): routine live-session reconnects are now info-level instead of warnings. Some accessories silently drop the HomeKit session periodically and the driver reconnects within seconds — packet capture confirmed this is normal self-healing, not a fault, so it no longer logs a wall of warnings ('session dead… reconnecting' / 'live socket dropped… reconnecting'). A genuinely unreachable accessory is still reported as a warning via the healthStatus attribute. Turn on info logging to see the reconnects. (0.9.13 reverted the 2.5.1 keepalive change that couldn't run from a driver.)",
+  "version": "0.9.15",
+  "releaseNotes": "0.9.15 - Auto-recovery fix (hapCore 0.10.11): in rare cases a dropped accessory session could stay dead until you opened the device and hit Save. The reconnect backstop trusted an internal 'live' flag that a stalled session could leave stuck on, so it never noticed the session was actually dead. It now also checks whether data is still flowing and reconnects a session that's gone quiet despite the flag — so accessories heal themselves without any manual step. Also hardened a reconnect path that could give up without retrying when a device's port needed re-discovering. (0.9.14 made routine reconnects info-level instead of warnings.)",
   "category": "Integrations",
   "tags": "HomeKit, HAP, Local, Import, No Cloud",
   "dateReleased": "2026-07-29",

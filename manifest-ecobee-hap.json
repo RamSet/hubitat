@@ -1,8 +1,8 @@
 {
   "packageName": "Ecobee HAP Thermostat (Local)",
   "author": "RamSet",
-  "version": "0.19.9",
-  "releaseNotes": "0.19.9 - Quieter logs: routine live-session reconnects are now info-level instead of warnings. Many ecobees silently drop the HomeKit session every several minutes and the driver reconnects within seconds — packet capture confirmed this is normal, harmless self-healing, not a fault, so it no longer logs a wall of warnings ('session dead… reconnecting' / 'live socket dropped… reconnecting'). A genuinely unreachable thermostat is still reported as a warning via the healthStatus attribute. Turn on info logging if you want to see the reconnects. (0.19.8 reverted the 2.5.1 keepalive change that couldn't run from a driver.)",
+  "version": "0.19.10",
+  "releaseNotes": "0.19.10 - Auto-recovery fix: in rare cases a dropped session could stay dead until you opened the device and hit Save. The reconnect backstop trusted an internal 'live' flag that a stalled session could leave stuck on, so it never noticed the session was actually dead. It now also checks whether data is still flowing, and reconnects a session that's gone quiet despite the flag — so the thermostat heals itself without any manual step. Also hardened a reconnect path that could give up without retrying when the device's port needed re-discovering. (0.19.9 made routine reconnects info-level instead of warnings.)",
   "category": "Thermostats",
   "tags": "Thermostat, ecobee, HomeKit, HAP, Local, Sensor",
   "dateReleased": "2026-07-29",
