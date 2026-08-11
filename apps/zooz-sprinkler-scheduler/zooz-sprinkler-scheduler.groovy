@@ -62,7 +62,7 @@ mappings {
     path("/calendar.ics")  { action: [GET: "apiCalendar"] }
 }
 
-String getAppVersion() { return "v0.14.1 (2026-07)" }
+String getAppVersion() { return "v0.15.0 (2026-08)" }
 
 // Simple vs Advanced interface. Simple shows only zones, schedule, weather and
 // hardware safety; Advanced exposes everything (moisture, learning, sensors,
@@ -150,6 +150,8 @@ private String  wApiUnit()  { return isMetric() ? "kmh"     : "mph" }
     // Hardware & watchdog
     "hardware.push"    : [section: "Hardware",   default: '${app}: Zooz relay watchdog set to ${minutes}min on ${count} controller(s)'],
     "watchdog.stale"   : [section: "Hardware",   default: '${app}: ${sensor} unreachable for ${hours}h'],
+    "relay.failed"     : [section: "Hardware",   default: '${app}: ⚠ ${zone} relay never confirmed ON — ${device} still reads "${reads}" after ${attempts} attempt(s). ${action}.'],
+    "relay.recovered"  : [section: "Hardware",   default: '${app}: ${zone} relay only confirmed ON after ${attempts} retry(ies) — ${device}, mesh is marginal'],
 
     // Test / manual
     "test.run"         : [section: "Test",       default: '${app}: testing ${zone} for ${duration}', defaultOff: true],
@@ -926,6 +928,30 @@ def hardwarePage() {
                   title: "Warn if a relay is unreachable for this many hours",
                   description: "These relays only report when actuated, so they're silent between waterings. Blank = auto (your watering gap + a buffer, currently ~${expectedQuietHours()}h) so you only get warned if a run is actually missed.",
                   range: "1..2000", required: false
+        }
+        section("Confirm the relay actually turned on") {
+            paragraph "Turning a Z-Wave relay on is fire-and-forget: the app sends the command and moves on. If the command is lost on the mesh, the app still runs its timers and still sends \"watering\" notifications — while nothing is actually watering. With this on, a few seconds after each valve is commanded ON the app asks that relay to report its own state, checks the answer, re-sends the command if it hasn't confirmed, and tells you if it never does."
+            paragraph "Worth knowing: on a multi-relay controller the individual relay children normally stay silent — the parent device reports, the per-relay children don't, unless something asks them. That's why this polls each relay directly instead of just reading the last known value, which on those children can be blank forever."
+            input name: "relayVerifyEnable", type: "bool",
+                  title: "Verify each zone relay reports ON after it's commanded",
+                  defaultValue: true, submitOnChange: true
+            if (settings.relayVerifyEnable != false) {
+                input name: "relayVerifySec", type: "number",
+                      title: "Seconds to wait for the relay to answer",
+                      description: "How long to give the relay to report back after it's asked. Default 10.",
+                      range: "3..60", defaultValue: 10
+                input name: "relayVerifyRetries", type: "number",
+                      title: "Re-send the ON command this many times before giving up",
+                      description: "Each retry asks the relay again too, so a merely-lost status report doesn't look like a dead valve. Default 2.",
+                      range: "0..5", defaultValue: 2
+                input name: "relayVerifyAction", type: "enum",
+                      title: "When a relay never confirms ON",
+                      options: ["skip":   "Skip that zone, continue the rest of the schedule (recommended)",
+                                "abort":  "Stop the whole run",
+                                "notify": "Notify only, keep running the timers"],
+                      defaultValue: "skip"
+                paragraph "Note: a device that never reports a switch state at all (some non-Zooz drivers) can't be verified — the app warns once and skips verification for that actuation rather than false-alarming."
+            }
         }
         if (settings.hwZen16Parents) {
             section("Push now") {
@@ -1715,6 +1741,7 @@ private void pauseRunningSchedule(String reason) {
     unschedule("zoneCyclePhaseDone")
     unschedule("zoneCycleResume")
     unschedule("doResumeAfterPause")
+    clearRelayConfirm()
 
     state.paused = true
     state.running = false  // schedule is no longer actively running
@@ -1779,7 +1806,7 @@ def doResumeAfterPause() {
         return
     }
     def sw = settings."zone${zid}Switch"
-    if (sw) try { sw.on() } catch (e) { log.warn "resume: ${e.message}" }
+    if (sw) try { sw.on(); armRelayConfirm(zid, "schedule") } catch (e) { log.warn "resume: ${e.message}" }
     log.info "${app.label}: RESUMED ${zname} — ${remainingSec}s left in this cycle"
     notify("pause.resume", [zone: zname, remaining: fmtDuration(remainingSec as int)])
     state.currentPhaseStartMs = now()
@@ -2187,6 +2214,8 @@ def startNextZone() {
     // different controller that didn't run this cycle. The per-cycle on-time is
     // the longest continuous actuation, which the auto-off-timer guard uses.
     markControllerReachable(sw, perCycleMin * 60)
+    // Prove the valve actually opened instead of trusting a fire-and-forget Set.
+    armRelayConfirm(zid, "schedule")
     // Mirror onto the exposed child Virtual Switch (HomeKit/dashboard view),
     // then reconcile all tiles so any prior zone's tile is cleared.
     setZoneChildSwitch(zid, "on")
@@ -2272,6 +2301,7 @@ def zoneCycleResume() {
     if (sw) {
         if (descTextEnable) log.info "${app.label}: ▶ ${zname} resume cycle ${(state.currentZoneCycleIdx + 1)}/${state.currentZoneCycles} (${perCycleMin}m)"
         sw.on()
+        armRelayConfirm(zid, "schedule")
         state.currentPhaseStartMs = now()
         state.currentPhaseDurationSec = perCycleMin * 60
         state.currentPhaseType = "water"
@@ -2325,6 +2355,7 @@ def stopAllZones() {
     unschedule("zoneCycleResume")
     unschedule("doResumeAfterPause")
     unschedule("manualZoneTimeout")
+    clearRelayConfirm()
     Integer n = (settings.zoneCountPref ?: 0) as int
     for (int i = 1; i <= n; i++) {
         def sw = settings."zone${i}Switch"
@@ -3095,6 +3126,7 @@ def manualZoneStart(int zid) {
     log.info "${app.label}: MANUAL ▶ ${zname} for ${mins}m (via ${sw.displayName})"
     notify("zone.manualStart", [zone: zname, duration: "${mins}m", switch: sw.displayName])
     try { sw.on() } catch (e) { log.warn "manualZoneStart relay on: ${e.message}" }
+    armRelayConfirm(zid, "manual")
     setZoneChildSwitch(zid, "on")   // reflect on the HomeKit/dashboard tile
 
     rescheduleManualTimers()
@@ -4214,6 +4246,156 @@ private String controllerKeyFor(sw) {
     } catch (e) {
         try { return sw.id as String } catch (e2) { return null }
     }
+}
+
+// =========================================================================
+// Relay confirmation — prove the valve actually opened
+// =========================================================================
+// The Zooz driver's on() sends a Z-Wave Binary Set and does NOT follow it with a
+// Get, and it does not optimistically fake the attribute either. So a zone
+// switch's "switch" attribute only reads "on" once the relay itself reports back
+// — which makes it an honest signal, but only if we ASK for it.
+//
+// This matters more than it looks for multi-relay controllers. A ZEN16/ZEN17
+// reports its aggregate state on endpoint 0 (the parent device); the per-relay
+// child endpoints stay silent unless something sends a per-endpoint Get. Nothing
+// in the normal watering path ever does, so a child relay's "switch" attribute
+// can sit at null forever and reading it proves nothing. Every check therefore
+// pokes refresh() first (componentRefresh → switchBinaryGet on that endpoint) and
+// reads on the NEXT pass, once the report has had time to come back.
+//
+// The payoff: if the ON was dropped on the mesh, we find out in seconds instead
+// of running timers and sending "watering" notifications for a zone that never
+// opened.
+
+// Each actuation gets its own pending check (overwrite:false + data payload), so
+// two manual zones running at once can't clobber each other's verification the
+// way a single shared state slot would. stage "poke" asks the relay to report,
+// stage "read" believes what it says.
+private void armRelayConfirm(Integer zid, String ctx, Integer tries = 0, String stage = "poke") {
+    if (settings.relayVerifyEnable == false) return
+    if (!zid || !settings."zone${zid}Switch") return
+    // The poke goes out shortly after the Set so the relay has actuated; the read
+    // then waits the full configured window for the report to land.
+    Integer delay = (stage == "poke") ? 3 : relayVerifyDelaySec()
+    runIn(delay, "relayConfirmCheck",
+          [data: [zid: zid, ctx: ctx, tries: tries, stage: stage], overwrite: false])
+}
+
+private void clearRelayConfirm() {
+    unschedule("relayConfirmCheck")
+}
+
+private Integer relayVerifyDelaySec() {
+    return Math.max(3, (settings.relayVerifySec ?: 10) as int)
+}
+
+// Ask a relay to report its current state. Returns false if the device offers no
+// way to be asked, in which case there is nothing to verify and we bow out
+// quietly rather than accusing a perfectly good valve.
+private boolean relayPoke(sw, String zname) {
+    try {
+        if (sw.respondsTo("refresh")) { sw.refresh(); return true }
+    } catch (e) {
+        log.warn "${app.label}: ${zname} refresh failed: ${e.message}"
+        return false
+    }
+    log.warn "${app.label}: ${zname} — ${sw.displayName} has no refresh command, so its relay state can't be confirmed; verification skipped"
+    return false
+}
+
+def relayConfirmCheck(data) {
+    Integer zid = (data?.zid ?: 0) as int
+    if (zid <= 0) return
+    String ctx = (data?.ctx ?: "schedule") as String
+    String stage = (data?.stage ?: "read") as String
+
+    // Stale-context guard: if the run advanced, paused, stopped, or moved out of
+    // the watering phase since we armed, this check is about a valve we no longer
+    // care about — and a valve that's legitimately closed must not false-alarm.
+    if (ctx == "schedule" && (state.running != true
+                              || ((state.currentZoneId ?: 0) as int) != zid
+                              || state.currentPhaseType != "water")) return
+    if (ctx == "manual" && !((state.manualActive ?: [:]) as Map).containsKey(zid.toString())) return
+
+    def sw = settings."zone${zid}Switch"
+    if (!sw) return
+    String zname = settings."zone${zid}Name" ?: "Zone ${zid}"
+    Integer tries = (data?.tries ?: 0) as int
+
+    // Stage 1 — ask the relay to state its own case, then come back and read it.
+    // Without this the read is meaningless on a child endpoint that has never
+    // been polled (see the note above).
+    if (stage == "poke") {
+        if (!relayPoke(sw, zname)) return
+        armRelayConfirm(zid, ctx, tries, "read")
+        return
+    }
+
+    String reads = null
+    try { reads = sw.currentValue("switch") as String } catch (e) { reads = null }
+
+    if (reads == "on") {
+        if (tries > 0) {
+            log.warn "${app.label}: ${zname} relay confirmed ON only after ${tries} retry(ies) — mesh is marginal"
+            notify("relay.recovered", [zone: zname, attempts: tries, device: sw.displayName])
+        } else if (descTextEnable) {
+            log.info "${app.label}: ${zname} relay confirmed ON (${sw.displayName})"
+        }
+        return
+    }
+
+    // Still nothing even after being explicitly asked: this device genuinely does
+    // not report its state, so "not on" carries no information. Don't cry wolf.
+    if (reads == null) {
+        log.warn "${app.label}: ${zname} — ${sw.displayName} reported no switch state even after a refresh, so the relay can't be confirmed; verification skipped for this actuation"
+        return
+    }
+
+    Integer maxTries = Math.max(0, (settings.relayVerifyRetries ?: 2) as int)
+    if (tries < maxTries) {
+        log.warn "${app.label}: ${zname} relay still reads '${reads}' — re-sending ON (retry ${tries + 1}/${maxTries})"
+        try { sw.on() } catch (e) { log.warn "relay retry on: ${e.message}" }
+        armRelayConfirm(zid, ctx, tries + 1, "poke")
+        return
+    }
+
+    // Confirmed failure — the relay was commanded, re-commanded and refreshed,
+    // and it is still not reporting on.
+    String action = (settings.relayVerifyAction ?: "skip") as String
+    if (ctx == "manual") action = "manual"
+    String actionText = [skip:   "Skipping this zone and continuing the schedule",
+                         abort:  "Stopping the run",
+                         notify: "Continuing anyway",
+                         manual: "Manual run cancelled"][action] ?: "Skipping this zone"
+    log.error "${app.label}: ${zname} relay did NOT confirm ON — ${sw.displayName} still reads '${reads}' after ${maxTries + 1} attempt(s). ${actionText}."
+    notify("relay.failed", [zone: zname, device: sw.displayName, reads: reads,
+                            attempts: maxTries + 1, action: actionText])
+
+    if (ctx == "manual") { manualZoneStop(zid); return }
+    if (action == "notify") return
+
+    if (action == "abort") {
+        stopAllZones()
+        recordRunFinish("aborted — ${zname} relay never confirmed ON")
+        publishDashboardState()
+        return
+    }
+
+    // skip: close this zone out and move on to the next one in the plan. Other
+    // zones may well live on a different controller and still water fine.
+    unschedule("zoneCyclePhaseDone")
+    unschedule("zoneCycleResume")
+    try { sw.off() } catch (e) { }
+    setZoneChildSwitch(zid, "off")
+    unsubscribeZoneMoisture(zid)
+    recordZoneRun(zid, 0, "relay never confirmed ON")
+    state.currentZoneIdx = ((state.currentZoneIdx ?: 0) as int) + 1
+    Integer betweenSec = Math.max(2, (settings.scheduleBetweenZoneSec ?: 10) as int)
+    state.currentPhaseStartMs = now()
+    state.currentPhaseDurationSec = betweenSec
+    state.currentPhaseType = "gap"
+    runIn(betweenSec, "startNextZone")
 }
 
 // Actively prod a device so a reachable-but-idle relay reports in (updating
