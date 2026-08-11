@@ -938,8 +938,8 @@ def hardwarePage() {
             if (settings.relayVerifyEnable != false) {
                 input name: "relayVerifySec", type: "number",
                       title: "Seconds to wait for the relay to answer",
-                      description: "How long to give the relay to report back after it's asked. Default 10.",
-                      range: "3..60", defaultValue: 10
+                      description: "How long to give the relay to report back after it's asked. Default 15 — spontaneous reports on a busy mesh have been seen arriving 45s+ late, and a forced ask should beat that comfortably.",
+                      range: "3..90", defaultValue: 15
                 input name: "relayVerifyRetries", type: "number",
                       title: "Re-send the ON command this many times before giving up",
                       description: "Each retry asks the relay again too, so a merely-lost status report doesn't look like a dead valve. Default 2.",
@@ -4287,15 +4287,18 @@ private void clearRelayConfirm() {
 }
 
 private Integer relayVerifyDelaySec() {
-    return Math.max(3, (settings.relayVerifySec ?: 10) as int)
+    return Math.max(3, (settings.relayVerifySec ?: 15) as int)
 }
 
 // Ask a relay to report its current state. Returns false if the device offers no
 // way to be asked, in which case there is nothing to verify and we bow out
 // quietly rather than accusing a perfectly good valve.
 private boolean relayPoke(sw, String zname) {
+    // hasCommand, NOT respondsTo: respondsTo asks whether the DeviceWrapper class
+    // has that Groovy method, which is false for every driver command — it made
+    // this bail out on every zone in production. hasCommand asks the driver.
     try {
-        if (sw.respondsTo("refresh")) { sw.refresh(); return true }
+        if (sw.hasCommand("refresh")) { sw.refresh(); return true }
     } catch (e) {
         log.warn "${app.label}: ${zname} refresh failed: ${e.message}"
         return false
@@ -4402,8 +4405,10 @@ def relayConfirmCheck(data) {
 // lastActivity). Prefer ping (Z-Wave NOP/ack); fall back to refresh.
 private void pokeDevice(dev) {
     try {
-        if (dev.respondsTo("ping"))         dev.ping()
-        else if (dev.respondsTo("refresh")) dev.refresh()
+        // hasCommand, not respondsTo — see relayPoke(). respondsTo is false for
+        // every driver command, so this silently did nothing.
+        if (dev.hasCommand("ping"))         dev.ping()
+        else if (dev.hasCommand("refresh")) dev.refresh()
     } catch (e) { /* driver may not support either */ }
 }
 
