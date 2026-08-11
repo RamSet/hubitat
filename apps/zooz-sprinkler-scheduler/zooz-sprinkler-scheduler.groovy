@@ -931,7 +931,7 @@ def hardwarePage() {
         }
         section("Confirm the relay actually turned on") {
             paragraph "Turning a Z-Wave relay on is fire-and-forget: the app sends the command and moves on. If the command is lost on the mesh, the app still runs its timers and still sends \"watering\" notifications — while nothing is actually watering. With this on, a few seconds after each valve is commanded ON the app asks that relay to report its own state, checks the answer, re-sends the command if it hasn't confirmed, and tells you if it never does."
-            paragraph "Worth knowing: on a multi-relay controller the individual relay children normally stay silent — the parent device reports, the per-relay children don't, unless something asks them. That's why this polls each relay directly instead of just reading the last known value, which on those children can be blank forever."
+            paragraph "It asks the relay rather than reading its last known value, because those aren't the same thing: a relay left on by an earlier cycle or a manual run still reads \"on\", so a dropped command could slip past an unchecked read. Costs two extra Z-Wave messages per zone start."
             input name: "relayVerifyEnable", type: "bool",
                   title: "Verify each zone relay reports ON after it's commanded",
                   defaultValue: true, submitOnChange: true
@@ -4253,16 +4253,16 @@ private String controllerKeyFor(sw) {
 // =========================================================================
 // The Zooz driver's on() sends a Z-Wave Binary Set and does NOT follow it with a
 // Get, and it does not optimistically fake the attribute either. So a zone
-// switch's "switch" attribute only reads "on" once the relay itself reports back
-// — which makes it an honest signal, but only if we ASK for it.
+// switch's "switch" attribute only changes once the relay itself reports back,
+// which makes it an honest signal rather than an echo of our own command.
 //
-// This matters more than it looks for multi-relay controllers. A ZEN16/ZEN17
-// reports its aggregate state on endpoint 0 (the parent device); the per-relay
-// child endpoints stay silent unless something sends a per-endpoint Get. Nothing
-// in the normal watering path ever does, so a child relay's "switch" attribute
-// can sit at null forever and reading it proves nothing. Every check therefore
-// pokes refresh() first (componentRefresh → switchBinaryGet on that endpoint) and
-// reads on the NEXT pass, once the report has had time to come back.
+// But the last reported value is not the same as the current one. A relay that
+// was left on by a previous cycle, a manual run, or a hardware auto-off that
+// hasn't reported yet will still read "on" — so a dropped Set could sail through
+// a naive read. Every check therefore pokes refresh() first (componentRefresh →
+// switchBinaryGet on that endpoint) and reads on the NEXT pass, once the fresh
+// report has had time to come back. Two extra Z-Wave frames per zone start buys
+// an answer about the valve as it is now.
 //
 // The payoff: if the ON was dropped on the mesh, we find out in seconds instead
 // of running timers and sending "watering" notifications for a zone that never
