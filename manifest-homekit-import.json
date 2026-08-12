@@ -2,7 +2,7 @@
   "packageName": "HomeKit Import (Local)",
   "author": "RamSet",
   "version": "0.9.17",
-  "releaseNotes": "0.9.17 - The accessory's healthStatus (online/offline) attribute is now exposed and populates reliably (driver + hapCore 0.10.13) — it was being computed but never surfaced, so you can now use it for alerting. Also carries 0.9.16: persistent sessions for cheap Wi-Fi chips via TCP keepalive on Hubitat 2.5.1.145+ — a Meross-class accessory that used to drop in ~90s can now hold a Persistent (event-push) session with instant updates (switch Connection mode to Persistent and set the liveness probe to a gentle ~300, not 30). Safe on all firmware.",
+  "releaseNotes": "0.9.17 - The accessory's healthStatus (online/offline) attribute is now exposed and populates reliably (driver + hapCore 0.10.13) — it was being computed but never surfaced, so you can now use it for alerting. Also carries the 0.9.16 engine change: TCP keepalive on the accessory connection (Hubitat 2.5.1.145+) — a safe, additive under-the-hood update that falls back cleanly on older firmware. IMPORTANT: flaky single-slot chips like the Meross MSG100 should stay on ON-DEMAND mode. Longer testing showed that in Persistent mode a dropped session can wedge the accessory's single connection slot for ~40 minutes (the device goes offline the whole time), so on-demand — which reconnects in seconds — is the reliable choice for those. Persistent may still suit better-behaved accessories.",
   "category": "Integrations",
   "tags": "HomeKit, HAP, Local, Import, No Cloud",
   "dateReleased": "2026-07-29",
