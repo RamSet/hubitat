@@ -24,9 +24,18 @@
  * Include in a driver with:  #include RamSet.hapCore
  *
  * Author: RamSet
- * Version: 0.10.11
+ * Version: 0.10.12
  *
  * Changelog:
+ *  v0.10.12 - TCP keepalive on the session socket (Hubitat 2.5.1.145+), enabling a passive persistent model for
+ *            cheap chips. The persistent + one-shot connects now request SO_KEEPALIVE (tcpKeepIdle/Interval/Count)
+ *            so the OS holds the socket warm and detects a dead peer — what real HomeKit controllers use instead of
+ *            polling. SAFE ON EVERY BUILD: on firmware without the fix the options throw getMethod (sandbox-blocked)
+ *            and we catch it + fall back to the historic plain connect. This lets a Meross-class chip hold a
+ *            persistent session when its read-probe is turned down/off (set "Keepalive/liveness probe" low or 0 for
+ *            such chips) — proven live: an MSG100 that dropped in ~90s while polled held 16+ min passively and still
+ *            answered a read. The ecobee is unaffected (its ~10-min drop is a firmware session cap keepalive can't
+ *            fix; it stays on the recovery model).
  *  v0.10.11 - AUTO-RECOVERY FIX (forum #202: session died, never recovered, dead until a manual Save). The
  *            reconnect backstop `ensureUp` bailed on `state.live==true` — but a zombie session leaves that flag
  *            stuck TRUE while no data flows, so the backstop skipped the dead session on every 10-min tick and
@@ -584,6 +593,19 @@ def ensureUp(){
 }
 def schedulePoll(){ unschedule("pollRead"); runIn(pollSecs(),"pollRead") }
 def pollRead(){ if(isPaired() && onDemand()){ if(state.services==null) discoverOnce() else refresh(); schedulePoll() } }
+// Open the HAP socket with TCP keepalive (Hubitat 2.5.1.145+), then FALL BACK to a plain connect on any build
+// where the extended socket options aren't allowed yet (older firmware throws SecurityException getMethod — the
+// sandbox blocks the reflection). SO_KEEPALIVE holds the socket warm and lets the OS surface a dead peer, which is
+// how a real HomeKit controller keeps a session alive WITHOUT polling — the thing that lets a cheap chip (Meross)
+// hold a persistent session when its liveness probe is turned down/off. Safe everywhere: keepalive where supported,
+// identical-to-before plain connect where not.
+private void hapConnect(){
+    try { interfaces.rawSocket.connect([byteInterface:true, keepAlive:true, tcpKeepIdle:25, tcpKeepInterval:10, tcpKeepCount:3], settings.ip, hapPort()) }
+    catch(e){
+        if(e?.toString()?.contains("getMethod")){ try{ interfaces.rawSocket.close() }catch(ig){}; interfaces.rawSocket.connect([byteInterface:true], settings.ip, hapPort()) }
+        else throw e
+    }
+}
 def hapStart(String op, String body){
     if(!settings.ip || hapPort()<=0){ log.warn "HAP: set IP first (port auto-detects)"; return }
     // single connection slot: never start a second connect while one is in flight (overlapping
@@ -598,7 +620,7 @@ def hapStart(String op, String body){
     state.sess=false; state.vstage="m2"
     def ek=genEph(); state.ephPriv=ek.priv; state.ephPub=ek.pub
     sendEvent(name:"hapStatus", value:"connecting")
-    try { interfaces.rawSocket.connect([byteInterface:true], settings.ip, hapPort()) }
+    try { hapConnect() }
     catch(e){ log.error "connect: $e"; rep("ERR connect $e"); return }
     sendHttpTlv("/pair-verify", tlv([[6,[1] as byte[]],[3,hex(state.ephPub)]]))
     unschedule("oneshotWatch"); runIn(12,"oneshotWatch")   // if verify hangs, close so we don't leave a half-open socket (which wedges single-slot accessories)
@@ -732,7 +754,7 @@ void liveConnect(){
     state.op="live"; state.inCtr=0; state.outCtr=0; rxbuf().setLength(0); plainbuf().setLength(0); state.sess=false; state.vstage="m2"; state.live=false
     def ek=genEph(); state.ephPriv=ek.priv; state.ephPub=ek.pub
     sendEvent(name:"hapStatus", value:"connecting (live)")
-    try { interfaces.rawSocket.connect([byteInterface:true], settings.ip, hapPort()) }
+    try { hapConnect() }
     catch(e){ log.error "live connect: $e"; state.connInFlight=null; runIn(30,"startLive"); return }
     sendHttpTlv("/pair-verify", tlv([[6,[1] as byte[]],[3,hex(state.ephPub)]]))
     unschedule("verifyWatch"); runIn(12,"verifyWatch")   // pair-verify must complete in 10s or we retry (Meross often stalls at M2)

@@ -1,8 +1,8 @@
 {
   "packageName": "HomeKit Import (Local)",
   "author": "RamSet",
-  "version": "0.9.15",
-  "releaseNotes": "0.9.15 - Auto-recovery fix (hapCore 0.10.11): in rare cases a dropped accessory session could stay dead until you opened the device and hit Save. The reconnect backstop trusted an internal 'live' flag that a stalled session could leave stuck on, so it never noticed the session was actually dead. It now also checks whether data is still flowing and reconnects a session that's gone quiet despite the flag — so accessories heal themselves without any manual step. Also hardened a reconnect path that could give up without retrying when a device's port needed re-discovering. (0.9.14 made routine reconnects info-level instead of warnings.)",
+  "version": "0.9.16",
+  "releaseNotes": "0.9.16 - Persistent sessions for cheap Wi-Fi accessories (hapCore 0.10.12). On Hubitat 2.5.1.145 and newer, the driver now holds the connection open with TCP keepalive instead of polling the accessory — which is how real HomeKit controllers keep a session alive. This lets flaky chips like the Meross garage opener run in Persistent (event-push) mode with instant state updates instead of on-demand polling: set the accessory's 'Keepalive/liveness probe' to a gentle value (e.g. 300) and switch Connection mode to Persistent. Proven on a Meross MSG100 that used to drop in ~90 seconds and now holds. Safe on all firmware — it falls back to the previous connection behavior where keepalive isn't available yet. (0.9.15 added the auto-recovery fix for a session that could stay dead until a manual Save.)",
   "category": "Integrations",
   "tags": "HomeKit, HAP, Local, Import, No Cloud",
   "dateReleased": "2026-07-29",
