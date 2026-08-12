@@ -24,9 +24,13 @@
  * Include in a driver with:  #include RamSet.hapCore
  *
  * Author: RamSet
- * Version: 0.10.12
+ * Version: 0.10.13
  *
  * Changelog:
+ *  v0.10.13 - healthStatus now populates reliably: setHealth() emits the event not only on an online/offline
+ *            change but also when the device's healthStatus attribute doesn't yet match state (e.g. a driver that
+ *            only just declared the attribute) — so it stops reading blank. Logs still fire only on a real flip.
+ *            Pairs with HomeKit HAP Accessory driver 0.13.3 which adds the attribute declaration.
  *  v0.10.12 - TCP keepalive on the session socket (Hubitat 2.5.1.145+), enabling a passive persistent model for
  *            cheap chips. The persistent + one-shot connects now request SO_KEEPALIVE (tcpKeepIdle/Interval/Count)
  *            so the OS holds the socket warm and detects a dead peer — what real HomeKit controllers use instead of
@@ -826,10 +830,15 @@ def healthCheck(){
     setHealth(stale <= offlineAfterSecs()*1000L ? "online" : "offline")
 }
 void setHealth(String s){
-    if(state.health == s) return
+    boolean changed = (state.health != s)
+    // Emit on a real change, OR when the attribute is stale/undeclared-until-now (so a driver that only just
+    // declared healthStatus populates it instead of reading blank until the next actual online/offline flip).
+    if(!changed && device.currentValue("healthStatus") == s) return
     state.health = s; sendEvent(name:"healthStatus", value:s)
-    if(s=="offline") log.warn "HAP: accessory OFFLINE — no data in >${offlineAfterSecs()}s (self-heal still retrying)"
-    else logInfo "HAP: accessory online"
+    if(changed){
+        if(s=="offline") log.warn "HAP: accessory OFFLINE — no data in >${offlineAfterSecs()}s (self-heal still retrying)"
+        else logInfo "HAP: accessory online"
+    }
 }
 void processLiveStream(){
     String s = new String(hex(plainbuf().toString()), "ISO-8859-1"); int consumed=0

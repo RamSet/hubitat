@@ -1,8 +1,8 @@
 {
   "packageName": "HomeKit Import (Local)",
   "author": "RamSet",
-  "version": "0.9.16",
-  "releaseNotes": "0.9.16 - Persistent sessions for cheap Wi-Fi accessories (hapCore 0.10.12). On Hubitat 2.5.1.145 and newer, the driver now holds the connection open with TCP keepalive instead of polling the accessory — which is how real HomeKit controllers keep a session alive. This lets flaky chips like the Meross garage opener run in Persistent (event-push) mode with instant state updates instead of on-demand polling: set the accessory's 'Keepalive/liveness probe' to a gentle value (e.g. 300) and switch Connection mode to Persistent. Proven on a Meross MSG100 that used to drop in ~90 seconds and now holds. Safe on all firmware — it falls back to the previous connection behavior where keepalive isn't available yet. (0.9.15 added the auto-recovery fix for a session that could stay dead until a manual Save.)",
+  "version": "0.9.17",
+  "releaseNotes": "0.9.17 - The accessory's healthStatus (online/offline) attribute is now exposed and populates reliably (driver + hapCore 0.10.13) — it was being computed but never surfaced, so you can now use it for alerting. Also carries 0.9.16: persistent sessions for cheap Wi-Fi chips via TCP keepalive on Hubitat 2.5.1.145+ — a Meross-class accessory that used to drop in ~90s can now hold a Persistent (event-push) session with instant updates (switch Connection mode to Persistent and set the liveness probe to a gentle ~300, not 30). Safe on all firmware.",
   "category": "Integrations",
   "tags": "HomeKit, HAP, Local, Import, No Cloud",
   "dateReleased": "2026-07-29",

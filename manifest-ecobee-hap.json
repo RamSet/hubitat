@@ -1,8 +1,8 @@
 {
   "packageName": "Ecobee HAP Thermostat (Local)",
   "author": "RamSet",
-  "version": "0.19.11",
-  "releaseNotes": "0.19.11 - Under-the-hood engine update (hapCore 0.10.12): adds TCP keepalive to the accessory connection on Hubitat 2.5.1.145 and newer. For the ecobee this is effectively a no-op — it keeps using the existing self-healing recovery behavior — but it's part of the shared engine and is safe on every firmware (it falls back to the previous connection behavior where keepalive isn't available). Nothing to do. (0.19.10 added the auto-recovery fix for a session that could stay dead until a manual Save.)",
+  "version": "0.19.12",
+  "releaseNotes": "0.19.12 - Small reliability fix (hapCore 0.10.13): the healthStatus (online/offline) attribute now populates dependably instead of occasionally reading blank until the next state change. Also includes the 0.19.11 engine update (TCP keepalive, a no-op for the ecobee, safe on every firmware). Nothing to do.",
   "category": "Thermostats",
   "tags": "Thermostat, ecobee, HomeKit, HAP, Local, Sensor",
   "dateReleased": "2026-07-29",

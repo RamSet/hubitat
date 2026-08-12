@@ -18,9 +18,13 @@
  *   Contact/Motion/Occupancy/Temperature/Humidity/Light sensors, Battery. Unmapped -> Dump Accessories.
  *
  * Author: RamSet
- * Version: 0.13.2
+ * Version: 0.13.3
  *
  * Changelog:
+ *  v0.13.3 - Declare the healthStatus attribute so it actually surfaces. hapCore's health tracker emits
+ *           healthStatus (online/offline), but this driver never declared the attribute, so the event was
+ *           dropped and the value read as blank/None. Now declared — the online/offline signal is visible and
+ *           alertable, matching the ecobee driver. (Pairs with hapCore 0.10.12 keepalive / passive persistent.)
  *  v0.13.2 - Recovery latch fix (hapCore 0.10.6): a stale internal connInFlight flag could block the reconnect
  *           backstop indefinitely, so after a bad drop the accessory stayed dead until you hit Save (the real
  *           cause of overnight "stopped updating"). The backstop now clears a stale flag and reconnects on its
@@ -121,6 +125,7 @@ metadata {
         command "rediscover"        // re-read /accessories and rebuild children (after adding/removing services)
         command "identify"          // HomeKit Identify — make the accessory beep/blink to locate it
         attribute "hapStatus", "string"
+        attribute "healthStatus", "string"   // online/offline health signal from hapCore (alertable); needs declaring here or setHealth's event is dropped
         attribute "services", "string"   // human-readable list of mapped services
         attribute "manufacturer", "string"
         attribute "model", "string"
