@@ -1,8 +1,8 @@
 {
   "packageName": "Ecobee HAP Thermostat (Local)",
   "author": "RamSet",
-  "version": "0.19.12",
-  "releaseNotes": "0.19.12 - Small reliability fix (hapCore 0.10.13): the healthStatus (online/offline) attribute now populates dependably instead of occasionally reading blank until the next state change. Also includes the 0.19.11 engine update (TCP keepalive, a no-op for the ecobee, safe on every firmware). Nothing to do.",
+  "version": "0.19.13",
+  "releaseNotes": "0.19.13 - Big one for anyone whose thermostat 'dropped' or reconnected every several minutes: the driver now holds ONE stable session instead of constantly poking and re-establishing it. On Hubitat 2.5.1.145+, the connection is held alive by TCP keepalive, so the frequent liveness probe — which turned out to be exactly what made the session silently drop every ~10 minutes — is now OFF by default. You get instant event updates and a quiet log, with no loss of freshness (the 5-minute background refresh still keeps comfort profile / hold / sensor values current). NEW INSTALLS get this automatically. EXISTING installs: open the thermostat and set 'Liveness probe interval' to 0 to get the held session. On firmware older than 2.5.1.145 (no keepalive), leave a probe value (~60-120). (0.19.12 fixed the healthStatus attribute; 0.19.11 added the keepalive engine.)",
   "category": "Thermostats",
   "tags": "Thermostat, ecobee, HomeKit, HAP, Local, Sensor",
   "dateReleased": "2026-07-29",

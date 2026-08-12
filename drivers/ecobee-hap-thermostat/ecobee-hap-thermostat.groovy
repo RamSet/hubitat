@@ -17,12 +17,19 @@
  *   this driver (HPM does it automatically).
  *
  * Author: RamSet
- * Version: 0.19.5
- * Date: 2026-07-21
+ * Version: 0.19.6
+ * Date: 2026-08-12
  *
  * REQUIRES library: RamSet.hapCore (installed automatically by Hubitat Package Manager).
  *
  * Changelog:
+ *  v0.19.6 - Passive held session by default. The liveness-probe interval now defaults to 0 (off). With hapCore's
+ *           TCP keepalive (Hubitat 2.5.1.145+) holding the socket, the frequent probe is no longer needed — and it
+ *           was the cause of the ~10-minute silent-drop/reconnect cycle: proven that turning it off lets the
+ *           thermostat hold one stable session (instant events, no churn) with no loss of freshness (the 5-min
+ *           background refresh still keeps comfort/hold/sensor values current and serves as a gentle liveness
+ *           check). Existing installs keep their current value — set the probe to 0 to get the held session. On
+ *           firmware older than 2.5.1.145 (no keepalive), set a probe (~60-120) instead.
  *  v0.19.5 - New healthStatus attribute (online/offline) for alerting. Reports "offline" when the thermostat
  *           becomes unreachable (power/network) and the driver can't recover it, and "online" when it's connected
  *           and data is flowing — backed by hapCore 0.10.5's data-flow health check with hysteresis, so it doesn't
@@ -240,9 +247,9 @@ metadata {
         input "refreshInterval", "enum", title: "Background refresh interval",
             description: "How often to re-read the values HomeKit can't push (comfort profile, on-hold, hold-end, per-profile setpoints, alert, sensor activity timers). Faster = fresher but more local traffic; 5 minutes is recommended. If the session ever gets flaky, back it off.",
             options: ["30 seconds","1 minute","2 minutes","5 minutes","10 minutes","15 minutes","30 minutes"], defaultValue: "5 minutes"
-        input "safetyRefreshSecs", "number", title: "Live-session safety-reconnect window (seconds)",
-            description: "If the thermostat pushes no HomeKit event for this long, the live session is reconnected to re-sync. An idle thermostat (HVAC off, temperature steady) sends no events, so keep this ABOVE the background refresh interval — otherwise a healthy but quiet thermostat reconnects every couple of minutes and logs 'HAP: no update in Ns'. Recommended: refresh interval + 60s (default 360). 0 = off (falls back to a 30-minute watchdog).",
-            defaultValue: 360, range: "0..3600"
+        input "safetyRefreshSecs", "number", title: "Liveness probe interval (seconds) — 0 = off, recommended on Hubitat 2.5.1.145+",
+            description: "How often to poke the held session with a tiny read to confirm it's alive. FREQUENT probing is what makes the thermostat silently drop and reconnect every ~10 minutes. On Hubitat 2.5.1.145+ TCP keepalive holds the connection at the OS level, so leave this at 0 (no probing) for a stable held session with instant events — the Background refresh above keeps values current and doubles as a gentle liveness check. Only set a value (~60-120) if you're on firmware OLDER than 2.5.1.145, which has no keepalive and needs a probe to detect a dead session.",
+            defaultValue: 0, range: "0..3600"
     }
 }
 
