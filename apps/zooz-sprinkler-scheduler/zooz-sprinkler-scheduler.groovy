@@ -1527,6 +1527,12 @@ def updated() {
 }
 
 def initialize() {
+    // Drop every existing subscription before re-creating the ones the CURRENT
+    // settings call for. Without this, a device removed from a sensor setting
+    // keeps its subscription forever and its handler keeps firing — a rain sensor
+    // that had been unconfigured months earlier was still stopping runs mid-cycle.
+    // unschedule() in updated() had no unsubscribe() counterpart.
+    unsubscribe()
     state.zones = state.zones ?: [:]
     state.lastRunByZone = state.lastRunByZone ?: [:]
     state.running = false
@@ -1644,6 +1650,19 @@ def preRunNotify() {
 // ---- Mid-run safety event handlers ----
 
 def rainSensorEvent(evt) {
+    // Refuse to act on a device that is not a configured rain sensor RIGHT NOW.
+    // initialize() clears stale subscriptions, but only once the app is saved —
+    // this makes the handler safe the moment the code lands, and keeps it safe if
+    // a subscription ever outlives its setting again. Every other sensor handler
+    // re-reads its settings before acting (externalPauseActive() etc.); this one
+    // acted straight off the event, which is why it could stop a run using a
+    // sensor the config no longer knew about.
+    String eid = (evt?.deviceId ?: "") as String
+    List cfg = ((settings.rainSensorWaterDevices ?: []) + (settings.rainSensorContactDevices ?: []))
+    if (!cfg.any { (it?.id as String) == eid }) {
+        log.warn "${app.label}: ignoring rain event from ${evt?.displayName} — not a configured rain sensor (stale subscription; open the app and hit Done to clear it)"
+        return
+    }
     // Water-capability device emits attribute "water" with value "wet" or "dry".
     // Contact device emits attribute "contact" with value "open" or "closed".
     // The configured "wet state" tells us which contact value means raining.
