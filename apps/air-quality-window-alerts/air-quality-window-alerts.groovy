@@ -58,6 +58,18 @@ def mainPage() {
                   defaultValue: "51", required: true, submitOnChange: true
             paragraph "Judged on <b>airQualityIndex</b> (EPA 0-500 scale). " +
                       "Picking <i>Moderate</i> alerts on anything that is not Good."
+            paragraph "<b>When does the air count as recovered?</b> You get one alert per band, and the air " +
+                      "recovering is what allows the next one. An outdoor sensor sitting near your threshold " +
+                      "wobbles across it constantly — without the two settings below, every wobble reads as a " +
+                      "fresh spell and you get the same alert again and again."
+            input "rearmMargin", "number",
+                  title: "Recovery must reach this many AQI points below the threshold",
+                  description: "Threshold ${thresholdAqi()} → the air must reach ${thresholdAqi() - ((rearmMargin == null ? 10 : rearmMargin) as Integer)} or better. Default 10.",
+                  defaultValue: 10, range: "0..100", required: true, submitOnChange: true
+            input "rearmMinutes", "number",
+                  title: "…and stay there for this many minutes",
+                  description: "Stops one clean reading between dirty ones from counting as recovery. Default 15.",
+                  defaultValue: 15, range: "0..240", required: true, submitOnChange: true
         }
         section("Alerts") {
             input "alertOnOpen",   "bool", title: "Alert when a window/door is opened while the air is already bad", defaultValue: true
@@ -120,6 +132,7 @@ def initialize() {
     state.alertedBand = null
     state.lastAqi     = outdoorWorst()?.aqi
     state.fanStopped  = null
+    state.recoveryAt  = null
 
     subscribe(contacts,  "contact",         contactHandler)
     subscribe(outdoorAQ, "airQualityIndex", airQualityHandler)
@@ -165,6 +178,57 @@ def bandIsNew(Integer aqi) {
     state.alertedBand == null || bandOf(aqi) > state.alertedBand
 }
 
+// ------------------------------------------------------- recovery hysteresis
+//
+// The air has to convincingly clear before we will announce it again. Two conditions,
+// both required, because either alone still flaps: it must fall a margin BELOW the
+// alert threshold (so readings hovering on the line are ignored), and it must stay
+// there for a dwell time (so one clean reading between dirty ones proves nothing).
+
+// The line recovery must get under — below the threshold by the configured margin.
+def rearmCeiling() {
+    thresholdAqi() - ((rearmMargin == null ? 10 : rearmMargin) as Integer)
+}
+
+def rearmDwellMin() {
+    (rearmMinutes == null ? 15 : rearmMinutes) as Integer
+}
+
+// A reading came in below the alert threshold while an alert is latched.
+private void armRecovery(Integer aqi) {
+    if (aqi >= rearmCeiling()) {
+        // In the deadband: under the threshold but not convincingly. Neither alert
+        // nor recovery — and it invalidates any countdown already running.
+        cancelRecovery()
+        logDebug "outdoor AQI ${aqi} is under the threshold but above the re-arm line ${rearmCeiling()} — latch held"
+        return
+    }
+    if (state.recoveryAt != null) return   // already counting down
+    state.recoveryAt = now()
+    runIn(rearmDwellMin() * 60, "rearmLatch")
+    logDebug "outdoor AQI ${aqi} cleared the re-arm line ${rearmCeiling()} — re-arming in ${rearmDwellMin()}min if it holds"
+}
+
+private void cancelRecovery() {
+    if (state.recoveryAt == null) return
+    state.recoveryAt = null
+    unschedule("rearmLatch")
+    logDebug "recovery countdown cancelled — air came back up"
+}
+
+// The dwell elapsed. Re-check before trusting it: the countdown survives readings that
+// never re-entered the handler, so confirm the air is still clear right now.
+def rearmLatch() {
+    def aqi = outdoorWorst()?.aqi
+    state.recoveryAt = null
+    if (aqi != null && aqi >= rearmCeiling()) {
+        logDebug "re-arm due, but outdoor AQI is back to ${aqi} — latch held"
+        return
+    }
+    logDebug "outdoor AQI held below ${rearmCeiling()} for ${rearmDwellMin()}min — alert latch reset"
+    state.alertedBand = null
+}
+
 def airQualityHandler(evt) {
     // Recompute across every sensor rather than trusting evt.value: a clean PM2.5
     // reading arriving after a bad TVOC one must not overwrite the verdict.
@@ -173,15 +237,18 @@ def airQualityHandler(evt) {
     state.lastAqi = aqi
     if (aqi == null) return
 
-    // Recovery re-arms the latch, regardless of which alerts are enabled, so a later spike
-    // is reported again. This is the ONLY thing that re-arms it.
+    // Recovery re-arms the latch, so a later spike is reported again. This is the ONLY
+    // thing that re-arms it — which is exactly why it must be hard to trigger. A single
+    // reading a point under the line is not a recovery: a sensor parked near the boundary
+    // oscillates (53/50/53/50 within seconds), and re-arming on each dip turned one
+    // Moderate spell into an alert every twenty seconds. Recovery now has to clear the
+    // threshold by a margin AND hold there. See armRecovery/rearmLatch.
     if (aqi < thresholdAqi()) {
-        if (state.alertedBand != null) {
-            logDebug "outdoor AQI dropped to ${aqi}, below threshold — alert latch reset"
-            state.alertedBand = null
-        }
+        if (state.alertedBand != null) armRecovery(aqi)
         return
     }
+    // Back at or above the threshold — any recovery in progress is void.
+    cancelRecovery()
 
     if (!alertOnWorsen) return
 
@@ -499,6 +566,10 @@ def alertStateHtml() {
         ? "${dot('#e67e22')} already alerted at <b>${bands()[state.alertedBand][1]}</b> — quiet until it worsens or clears"
         : "${dot('#27ae60')} nothing sent"]
     if (state.lastAlertAt) bits << "last ${new Date(state.lastAlertAt as Long).format('MMM d, h:mm a', location.timeZone)}"
+    if (state.alertedBand != null && state.recoveryAt != null) {
+        long left = (rearmDwellMin() * 60L) - (((now() - (state.recoveryAt as Long)) / 1000L) as Long)
+        bits << "${dot('#27ae60')} recovering — re-arms in ${Math.max(0L, left / 60L as Long)}min if it holds under ${rearmCeiling()}"
+    }
     if (cooling()) bits << "<b>cooling down</b>, ${(((cooldown ?: 0) as Integer) * 60) - sinceLastAlert()}s left"
     if (inQuietHours()) bits << "${dot('#8e44ad')} <b>quiet hours</b>${quietMutePush ? ' — push held too' : ' — speakers silent'}"
     return bits.join(" &nbsp;·&nbsp; ")
