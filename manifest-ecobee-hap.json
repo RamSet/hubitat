@@ -1,11 +1,11 @@
 {
   "packageName": "Ecobee HAP Thermostat (Local)",
   "author": "RamSet",
-  "version": "0.19.13",
-  "releaseNotes": "0.19.13 - Big one for anyone whose thermostat 'dropped' or reconnected every several minutes: the driver now holds ONE stable session instead of constantly poking and re-establishing it. On Hubitat 2.5.1.145+, the connection is held alive by TCP keepalive, so the frequent liveness probe — which turned out to be exactly what made the session silently drop every ~10 minutes — is now OFF by default. You get instant event updates and a quiet log, with no loss of freshness (the 5-minute background refresh still keeps comfort profile / hold / sensor values current). NEW INSTALLS get this automatically. EXISTING installs: open the thermostat and set 'Liveness probe interval' to 0 to get the held session. On firmware older than 2.5.1.145 (no keepalive), leave a probe value (~60-120). (0.19.12 fixed the healthStatus attribute; 0.19.11 added the keepalive engine.)",
+  "version": "0.19.14",
+  "releaseNotes": "0.19.14 - Engine update (shared hapCore 0.10.16) that matters if your thermostat ever goes offline (power loss, WiFi drop, or a reboot). Before, a gone thermostat made the driver retry the FULL network discovery every ~60 seconds forever — enough to spike your hub's load and make the admin UI sluggish. Now those retries back off automatically (1m, 2m, 5m…) and the expensive whole-network scan is throttled to at most once every 30 minutes, so an offline thermostat stays quiet on the hub. When it comes back, it reconnects within a few minutes — even if the ecobee rebooted onto a new HomeKit port (the driver now re-checks the port instead of hammering the old one). Also: the healthStatus attribute now flips to 'offline' within about a minute of a real outage (was up to ~30 min), so your alerts fire promptly. No settings to change. (0.19.13 held one stable session via TCP keepalive; 0.19.12 fixed the healthStatus attribute.)",
   "category": "Thermostats",
   "tags": "Thermostat, ecobee, HomeKit, HAP, Local, Sensor",
-  "dateReleased": "2026-07-29",
+  "dateReleased": "2026-08-16",
   "drivers": [
     {
       "id": "511b25e3-4ca2-413e-a1f7-351ff50cd3b1",

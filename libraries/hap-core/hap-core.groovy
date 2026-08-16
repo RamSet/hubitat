@@ -24,9 +24,37 @@
  * Include in a driver with:  #include RamSet.hapCore
  *
  * Author: RamSet
- * Version: 0.10.13
+ * Version: 0.10.16
  *
  * Changelog:
+ *  v0.10.16 - Reboot-changed-port recovery. A HomeKit accessory's HAP port is DYNAMIC and frequently changes when
+ *            the accessory reboots (observed live: an ecobee came back on 42600 after being on 57857). 0.10.14/15's
+ *            cheap-reconnect path connected straight to the last-known port and would never re-resolve it until the
+ *            30-min sweep window — so a rebooted accessory sat unreachable for up to half an hour even though it was
+ *            back and answering mDNS. Now, every 3rd consecutive reconnect failure re-resolves the port via unicast
+ *            mDNS first (cheap when the host is up; catches the new port immediately). The expensive multicast subnet
+ *            SWEEP stays gated to ≤1/30min (moved into mdnsTimeout, where it belongs) so an offline accessory still
+ *            can't pin hub load. Net: transient drops reconnect instantly, a rebooted accessory recovers within a
+ *            couple of retry cycles on its new port, and a truly-offline one decays to a quiet cheap retry.
+ *  v0.10.15 - Recovery latency fix for 0.10.14: the reconnect backoff cap was lowered from 30 min to 5 min, so an
+ *            accessory that comes back online reconnects within ~5 min instead of possibly waiting out a long
+ *            backoff. This is SAFE because the expensive /24 subnet sweep is gated independently (SWEEP_INTERVAL_SEC,
+ *            30 min) — a stale retry is just a ~ms NoRouteToHost connect to the last-known ip:port, so retrying it
+ *            every few minutes costs nothing. Load protection stays with the sweep circuit-breaker; the cheap retry
+ *            no longer has to be starved to protect the hub. (Observed live on an offline ecobee: 0.10.14 backed off
+ *            to the 30-min cap and left the thermostat unreconnected for up to half an hour after it returned.)
+ *  v0.10.14 - OFFLINE ACCESSORY NO LONGER PINS HUB LOAD. When an accessory is powered off / off the network, the
+ *            recovery path used to run the FULL discovery ladder (2×mDNS unicast + an 8s /24 multicast subnet sweep +
+ *            TCP connect) every ~60s forever — ~23s of blocking I/O per minute (~40% duty), enough to trip
+ *            hubLoadSevere and stall the hub's stats sampler. Four changes: (1) EXPONENTIAL BACKOFF on consecutive
+ *            reconnect failures (60→120→300→600→900→1800s, reset on the next successful session) instead of a flat
+ *            60s; (2) CHEAP PATH FIRST — a known accessory reconnects straight to its last-known ip:port (fails in ms
+ *            with NoRouteToHost when offline) instead of paying mDNS+sweep up front; (3) the expensive multicast
+ *            subnet sweep is now a CIRCUIT BREAKER — it runs only when there is no cached port, or at most once per
+ *            30 min, not every cycle; (4) unicast mDNS port-detect timeout trimmed 6s→4s. Also: healthStatus flips
+ *            to "offline" after 2 failed reconnects (a direct signal, minutes) rather than waiting on lastRx
+ *            staleness (up to ~32 min in passive mode), and back to "online" on session up. Minor: a log line no
+ *            longer uses an apostrophe that the hub's log viewer double-HTML-escaped ("couldn&amp;apos;t").
  *  v0.10.13 - healthStatus now populates reliably: setHealth() emits the event not only on an online/offline
  *            change but also when the device's healthStatus attribute doesn't yet match state (e.g. a driver that
  *            only just declared the attribute) — so it stops reading blank. Logs still fire only on a real flip.
@@ -177,6 +205,17 @@ StringBuilder plainbuf(){ if(PLAINBUF[device.id]==null) PLAINBUF[device.id]=new 
 // socket and reconnect. (Raw idle TCP to the device held 100s+ untouched — idle isn't the problem.)
 @Field static int KEEPALIVE_SEC = 300            // how often the silence-watchdog checks (it does NOT poll)
 @Field static int SILENCE_RECONNECT_SEC = 1800   // pure-listen: if totally silent this long, RECONNECT (never poll)
+// ---- offline reconnect: exponential backoff + sweep circuit-breaker (an offline accessory must NOT pin hub load) ----
+// Consecutive live-reconnect failures grow the retry gap so a powered-off/unreachable accessory decays from ~1/min
+// to ~1/30min instead of hammering the FULL discovery ladder every 60s (23s blocking I/O = ~40% duty -> hubLoadSevere).
+@Field static List<Integer> RE_BACKOFF_SEC = [60,120,300]   // retry cadence by consecutive failures, cap 5m (see note)
+// Why cap the RETRY at only 5m when the accessory could be gone for hours? Because the expensive part — the /24
+// multicast subnet sweep — is gated SEPARATELY by SWEEP_INTERVAL_SEC below, so a stale retry is just a ~ms
+// NoRouteToHost connect to the last-known ip:port. Keeping that on a short leash means a returning accessory
+// reconnects within 5 min instead of waiting out a 30-min backoff. Load protection comes from the sweep breaker,
+// not from starving the cheap retry.
+@Field static int SWEEP_INTERVAL_SEC = 1800      // the expensive /24 multicast subnet sweep runs at most this often (load protection)
+@Field static int OFFLINE_AFTER_FAILS = 2        // flip healthStatus=offline after this many failed reconnects (direct signal, not lastRx staleness)
 
 boolean isPaired(){ return (state.paired==true || settings?.iosLtsk) ? true : false }
 // On-demand mode: connect → verify → read/write → close per action, plus periodic polling. No held
@@ -306,8 +345,8 @@ def mdnsThen(String op){
         [destinationAddress:"${settings.ip}:5353",
          type:hubitat.device.HubAction.Type.LAN_TYPE_UDPCLIENT,
          encoding:hubitat.device.HubAction.Encoding.HEX_STRING,
-         timeout:5, callback:"mdnsCallback"]))
-    runIn(6,"mdnsTimeout")
+         timeout:4, callback:"mdnsCallback"]))
+    runIn(4,"mdnsTimeout")   // unicast SRV reply is sub-second when the accessory is up; 4s is ample and halves the pre-sweep cost
 }
 def mdnsTimeout(){
     def op=state.afterMdns; state.afterMdns=null; if(!op) return
@@ -318,8 +357,15 @@ def mdnsTimeout(){
         mdnsThen(op); return
     }
     state.mdnsTries=0
-    // no reply at the pinned IP — the accessory may have a new DHCP address. Try to relocate it by its id.
-    if(settings.accPairingId){ log.warn "HAP: no mDNS reply at ${settings.ip} — searching the subnet for the accessory (IP may have changed)…"; relocate(op); return }
+    // no reply at the pinned IP — the accessory may have a new DHCP address. The subnet SWEEP (relocate) is the
+    // expensive part (multicast /24), so gate it to ≤1/SWEEP_INTERVAL_SEC: an offline accessory can't pin the hub
+    // sweeping every cycle. Between sweeps, just try the last-known port and let the backoff pace retries.
+    long sinceSweep = now() - (state.lastSweep ?: 0L)
+    if(settings.accPairingId && sinceSweep >= SWEEP_INTERVAL_SEC*1000L){
+        state.lastSweep = now()
+        log.warn "HAP: no mDNS reply at ${settings.ip} — searching the subnet for the accessory (IP may have changed)…"
+        relocate(op); return
+    }
     log.warn "HAP: mDNS port detect timed out; using last-known port"; dispatchOp(op)
 }
 // Accessory not answering at its saved IP? Browse the whole subnet (multicast mDNS) and match OUR accessory
@@ -337,7 +383,7 @@ def relocate(String op){
 }
 def relocateTimeout(){
     def op=state.afterRelocate; state.afterRelocate=null; if(!op) return
-    log.warn "HAP: couldn't find the accessory on the network (it may be offline — a DHCP reservation is recommended); trying last-known IP"
+    log.warn "HAP: could not find the accessory on the network (it may be offline — a DHCP reservation is recommended); trying last-known IP"
     dispatchOp(op)
 }
 def relocateCallback(message){
@@ -701,7 +747,7 @@ void doM4(Map tv){
     unschedule("oneshotWatch")
     sendEvent(name:"hapStatus", value:"session")
     if(state.op=="live"){
-        state.live=true; state.vtry=0; state.kaMiss=0; state.connInFlight=null; unschedule("verifyWatch")
+        state.live=true; state.vtry=0; state.kaMiss=0; state.connInFlight=null; unschedule("verifyWatch"); reOK(); setHealth("online")
         sendEvent(name:"hapStatus", value:"live"); logInfo "HAP: live session up — subscribing to events"
         dlog("session up (live) -> subscribe + get")
         unschedule("liveKeepalive"); state.probeAt=null; runIn(kaEvery(),"liveKeepalive")   // hold + liveness-probe the one session (probeAt reset so first tick doesn't false-fail)
@@ -750,16 +796,44 @@ void finish(){
 }
 
 // ===== live event mode (persistent session + subscriptions) =====
-def startLive(){ if(!isPaired()){ log.warn "HAP: not paired"; return }; unschedule("liveKeepalive"); unschedule("kaWatch"); mdnsThen(state.services==null ? "discover" : "live") }
+// ---- offline reconnect scheduling: one place that grows the retry gap on consecutive failures ----
+private int reBackoff(){ int n=(state.reFails?:0) as int; return RE_BACKOFF_SEC[ Math.min(n, RE_BACKOFF_SEC.size()-1) ] }
+// Every failed live reconnect funnels through here: count it, back off, and (after a couple) surface offline.
+private void reFail(String why){
+    state.reFails = ((state.reFails?:0) as int) + 1
+    if((state.reFails as int) >= OFFLINE_AFTER_FAILS) setHealth("offline")   // direct signal — don't wait on lastRx staleness
+    int d = reBackoff()
+    logInfo "HAP: reconnect attempt ${state.reFails} failed (${why}) — next try in ${d}s"
+    unschedule("startLive"); runIn(d, "startLive")
+}
+// A live session came up: clear the failure streak so the next outage starts from the short end of the ladder.
+private void reOK(){ if((state.reFails?:0) as int){ state.reFails=0 } }
+// Try the CHEAP path first: known topology + cached port -> connect straight to the last-known ip:port (fails in
+// ms with NoRouteToHost when the accessory is offline). The expensive multicast /24 subnet sweep (relocate, via
+// mdnsThen) only runs when we have no port, or at most once per SWEEP_INTERVAL_SEC — so an offline accessory can't
+// pin the hub sweeping every cycle. When the accessory is genuinely up, mDNS answers fast and this path is unchanged.
+def startLive(){
+    if(!isPaired()){ log.warn "HAP: not paired"; return }
+    unschedule("liveKeepalive"); unschedule("kaWatch")
+    boolean haveTopo = (state.services!=null && hapPort()>0)
+    int n = (state.reFails?:0) as int
+    // Fast path for a transient drop: reconnect straight to the last-known ip:port. But every 3rd consecutive
+    // failure, re-resolve the port via unicast mDNS first — an accessory that rebooted often comes back on a NEW
+    // dynamic HAP port, and hammering the stale cached port would never recover. Unicast mDNS is cheap when the host
+    // is up; when it's down it times out and mdnsTimeout falls through to the SWEEP, which is itself gated to ≤1/30min.
+    boolean reresolve = !haveTopo || (n>0 && n % 3 == 0)
+    if(reresolve) mdnsThen(state.services==null ? "discover" : "live")
+    else liveConnect()
+}
 void liveConnect(){
-    if(hapPort()<=0){ log.warn "HAP: no port — re-resolving via mDNS"; runIn(30,"startLive"); return }
+    if(hapPort()<=0){ log.warn "HAP: no port — re-resolving via mDNS"; state.lastSweep=0L; runIn(30,"startLive"); return }
     if(state.connInFlight && (now()-(state.connAt?:0) < 14000)){ rep("liveConnect skip: ${state.connInFlight} in-flight"); return }   // don't stack overlapping connects (wedges single-slot accessories)
     state.connInFlight="live"; state.connAt=now()
     state.op="live"; state.inCtr=0; state.outCtr=0; rxbuf().setLength(0); plainbuf().setLength(0); state.sess=false; state.vstage="m2"; state.live=false
     def ek=genEph(); state.ephPriv=ek.priv; state.ephPub=ek.pub
     sendEvent(name:"hapStatus", value:"connecting (live)")
     try { hapConnect() }
-    catch(e){ log.error "live connect: $e"; state.connInFlight=null; runIn(30,"startLive"); return }
+    catch(e){ log.warn "HAP: live connect failed: $e"; state.connInFlight=null; reFail("${e}"); return }
     sendHttpTlv("/pair-verify", tlv([[6,[1] as byte[]],[3,hex(state.ephPub)]]))
     unschedule("verifyWatch"); runIn(12,"verifyWatch")   // pair-verify must complete in 10s or we retry (Meross often stalls at M2)
 }

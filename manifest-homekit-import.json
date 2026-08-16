@@ -1,11 +1,11 @@
 {
   "packageName": "HomeKit Import (Local)",
   "author": "RamSet",
-  "version": "0.9.17",
-  "releaseNotes": "0.9.17 - The accessory's healthStatus (online/offline) attribute is now exposed and populates reliably (driver + hapCore 0.10.13) — it was being computed but never surfaced, so you can now use it for alerting. Also carries the 0.9.16 engine change: TCP keepalive on the accessory connection (Hubitat 2.5.1.145+) — a safe, additive under-the-hood update that falls back cleanly on older firmware. IMPORTANT: flaky single-slot chips like the Meross MSG100 should stay on ON-DEMAND mode. Longer testing showed that in Persistent mode a dropped session can wedge the accessory's single connection slot for ~40 minutes (the device goes offline the whole time), so on-demand — which reconnects in seconds — is the reliable choice for those. Persistent may still suit better-behaved accessories.",
+  "version": "0.9.18",
+  "releaseNotes": "0.9.18 - Engine update (shared hapCore 0.10.16) for accessories that go offline. Before, an accessory that was powered off or off the network made the driver retry the FULL discovery ladder (mDNS + a whole-subnet scan + connect) every ~60 seconds indefinitely — ~23s of network work per minute, enough to trip 'hub load severe' and make the admin UI unusable. Now: reconnect attempts back off exponentially (1m, 2m, 5m), the expensive subnet scan is a circuit-breaker limited to at most once every 30 minutes, and the accessory's healthStatus flips to 'offline' within ~1 minute (was up to ~30) so alerts fire promptly. When the accessory returns it reconnects within a few minutes, including after a reboot that moved its HomeKit port (the driver re-resolves the port instead of hammering the stale one). Nothing to configure. IMPORTANT (unchanged): flaky single-slot chips like the Meross MSG100 should stay on ON-DEMAND mode — in Persistent mode a dropped session can wedge their single connection slot for ~40 minutes. Persistent suits better-behaved accessories.",
   "category": "Integrations",
   "tags": "HomeKit, HAP, Local, Import, No Cloud",
-  "dateReleased": "2026-07-29",
+  "dateReleased": "2026-08-16",
   "minimumHEVersion": "2.3.0",
   "drivers": [
     {
