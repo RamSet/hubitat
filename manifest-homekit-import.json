@@ -1,11 +1,11 @@
 {
   "packageName": "HomeKit Import (Local)",
   "author": "RamSet",
-  "version": "0.9.18",
-  "releaseNotes": "0.9.18 - Engine update (shared hapCore 0.10.16) for accessories that go offline. Before, an accessory that was powered off or off the network made the driver retry the FULL discovery ladder (mDNS + a whole-subnet scan + connect) every ~60 seconds indefinitely — ~23s of network work per minute, enough to trip 'hub load severe' and make the admin UI unusable. Now: reconnect attempts back off exponentially (1m, 2m, 5m), the expensive subnet scan is a circuit-breaker limited to at most once every 30 minutes, and the accessory's healthStatus flips to 'offline' within ~1 minute (was up to ~30) so alerts fire promptly. When the accessory returns it reconnects within a few minutes, including after a reboot that moved its HomeKit port (the driver re-resolves the port instead of hammering the stale one). Nothing to configure. IMPORTANT (unchanged): flaky single-slot chips like the Meross MSG100 should stay on ON-DEMAND mode — in Persistent mode a dropped session can wedge their single connection slot for ~40 minutes. Persistent suits better-behaved accessories.",
+  "version": "0.9.19",
+  "releaseNotes": "0.9.19 - Occupancy sensors (e.g. Aqara FP2 presence) now show up as a MOTION sensor too, not just a presence sensor — so you can pick them in Room Lighting and any motion-based rule. It reports 'active' while the room is occupied and 'inactive' when it clears (which actually works nicely for lights — no drop-out between motion pulses). Read-only, nothing to re-pair, no setting to change; just update. (0.9.18 carried the shared hapCore 0.10.16 engine fix: an offline/rebooted accessory no longer pins hub load — reconnects now back off, the subnet scan is throttled to <=1/30min, and it recovers within minutes even if a reboot moved the HomeKit port. Meross MSG100 should stay ON-DEMAND.)",
   "category": "Integrations",
   "tags": "HomeKit, HAP, Local, Import, No Cloud",
-  "dateReleased": "2026-08-16",
+  "dateReleased": "2026-08-17",
   "minimumHEVersion": "2.3.0",
   "drivers": [
     {

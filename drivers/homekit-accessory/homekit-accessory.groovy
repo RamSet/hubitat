@@ -18,9 +18,13 @@
  *   Contact/Motion/Occupancy/Temperature/Humidity/Light sensors, Battery. Unmapped -> Dump Accessories.
  *
  * Author: RamSet
- * Version: 0.13.3
+ * Version: 0.13.4
  *
  * Changelog:
+ *  v0.13.4 - Occupancy sensors (HAP type 86, e.g. Aqara FP2 presence) now ALSO report Hubitat `motion`
+ *           (active while occupied) in addition to `presence`, so they're selectable in Room Lighting and any
+ *           motion-based rule — not just presence automations. Read-only, no re-pair, no new setting. Pairs with
+ *           the occupancy child driver declaring MotionSensor.
  *  v0.13.3 - Declare the healthStatus attribute so it actually surfaces. hapCore's health tracker emits
  *           healthStatus (online/offline), but this driver never declared the attribute, so the event was
  *           dropped and the value read as blank/None. Now declared — the online/offline signal is visible and
@@ -342,7 +346,7 @@ void onCharacteristics(j){
                 case "lockTarget":  break
                 case "contact":     cd.sendEvent(name:"contact",     value: ((v as int)==0 ? "closed":"open")); break
                 case "motion":      cd.sendEvent(name:"motion",      value: (v ? "active":"inactive")); break
-                case "occupancy":   cd.sendEvent(name:"presence",    value: ((v as int)>0 ? "present":"not present")); break
+                case "occupancy":   boolean occ=((v as int)>0); cd.sendEvent(name:"presence", value:(occ?"present":"not present")); cd.sendEvent(name:"motion", value:(occ?"active":"inactive")); break  // also expose as motion so it's usable in Room Lighting / motion rules
                 case "temperature": cd.sendEvent(name:"temperature", value: cToHub(v), unit:"°${isF()?'F':'C'}"); break
                 case "humidity":    cd.sendEvent(name:"humidity",    value: (v as int), unit:"%"); break
                 case "illuminance": cd.sendEvent(name:"illuminance", value: Math.round(v as BigDecimal) as int, unit:"lux"); break
