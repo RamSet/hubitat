@@ -62,7 +62,7 @@ mappings {
     path("/calendar.ics")  { action: [GET: "apiCalendar"] }
 }
 
-String getAppVersion() { return "v0.15.0 (2026-08)" }
+String getAppVersion() { return "v0.16.0 (2026-08)" }
 
 // Simple vs Advanced interface. Simple shows only zones, schedule, weather and
 // hardware safety; Advanced exposes everything (moisture, learning, sensors,
@@ -849,6 +849,31 @@ def pauseSensorPage() {
                   description: "Lets the door fully close / person walk away before water comes back on.",
                   range: "0..600", defaultValue: 30
         }
+        section("Ignore brief blips (per sensor)") {
+            paragraph "Some pause sensors flick on and off for a few seconds at a time — a water heater " +
+                      "short-cycling, for example. Every blip otherwise costs a pause, a valve close and " +
+                      "reopen, the resume delay, and a pair of notifications. Sensors picked here must stay " +
+                      "in their trigger state continuously before the run actually pauses."
+            paragraph "<b>Leave doors and gates out of this.</b> They want the current hair-trigger " +
+                      "behaviour — a delay there means water still spraying while someone walks out."
+            Map pauseDevOpts = [:]
+            ((settings.pauseContacts ?: []) + (settings.pauseSwitches ?: [])).each {
+                pauseDevOpts[(it.id as String)] = it.displayName
+            }
+            if (pauseDevOpts) {
+                input name: "pauseDebounceIds", type: "enum",
+                      title: "Sensors that must hold before pausing",
+                      options: pauseDevOpts, multiple: true, required: false, submitOnChange: true
+                if (settings.pauseDebounceIds) {
+                    input name: "pauseDebounceSec", type: "number",
+                          title: "…hold for this many seconds",
+                          description: "Blips shorter than this are ignored entirely. Default 20.",
+                          range: "1..600", defaultValue: 20
+                }
+            } else {
+                paragraph "<i>Pick some pause sensors above first.</i>"
+            }
+        }
         if (settings.pauseContacts || settings.pauseSwitches) {
             section("Current state") {
                 (settings.pauseContacts ?: []).each { dev ->
@@ -1540,6 +1565,7 @@ def initialize() {
     state.zonesPlan = []
     state.deferredRunPending = false   // never carry a held-defer across re-init/reboot
     state.lastSchedEntryMs = 0L         // reset the double-start guard window
+    state.pauseActiveSince = [:]        // per-sensor debounce clocks start fresh
 
     if (settings.scheduleEnabled && settings.scheduleStartTime && (isIntervalMode() || settings.scheduleDays)) {
         // Interval mode fires the cron every day; runSchedule() gates on the
@@ -1684,20 +1710,26 @@ def rainSensorEvent(evt) {
     }
 }
 
+// evt is null when called from pauseDebounceCheck (a debounced sensor's dwell
+// elapsed while it sat there quietly, producing no new event of its own).
 def pauseSensorEvent(evt) {
+    trackPauseSensorEdges()
     boolean active = externalPauseActive()
     String mode = settings.pauseMode ?: "pause"
+    // Name the sensor from the event when we have one; otherwise ask which sensors
+    // are currently holding, so a dwell-triggered pause still says what caused it.
+    String who = evt?.displayName ? "${evt.displayName} → ${evt.value}" : externalPauseReason()
     if (active) {
-        if (descTextEnable) log.info "${app.label}: pause sensor activated (${evt?.displayName} → ${evt?.value})"
+        if (descTextEnable) log.info "${app.label}: pause sensor activated (${who})"
         if (mode == "stop") {
             if (state.running) {
                 log.warn "${app.label}: external pause active mid-run — STOP mode, killing schedule"
-                notify("pause.activate", [zone: "schedule", remaining: fmtDuration(0), reason: "${evt?.displayName} → ${evt?.value} (stop mode)"])
+                notify("pause.activate", [zone: "schedule", remaining: fmtDuration(0), reason: "${who} (stop mode)"])
                 stopAllZones()
             }
         } else {  // pause mode
             if (state.running) {
-                pauseRunningSchedule("${evt?.displayName} ${evt?.value}")
+                pauseRunningSchedule(evt?.displayName ? "${evt.displayName} ${evt.value}" : who)
             }
         }
     } else {
@@ -2688,12 +2720,70 @@ private String rainSensorReason() {
     return names.join(", ") ?: "unknown"
 }
 
+// Which sensors the operator asked to be patient about, as a Set of id strings.
+private Set debouncedPauseIds() {
+    return ((settings.pauseDebounceIds ?: []) as List).collect { it as String } as Set
+}
+
+private Integer pauseDebounceSecs() {
+    return Math.max(1, (settings.pauseDebounceSec ?: 20) as int)
+}
+
+// A sensor sitting in its trigger state counts as active straight away UNLESS the
+// operator listed it for debouncing, in which case it only counts once it has held
+// that state for the configured dwell. Doors stay instant; a short-cycling water
+// heater stops costing a pause, a valve cycle and two notifications per blip.
+//
+// Missing timestamp means we never saw the transition (app restarted while the
+// sensor was already active) — treat it as active rather than gambling that it
+// just started, because not pausing is the unsafe direction here.
+private boolean pauseSensorCounts(dev) {
+    if (!dev) return false
+    String did = dev.id as String
+    if (!debouncedPauseIds().contains(did)) return true
+    Long since = ((state.pauseActiveSince ?: [:]) as Map)[did] as Long
+    if (since == null) return true
+    return ((now() - since) / 1000L) >= pauseDebounceSecs()
+}
+
 private boolean externalPauseActive() {
     String cState = settings.pauseContactsState ?: "open"
     String sState = settings.pauseSwitchesState ?: "on"
-    if (settings.pauseContacts?.any { it.currentValue("contact") == cState }) return true
-    if (settings.pauseSwitches?.any { it.currentValue("switch")  == sState }) return true
+    if (settings.pauseContacts?.any { it.currentValue("contact") == cState && pauseSensorCounts(it) }) return true
+    if (settings.pauseSwitches?.any { it.currentValue("switch")  == sState && pauseSensorCounts(it) }) return true
     return false
+}
+
+// Stamp/clear the moment each debounced sensor entered its trigger state, and make
+// sure a sensor that simply STAYS active still gets acted on — the device sends no
+// further events while it holds, so without this re-check the dwell would elapse
+// unnoticed and the run would never pause.
+private void trackPauseSensorEdges() {
+    String cState = settings.pauseContactsState ?: "open"
+    String sState = settings.pauseSwitchesState ?: "on"
+    Map since = (state.pauseActiveSince ?: [:]) as Map
+    boolean anyPending = false
+    ((settings.pauseContacts ?: []).collect { [it, "contact", cState] } +
+     (settings.pauseSwitches  ?: []).collect { [it, "switch",  sState] }).each { row ->
+        def dev = row[0]; String attr = row[1]; String want = row[2]
+        String did = dev.id as String
+        if (!debouncedPauseIds().contains(did)) { since.remove(did); return }
+        if (dev.currentValue(attr) == want) {
+            if (since[did] == null) since[did] = now()
+            if (!pauseSensorCounts(dev)) anyPending = true
+        } else {
+            since.remove(did)
+        }
+    }
+    state.pauseActiveSince = since
+    unschedule("pauseDebounceCheck")
+    if (anyPending) runIn(pauseDebounceSecs(), "pauseDebounceCheck")
+}
+
+// The dwell may have elapsed on a sensor that has been quietly holding. Re-run the
+// same evaluation the event handler uses.
+def pauseDebounceCheck() {
+    pauseSensorEvent(null)
 }
 
 private String externalPauseReason() {
