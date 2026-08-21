@@ -14,6 +14,13 @@
 
 Changelog:
 
+## [1.3.2-rs4] - 2026-08-21 (RamSet fork)
+  - Added "Invert Sw<N> Sensor Reporting" preference, shown for any Sw input set
+    to a sensor type. Normally-closed sensors (most irrigation rain sensors open
+    their contacts when wet) otherwise report backwards, and the ZEN16 has no
+    NO/NC input-type parameter. Inverting here fixes the sensor child device, so
+    every app and dashboard reading it sees the corrected state.
+
 ## [1.3.2-rs3] - 2026-06-13 (RamSet fork)
   - Documented a confirmed gotcha: configuring an Sw input as a SENSOR type
     (Water/Heat/Motion/Contact/etc.) does NOT start reporting until the device
@@ -80,7 +87,7 @@ Changelog:
 
 import groovy.transform.Field
 
-@Field static final String VERSION = "1.3.2-rs3"
+@Field static final String VERSION = "1.3.2-rs4"
 @Field static final String DRIVER = "Zooz-ZEN16"
 @Field static final String COMM_LINK = "https://community.hubitat.com/t/zooz-relays-advanced/98194"
 @Field static final Map deviceModelNames = ["A000:A00A":"ZEN16"]
@@ -134,6 +141,19 @@ metadata {
 						range: param.range,
 						required: false
 				}
+			}
+		}
+
+		// Sw input inversion: a normally-CLOSED sensor (most irrigation rain
+		// sensors OPEN their contacts when wet) makes the ZEN16 report the input
+		// backwards — dry reads as wet. There is no NO/NC input-type parameter on
+		// the device, so flip it here, once, instead of in every consuming app.
+		endPointList.each { endPoint ->
+			if (((getParamValue("inputSw${endPoint}" as String) ?: 0) as Integer) >= 4) {
+				input "invertSw${endPoint}", "bool",
+					title: fmtTitle("Invert Sw${endPoint} Sensor Reporting"),
+					description: fmtDesc("Reverses what the Sw${endPoint} input reports (wet\u21c4dry, open\u21c4closed, active\u21c4inactive). Turn ON for a normally-closed sensor whose contacts OPEN when triggered \u2014 e.g. most irrigation rain sensors. Applies to the sensor child device, so every app and dashboard sees the corrected state."),
+					defaultValue: false
 			}
 		}
 
@@ -775,6 +795,12 @@ void sendEventLog(Map evt, ep=0) {
 void sendSensorEvents(sensorType, rawVal, Integer ep=0) {
 	Integer sType = sensorType as Integer
 	String sensorEp = "${ep}S"
+
+	//Invert Sw input reporting when the wired sensor is normally-closed (see invertSw* preference)
+	if (settings["invertSw${ep}" as String]) {
+		rawVal = (rawVal ? 0 : 0xFF)
+		logDebug "Sw${ep} sensor reporting inverted by preference"
+	}
 
 	if (sType==6)       sendEventLog(name:"water", value:(rawVal ? "wet" : "dry"), sensorEp)  //Water
 	else if (sType==5)  sendEventLog(name:"switch", value:(rawVal ? "on" : "off"), sensorEp)  //Heat
