@@ -29,7 +29,9 @@ package's manifest link from the table.
 ### Integrations
 | Package | What it does | Install |
 |---|---|---|
-| **[HomeKit Import (Local)](https://community.hubitat.com/t/release-homekit-import-local-bring-any-lan-homekit-accessory-into-hubitat-no-cloud-no-apple-hardware-no-homebridge/164815?u=ramset)** | Import any LAN/Wi-Fi HomeKit (HAP) accessory into Hubitat — pair with a setup code and the driver auto-maps it to a Hubitat device. No cloud, no Apple hardware, no Homebridge. Runs on any hub (C5/C7/C8). | [manifest](https://raw.githubusercontent.com/RamSet/hubitat/main/manifest-homekit-import.json) |
+| **[HomeKit Import (Local)](https://community.hubitat.com/t/release-homekit-import-local-bring-any-lan-homekit-accessory-into-hubitat-no-cloud-no-apple-hardware-no-homebridge/164815?u=ramset)** | Import any LAN/Wi-Fi HomeKit (HAP) accessory into Hubitat — enter its IP and 8-digit setup code (or paste the `X-HM://…` QR payload for accessories with no printed code), and the parent driver pairs, reads the accessory's service database, and auto-creates **one child device per mapped service**: switch/outlet, light, lock, garage door, window shade, fan, thermostat, security system, contact/motion/occupancy/temperature/humidity/light sensors, battery, plus a generic fallback. The capabilities live on the children; the parent holds the encrypted session and pushes live events. No cloud, no Apple hardware, no Homebridge. Runs on any hub (C5/C7/C8). | [manifest](https://raw.githubusercontent.com/RamSet/hubitat/main/manifest-homekit-import.json) |
+
+> **Both HAP packages share one bundle.** *Ecobee HAP Thermostat (Local)* and *HomeKit Import (Local)* are built on the same **RamSet HAP Core** bundle (the HAP client). HPM installs and updates it with either package — if you run both, update both, so they don't end up on different Core versions.
 
 ### Air Quality / Weather
 | Package | What it does | Install |
@@ -122,6 +124,62 @@ to reconcile` as a **warning** every few minutes on an idle ecobee — harmless 
 idle thermostat pushes no events, tripping a fixed 120 s liveness timer), now demoted
 to **info** and largely eliminated by the wider window. After updating via HPM, open
 the device once and click **Save Preferences** for the new window to take effect.
+
+---
+
+## HomeKit Import (Local) — notes
+
+Brings any LAN/Wi-Fi HomeKit accessory onto the hub with no cloud, no Apple hardware
+and no Homebridge. Forum thread:
+[HomeKit Import (Local)](https://community.hubitat.com/t/release-homekit-import-local-bring-any-lan-homekit-accessory-into-hubitat-no-cloud-no-apple-hardware-no-homebridge/164815?u=ramset).
+
+### Parent + children
+
+You install **one `HomeKit HAP Accessory` device per physical accessory** and give it
+the accessory's IP plus its 8-digit setup code — or, for accessories with no printed
+code or a code that rotates (Eufy HomeBase, Nanoleaf, …), paste the `X-HM://…` QR
+payload from the maker's app and the code is decoded from it.
+
+On pairing the driver reads the accessory's service database and **creates a child
+device per mapped service**. The parent is the bridge: it holds the one encrypted
+session, pushes live events, and carries `hapStatus` / `healthStatus`. The Hubitat
+capabilities live on the children — necessary because Hubitat capabilities are static
+per driver, while one accessory can expose several services of different classes.
+
+Mapped services: **Switch/Outlet, Light, Lock, Garage Door, Window Shade, Fan,
+Thermostat, Security System**, and **Contact / Motion / Occupancy / Temperature /
+Humidity / Light** sensors. A **Battery** service is folded into its sibling sensor
+where there is one, and only becomes a standalone child when nothing can host it.
+Occupancy sensors also report `motion` (active while occupied) so they can be picked
+in Room Lighting and motion rules, not just presence automations.
+
+Anything the driver doesn't recognise still surfaces: unmapped service types get a
+**`HomeKit HAP Generic`** child, labelled `… [HAP svc <type>]`, exposing every
+readable/notifying characteristic. `Dump Accessories` logs the raw service and
+characteristic map if you want to see what an accessory actually offers.
+
+### Connection modes
+
+**Persistent (event push)** — default. One held session, instant updates. A
+**keepalive/liveness probe** (default 30 s, floor 15, 0 disables) sends a tiny
+one-characteristic read on that interval; an unanswered probe reconnects immediately.
+This is what stops a cheap chip from silently idle-dropping the session overnight.
+
+**On-demand (poll)** — connect only to read/write, plus a poll interval in minutes.
+Use it for accessories that hard-close connections (Meross being the usual case).
+
+### Unpair vs. forget vs. rediscover
+
+- **`unpair`** — sends HAP RemovePairing, so the accessory releases the hub cleanly
+  (the HomeKit equivalent of a Z-Wave exclude), then removes the children. Use this
+  when the accessory is reachable.
+- **`forget`** — clears the local keys and children **without** telling the accessory.
+  Use it only when the accessory is dead or off the network: the pairing slot stays
+  occupied on the accessory, so if it is in fact still online, reset HomeKit on the
+  accessory itself to free that slot before pairing again.
+- **`rediscover`** — re-reads `/accessories` and rebuilds children. Run it after
+  adding or removing services on the accessory (a firmware update, a new sensor).
+- **`identify`** — makes the accessory beep or blink so you can tell which one it is.
 
 ---
 

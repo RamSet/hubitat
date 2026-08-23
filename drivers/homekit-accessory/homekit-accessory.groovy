@@ -15,7 +15,12 @@
  *   services of different classes.
  *
  *   Service coverage: Switch/Outlet, Light, Lock, Garage Door, Window Shade, Fan,
- *   Contact/Motion/Occupancy/Temperature/Humidity/Light sensors, Battery. Unmapped -> Dump Accessories.
+ *   Thermostat, Security System, Contact/Motion/Occupancy/Temperature/Humidity/Light
+ *   sensors, Battery. A Battery service is folded into its sibling sensor when there is
+ *   one, otherwise it becomes its own child. Any service type NOT in SERVICE_MAP still
+ *   surfaces: it gets a "HomeKit HAP Generic" child labelled "... [HAP svc <type>]"
+ *   exposing every readable/notifying characteristic. Use Dump Accessories to inspect
+ *   the raw service/characteristic map.
  *
  * Author: RamSet
  * Version: 0.13.4
