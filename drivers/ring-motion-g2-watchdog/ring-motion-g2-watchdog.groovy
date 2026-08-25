@@ -23,6 +23,14 @@
  *  Author: RamSet — https://github.com/RamSet/hubitat
  *
  *  Changelog:
+ *    0.4.0 - Fix the real hole: the watchdog only armed when it SAW a motion-active
+ *            event. A sensor that was already stuck active when this driver was assigned
+ *            (the normal case — you install this on the ones that are stuck), or that was
+ *            stuck across a hub reboot or a driver code update, had no timer armed and
+ *            nothing left to observe, so it stayed stuck forever. Recovery keyed off a
+ *            transition cannot recover a sensor that has stopped transitioning. Now a
+ *            periodic sweep reconciles actual state every 5 minutes regardless of
+ *            traffic, and any parsed frame re-arms a missing timer.
  *    0.3.1 - Scheduled handlers now take an optional argument. This is DEFENSIVE, not a
  *            confirmed fix: a MissingMethodException for watchdogCheck() was observed,
  *            but the class in the stack was the STOCK driver's, not this one — the device
@@ -46,7 +54,7 @@
 
 import groovy.transform.Field
 
-@Field static final String VERSION = "0.3.1"
+@Field static final String VERSION = "0.4.0"
 
 // Ring G2 advertises Notification v8. Keep the versions the device actually speaks;
 // asking zwave.parse() for a version the device does not support silently drops frames.
@@ -119,6 +127,7 @@ metadata {
 void installed() {
     logInfo "installed"
     sendEvent(name: "watchdogClears", value: 0)
+    startSweep()
     runIn(2, "refresh")
 }
 
@@ -128,6 +137,7 @@ void updated() {
     // A shortened timeout must apply to a run already in flight, and a disabled
     // watchdog must not leave an armed timer behind.
     if (device.currentValue("motion") == "active") armWatchdog() else disarmWatchdog()
+    startSweep()
 }
 
 void configure() {
@@ -139,6 +149,7 @@ void configure() {
     getParameterReport()
     sendCmds([secureCmd(zwave.versionV2.versionGet()),
               secureCmd(zwave.batteryV1.batteryGet())], 500)
+    startSweep()
 }
 
 void logsOff() {
@@ -197,6 +208,11 @@ void parse(String description) {
     // Self-bootstrap. Assigning a driver to an existing device does not call
     // installed(), and this sensor is FLiRS so there is no wake-up to hook either.
     // The first frame we successfully parse is the reliable trigger.
+    // Any frame is an opportunity to notice we are active but unguarded — e.g. the
+    // driver was assigned while the sensor was already stuck, so no active event was
+    // ever observed and nothing armed the timer.
+    if (device.currentValue("motion") == "active" && !isWatchdogArmed()) { armWatchdog() }
+
     if (state.driverVersion != VERSION) {
         state.driverVersion = VERSION
         logInfo "first parse on ${VERSION} — running configure()"
@@ -325,10 +341,12 @@ private void armWatchdog() {
     Integer secs = watchdogSecs()
     if (secs <= 0) { disarmWatchdog(); return }
     logDebug "watchdog armed for ${secs}s"
+    device.updateDataValue("wdArmed", "true")
     runIn(secs, "watchdogCheck", [overwrite: true])
 }
 
 private void disarmWatchdog() {
+    device.updateDataValue("wdArmed", "false")
     unschedule("watchdogCheck")
     unschedule("watchdogExpire")
 }
@@ -351,6 +369,35 @@ void watchdogCheck(data = null) {
 void watchdogExpire(data = null) {
     if (device.currentValue("motion") != "active") return
     clearMotion("watchdog-forced")
+}
+
+// The reconciler. Runs on a fixed schedule so recovery never depends on the sensor
+// sending anything, which is precisely what a stuck sensor stops doing. This is what
+// actually catches a device that was already stuck when the driver was assigned.
+void watchdogSweep(data = null) {
+    startSweep()   // self-healing: keep the schedule alive across reboots and code updates
+    Integer secs = watchdogSecs()
+    if (secs <= 0) return
+    if (device.currentValue("motion") != "active") return
+    Long ageSecs = motionAgeSecs()
+    if (ageSecs == null || ageSecs < secs) return
+    logDebug "sweep: active for ${ageSecs}s with a ${secs}s timeout — verifying with the sensor"
+    watchdogCheck()
+}
+
+private void startSweep() {
+    // runEvery5Minutes is overwrite-by-name, so calling this repeatedly is safe.
+    runEvery5Minutes("watchdogSweep")
+}
+
+private Long motionAgeSecs() {
+    Date d = device.currentState("motion")?.getDate()
+    if (d == null) return null
+    return (long)((now() - d.getTime()) / 1000L)
+}
+
+private boolean isWatchdogArmed() {
+    return (device.getDataValue("wdArmed") == "true")
 }
 
 // Ask specifically about the motion (intrusion) event. A device that is idle answers
