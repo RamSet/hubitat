@@ -23,10 +23,12 @@
  *  Author: RamSet — https://github.com/RamSet/hubitat
  *
  *  Changelog:
- *    0.3.1 - Fix: the watchdog timers threw MissingMethodException at fire time. runIn()
- *            with an options map invokes the handler with an argument, so the no-arg
- *            signatures never matched. Caught only by running the watchdog for real with
- *            a shortened timeout — it compiles clean and every other path works.
+ *    0.3.1 - Scheduled handlers now take an optional argument. This is DEFENSIVE, not a
+ *            confirmed fix: a MissingMethodException for watchdogCheck() was observed,
+ *            but the class in the stack was the STOCK driver's, not this one — the device
+ *            had already been reassigned and this driver's orphaned runIn schedule fired
+ *            against it. runIn(2, "configure") calls a zero-arg method here successfully,
+ *            so the no-arg signature was probably never the problem.
  *    0.3.0 - Fix: a sensor that answered the watchdog's verify query with "motion still
  *            active" was force-cleared anyway a few seconds later, because re-arming the
  *            check did not cancel the grace timer from the query. Verify-then-clear only
@@ -331,11 +333,10 @@ private void disarmWatchdog() {
     unschedule("watchdogExpire")
 }
 
-// NOTE ON THE SIGNATURES: both scheduled handlers below take an optional argument.
-// runIn() with an options map (we pass [overwrite: true]) invokes the handler WITH an
-// argument, so a bare no-arg signature throws MissingMethodException when the timer
-// fires — and only when it fires, which a compile check will never catch. runIn without
-// an options map calls with no argument, so the default keeps both styles working.
+// NOTE ON THE SIGNATURES: both scheduled handlers take an optional argument so they
+// tolerate being invoked with or without data. Defensive only — zero-arg scheduled
+// methods demonstrably work in this driver (runIn(2, "configure") does exactly that).
+// Do not read this as evidence that runIn requires an argument; it does not.
 // Stage 1: the sensor has been active too long. Ask it what it actually thinks before
 // overriding it — a genuinely occupied room must not be reported as empty.
 void watchdogCheck(data = null) {
