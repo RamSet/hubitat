@@ -23,6 +23,14 @@
  *  Author: RamSet — https://github.com/RamSet/hubitat
  *
  *  Changelog:
+ *    0.5.0 - Expose the configuration parameters. Labels for 4 (LED Indicator) and 8
+ *            (Motion Sensitivity, 0-4) are taken from Hubitat's built-in driver, which
+ *            was written against the real device; labels for 1, 2 and 3 are from Ring's
+ *            manual AND corroborated by the values read back off firmware 1.09. 5, 6, 7,
+ *            9, 10 and 11 are exposed as raw numbers with NO invented label — the
+ *            published manual disagrees with this firmware on their sizes and defaults,
+ *            so guessing a name for them would be worse than admitting ignorance.
+ *            Parameters are only written when you set them, so nothing is clobbered.
  *    0.4.0 - Fix the real hole: the watchdog only armed when it SAW a motion-active
  *            event. A sensor that was already stuck active when this driver was assigned
  *            (the normal case — you install this on the ones that are stuck), or that was
@@ -54,7 +62,7 @@
 
 import groovy.transform.Field
 
-@Field static final String VERSION = "0.4.0"
+@Field static final String VERSION = "0.5.0"
 
 // Ring G2 advertises Notification v8. Keep the versions the device actually speaks;
 // asking zwave.parse() for a version the device does not support silently drops frames.
@@ -75,6 +83,42 @@ import groovy.transform.Field
 @Field static final Integer EVT_CLEARED         = 0x00
 @Field static final Integer EVT_TAMPER          = 0x03   // product covering removed
 @Field static final Integer EVT_MOTION          = 0x08   // intrusion / motion detected
+
+// Parameter table. `title` is only filled in where the meaning is actually known:
+//   1, 2, 3  - Ring's manual, and the values read back off firmware 1.09 match it exactly.
+//   4, 8     - Hubitat's built-in driver, written against the real hardware. Authoritative.
+//   rest     - deliberately unnamed. Ring's published manual disagrees with firmware 1.09
+//              on the sizes and defaults of 5, 6, 8 and 11, so it cannot be trusted for
+//              the ones the built-in driver does not cover. Exposed raw so they can be
+//              experimented with; the observed factory value is quoted for each.
+// `applyDefault` means "write this even if the user never picked a value" — set only on
+// parameter 2, because that one is the actual fix for stuck-active.
+@Field static final List<Map> PARAMS = [
+    [num:1,  size:1, title:"Heartbeat interval (minutes)",  type:"number", range:"1..70",
+     note:"How often the sensor sends a battery report. Factory 70."],
+    [num:2,  size:1, title:"Retry count",                   type:"number", range:"0..5", applyDefault:5,
+     note:"Application-level retries when a report is not acknowledged. Factory 1 — which is why a single lost motion-clear becomes permanent. 5 is recommended."],
+    [num:3,  size:1, title:"Retry base wait (seconds)",     type:"number", range:"1..60",
+     note:"Base seconds between retries. Factory 5."],
+    [num:4,  size:1, title:"LED Indicator",                 type:"enum",
+     options:["0":"Disable","1":"Motion","2":"Motion and idle"],
+     note:"Factory 1; your sensors read 0."],
+    [num:8,  size:1, title:"Motion Sensitivity",            type:"enum",
+     options:["0":"0 (least sensitive)","1":"1","2":"2 (factory)","3":"3","4":"4 (most sensitive)"],
+     note:"Five levels. Factory 2."],
+    [num:5,  size:1, title:"Parameter 5 (unlabelled)",      type:"number", range:"0..255",
+     note:"Meaning unknown on firmware 1.09. Observed factory value: 3."],
+    [num:6,  size:1, title:"Parameter 6 (unlabelled)",      type:"number", range:"0..255",
+     note:"Meaning unknown on firmware 1.09. Observed factory value: 15."],
+    [num:7,  size:1, title:"Parameter 7 (unlabelled)",      type:"number", range:"0..255",
+     note:"Meaning unknown on firmware 1.09. Observed factory value: 0."],
+    [num:9,  size:1, title:"Parameter 9 (unlabelled)",      type:"number", range:"0..255",
+     note:"Meaning unknown on firmware 1.09. Observed factory value: 0."],
+    [num:10, size:1, title:"Parameter 10 (unlabelled)",     type:"number", range:"0..255",
+     note:"Meaning unknown on firmware 1.09. Observed factory value: 2."],
+    [num:11, size:2, title:"Parameter 11 (unlabelled)",     type:"number", range:"0..65535",
+     note:"Two bytes. Meaning unknown on firmware 1.09. Observed factory value: 10000."]
+]
 
 metadata {
     definition(name: "Ring Alarm Motion Sensor G2 Watchdog", namespace: "RamSet", author: "RamSet",
@@ -111,10 +155,16 @@ metadata {
               title: "Verify grace (seconds)",
               description: "How long to wait for the sensor to answer that query before clearing anyway. Default 10.",
               defaultValue: 10, range: "2..120"
-        input name: "retryCount", type: "number",
-              title: "Sensor retry count (configuration parameter 2)",
-              description: "How many application-level retries the SENSOR makes when a report is not acknowledged. Ring ships this at 1, so one lost motion-clear is never re-sent and the hub stays stuck on active. 5 is the maximum. Costs a little battery. Written on Configure.",
-              defaultValue: 5, range: "0..5"
+        PARAMS.each { pm ->
+            String desc = "Parameter #${pm.num}" + (state."param${pm.num}" != null ? ", sensor currently reports: ${state."param${pm.num}"}" : "") + ". ${pm.note}"
+            if (pm.type == "enum") {
+                input name: "configParam${pm.num}", type: "enum", title: pm.title,
+                      description: desc, options: pm.options, required: false
+            } else {
+                input name: "configParam${pm.num}", type: "number", title: pm.title,
+                      description: desc, range: pm.range, required: false
+            }
+        }
         input name: "txtEnable", type: "bool", title: "Enable descriptionText logging", defaultValue: true
         input name: "logEnable", type: "bool", title: "Enable debug logging", defaultValue: false
     }
@@ -141,11 +191,24 @@ void updated() {
 }
 
 void configure() {
-    Integer retries = (settings?.retryCount == null ? 5 : (settings.retryCount as Integer))
-    logInfo "configure — writing parameter 2 = ${retries}, then reading version, battery and parameters 1-12"
-    // Parameter 2 first: it is the one lever that attacks the actual cause rather than
-    // papering over it. The sweep that follows reads it back for confirmation.
-    sendCmds([secureCmd(zwave.configurationV1.configurationSet(parameterNumber: 2, size: 1, scaledConfigurationValue: retries))], 500)
+    // Write only what the operator actually chose (plus parameter 2's applyDefault),
+    // and only when it differs from what the sensor last reported. This is a battery
+    // device; re-writing eleven unchanged parameters on every Configure is pure drain.
+    List<String> writes = []
+    List<String> changed = []
+    PARAMS.each { pm ->
+        def chosen = settings["configParam${pm.num}" as String]
+        Integer target = (chosen != null) ? (chosen as Integer)
+                       : (pm.applyDefault != null ? (pm.applyDefault as Integer) : null)
+        if (target == null) return
+        def known = state."param${pm.num}"
+        if (known != null && (known as Integer) == target) return
+        changed << "${pm.num}=${target}"
+        writes << secureCmd(zwave.configurationV1.configurationSet(
+            parameterNumber: pm.num as Integer, size: pm.size as Integer, scaledConfigurationValue: target))
+    }
+    logInfo "configure — ${changed ? "writing ${changed.join(', ')}" : 'no parameter changes needed'}, then reading version, battery and all parameters"
+    if (writes) sendCmds(writes, 800)
     getParameterReport()
     sendCmds([secureCmd(zwave.versionV2.versionGet()),
               secureCmd(zwave.batteryV1.batteryGet())], 500)
@@ -208,6 +271,10 @@ void parse(String description) {
     // Self-bootstrap. Assigning a driver to an existing device does not call
     // installed(), and this sensor is FLiRS so there is no wake-up to hook either.
     // The first frame we successfully parse is the reliable trigger.
+    // Changing a device's driver clears its schedules, so the sweep can silently go
+    // missing. Cheap to re-assert on traffic; runEvery5Minutes overwrites by name.
+    startSweep()
+
     // Any frame is an opportunity to notice we are active but unguarded — e.g. the
     // driver was assigned while the sensor was already stuck, so no active event was
     // ever observed and nothing armed the timer.
