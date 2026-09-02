@@ -68,8 +68,10 @@ def mainPage() {
         }
 
         section("Turn off") {
-            input name: "autoOffMins", type: "number", title: "Turn light off after (minutes)",
-                  description: "0 = leave on", defaultValue: 5, range: "0..1440", required: true
+            paragraph "While the door is open the light stays on. The timer only runs once it closes."
+            input name: "autoOffMins", type: "number",
+                  title: "Turn light off (minutes) after closed",
+                  description: "0 = leave on", defaultValue: 1, range: "0..1440", required: true
         }
 
         section("Options") {
@@ -91,7 +93,7 @@ private String statusText() {
     String c = settings.barrier.currentValue("contact") ?: "unknown"
     String want = (c == "open") ? (settings.openColour ?: "Red") : (settings.closedColour ?: "Green")
     Integer off = autoOffMins()
-    String tail = off > 0 ? " Off after ${off} min." : ""
+    String tail = (off > 0) ? ((c == "closed") ? " Off after ${off} min." : " Stays on while open.") : ""
     return "Door is <b>${c}</b> → light should be <b>${want}</b>.${tail}"
 }
 
@@ -133,24 +135,27 @@ private void apply(String contactValue) {
 
     if (txtEnable != false) log.info "${app.label}: door ${contactValue} → ${name}"
     sendColour()
-    armAutoOff()
+    armAutoOff(contactValue)
 }
 
 private Integer autoOffMins() {
-    return (settings.autoOffMins == null ? 5 : (settings.autoOffMins as Integer))
+    return (settings.autoOffMins == null ? 1 : (settings.autoOffMins as Integer))
 }
 
-// Re-armed on every door event, so the countdown always runs from the latest change
-// rather than expiring mid-way through a fresh one. runIn overwrites by name.
-private void armAutoOff() {
+// Only counts down once the door is CLOSED — an open garage is the state worth keeping
+// visible, so the light stays lit for as long as it is open. Any door event clears the
+// pending timer first, so re-opening cancels a countdown already in flight instead of
+// switching the light off part-way through showing the open colour.
+private void armAutoOff(String contactValue) {
     unschedule("autoOff")
+    if (contactValue != "closed") { logDebug "door ${contactValue} — light stays on"; return }
     Integer m = autoOffMins()
     if (m > 0) { runIn(m * 60, "autoOff"); logDebug "auto-off armed for ${m} min" }
 }
 
 def autoOff(data = null) {
     settings.lights?.each { if (it.hasCommand("off")) it.off() }
-    if (txtEnable != false) log.info "${app.label}: auto-off after ${autoOffMins()} min"
+    if (txtEnable != false) log.info "${app.label}: auto-off — ${autoOffMins()} min after close"
 }
 
 // Repeats are scheduled rather than looped so the app never sits blocking, and each
