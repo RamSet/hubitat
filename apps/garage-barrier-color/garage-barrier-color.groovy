@@ -53,39 +53,31 @@ def mainPage() {
 
         section("Door") {
             input name: "barrier", type: "capability.contactSensor",
-                  title: "Garage door contact sensor",
-                  description: "The rule this replaces watched \"Garage Barrier ZW\". On this hub, pick the meshed copy of it.",
-                  required: true, submitOnChange: true
+                  title: "Select sensor", required: true, submitOnChange: true
         }
 
         section("Light") {
             input name: "lights", type: "capability.colorControl",
-                  title: "Light(s) to colour",
-                  description: "The lightstrip. Native on this hub, so no Hub Mesh hop.",
-                  multiple: true, required: true, submitOnChange: true
-            input name: "openColour", type: "enum", title: "Colour while the door is OPEN",
+                  title: "Select light(s)", multiple: true, required: true, submitOnChange: true
+            input name: "openColour", type: "enum", title: "Colour when open",
                   options: COLOURS.keySet() as List, defaultValue: "Red", required: true
-            input name: "closedColour", type: "enum", title: "Colour while the door is CLOSED",
+            input name: "closedColour", type: "enum", title: "Colour when closed",
                   options: COLOURS.keySet() as List, defaultValue: "Green", required: true
-            input name: "setLevel", type: "number",
-                  title: "Also set brightness to (%) — leave blank to leave brightness alone",
-                  range: "1..100", required: false
+            input name: "setLevel", type: "number", title: "Brightness %",
+                  description: "Optional", range: "1..100", required: false
         }
 
-        section("Reliability") {
-            input name: "repeats", type: "number",
-                  title: "Send the colour this many times",
-                  description: "The old rule sent it 3 times. Try 1 first now that the light is local; raise it only if a colour change is ever missed.",
-                  defaultValue: 2, range: "1..5", required: true
-            input name: "repeatSecs", type: "decimal",
-                  title: "Seconds between repeats",
-                  defaultValue: 1, range: "0.5..10", required: true
+        section("Turn off") {
+            input name: "autoOffMins", type: "number", title: "Turn light off after (minutes)",
+                  description: "0 = leave on", defaultValue: 5, range: "0..1440", required: true
         }
 
         section("Options") {
-            input name: "applyOnSave", type: "bool",
-                  title: "Apply the current door state when this app is saved",
-                  description: "Gets the light in sync immediately instead of waiting for the next door movement.",
+            input name: "repeats", type: "number", title: "Times to send colour",
+                  defaultValue: 2, range: "1..5", required: true
+            input name: "repeatSecs", type: "decimal", title: "Seconds between repeats",
+                  defaultValue: 1, range: "0.5..10", required: true
+            input name: "applyOnSave", type: "bool", title: "Apply current state on save",
                   defaultValue: true
             input name: "txtEnable", type: "bool", title: "Log each colour change", defaultValue: true
             input name: "logEnable", type: "bool", title: "Debug logging", defaultValue: false
@@ -98,7 +90,9 @@ private String statusText() {
     if (!settings.barrier || !settings.lights) return "Pick a contact sensor and a light to get started."
     String c = settings.barrier.currentValue("contact") ?: "unknown"
     String want = (c == "open") ? (settings.openColour ?: "Red") : (settings.closedColour ?: "Green")
-    return "Door is <b>${c}</b> → light should be <b>${want}</b>."
+    Integer off = autoOffMins()
+    String tail = off > 0 ? " Off after ${off} min." : ""
+    return "Door is <b>${c}</b> → light should be <b>${want}</b>.${tail}"
 }
 
 def installed() { initialize() }
@@ -131,8 +125,32 @@ private void apply(String contactValue) {
     state.pending = cmd
     state.pendingName = name
     state.left = Math.max(1, (settings.repeats == null ? 2 : (settings.repeats as Integer)))
+
+    // Auto-off means the light is usually OFF when the next door event lands, so the
+    // colour would go to a dark bulb and never be seen. Switch on first. hasCommand,
+    // not respondsTo — respondsTo is always false for driver commands inside an app.
+    if (autoOffMins() > 0) settings.lights?.each { if (it.hasCommand("on")) it.on() }
+
     if (txtEnable != false) log.info "${app.label}: door ${contactValue} → ${name}"
     sendColour()
+    armAutoOff()
+}
+
+private Integer autoOffMins() {
+    return (settings.autoOffMins == null ? 5 : (settings.autoOffMins as Integer))
+}
+
+// Re-armed on every door event, so the countdown always runs from the latest change
+// rather than expiring mid-way through a fresh one. runIn overwrites by name.
+private void armAutoOff() {
+    unschedule("autoOff")
+    Integer m = autoOffMins()
+    if (m > 0) { runIn(m * 60, "autoOff"); logDebug "auto-off armed for ${m} min" }
+}
+
+def autoOff(data = null) {
+    settings.lights?.each { if (it.hasCommand("off")) it.off() }
+    if (txtEnable != false) log.info "${app.label}: auto-off after ${autoOffMins()} min"
 }
 
 // Repeats are scheduled rather than looped so the app never sits blocking, and each
