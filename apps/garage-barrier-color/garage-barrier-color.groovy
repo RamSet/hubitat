@@ -22,7 +22,7 @@ definition(
     name:        "Garage Barrier Colour",
     namespace:   "ramset",
     author:      "RamSet",
-    description: "Sets a light to one colour while the garage door is open and another while it is closed",
+    description: "Colours a light from an IR barrier: one colour when the beam is broken, another when it is clear",
     category:    "Convenience",
     iconUrl:     "",
     iconX2Url:   "",
@@ -51,7 +51,7 @@ def mainPage() {
             paragraph statusText()
         }
 
-        section("Door") {
+        section("Barrier") {
             input name: "barrier", type: "capability.contactSensor",
                   title: "Select sensor", required: true, submitOnChange: true
         }
@@ -68,10 +68,9 @@ def mainPage() {
         }
 
         section("Turn off") {
-            paragraph "While the door is open the light stays on. The timer only runs once it closes."
             input name: "autoOffMins", type: "number",
-                  title: "Turn light off (minutes) after closed",
-                  description: "0 = leave on", defaultValue: 1, range: "0..1440", required: true
+                  title: "Turn light off after (minutes)",
+                  description: "0 = leave on", defaultValue: 2, range: "0..1440", required: true
         }
 
         section("Options") {
@@ -93,8 +92,8 @@ private String statusText() {
     String c = settings.barrier.currentValue("contact") ?: "unknown"
     String want = (c == "open") ? (settings.openColour ?: "Red") : (settings.closedColour ?: "Green")
     Integer off = autoOffMins()
-    String tail = (off > 0) ? ((c == "closed") ? " Off after ${off} min." : " Stays on while open.") : ""
-    return "Door is <b>${c}</b> → light should be <b>${want}</b>.${tail}"
+    String tail = off > 0 ? " Off after ${off} min." : ""
+    return "Barrier is <b>${c}</b> → light should be <b>${want}</b>.${tail}"
 }
 
 def installed() { initialize() }
@@ -133,29 +132,28 @@ private void apply(String contactValue) {
     // not respondsTo — respondsTo is always false for driver commands inside an app.
     if (autoOffMins() > 0) settings.lights?.each { if (it.hasCommand("on")) it.on() }
 
-    if (txtEnable != false) log.info "${app.label}: door ${contactValue} → ${name}"
+    if (txtEnable != false) log.info "${app.label}: barrier ${contactValue} → ${name}"
     sendColour()
     armAutoOff(contactValue)
 }
 
 private Integer autoOffMins() {
-    return (settings.autoOffMins == null ? 1 : (settings.autoOffMins as Integer))
+    return (settings.autoOffMins == null ? 2 : (settings.autoOffMins as Integer))
 }
 
-// Only counts down once the door is CLOSED — an open garage is the state worth keeping
-// visible, so the light stays lit for as long as it is open. Any door event clears the
-// pending timer first, so re-opening cancels a countdown already in flight instead of
-// switching the light off part-way through showing the open colour.
+// Armed after EVERY barrier event, in either state. This watches an IR beam, not a
+// door: "open" is the beam momentarily broken as something passes, so gating the timer
+// on state would mean it almost never ran. Re-arming on each event also restarts the
+// countdown from the latest crossing, so repeated traffic keeps the light lit.
 private void armAutoOff(String contactValue) {
     unschedule("autoOff")
-    if (contactValue != "closed") { logDebug "door ${contactValue} — light stays on"; return }
     Integer m = autoOffMins()
-    if (m > 0) { runIn(m * 60, "autoOff"); logDebug "auto-off armed for ${m} min" }
+    if (m > 0) { runIn(m * 60, "autoOff"); logDebug "auto-off armed for ${m} min (barrier ${contactValue})" }
 }
 
 def autoOff(data = null) {
     settings.lights?.each { if (it.hasCommand("off")) it.off() }
-    if (txtEnable != false) log.info "${app.label}: auto-off — ${autoOffMins()} min after close"
+    if (txtEnable != false) log.info "${app.label}: auto-off after ${autoOffMins()} min"
 }
 
 // Repeats are scheduled rather than looped so the app never sits blocking, and each
