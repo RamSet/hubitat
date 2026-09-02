@@ -35,20 +35,22 @@ preferences {
 
 // Hubitat hue is 0-100, not 0-360. These are the values the built-in colour picker uses.
 @Field static final Map COLOURS = [
-    "Red":    [hue: 0,  saturation: 100],
-    "Green":  [hue: 33, saturation: 100],
-    "Blue":   [hue: 66, saturation: 100],
-    "Amber":  [hue: 11, saturation: 100],
-    "Yellow": [hue: 16, saturation: 100],
-    "Purple": [hue: 82, saturation: 100],
-    "White":  [hue: 0,  saturation: 0]
+    "Red":    [hue: 0,  saturation: 100, swatch: "#c62828"],
+    "Green":  [hue: 33, saturation: 100, swatch: "#2e7d32"],
+    "Blue":   [hue: 66, saturation: 100, swatch: "#1565c0"],
+    "Amber":  [hue: 11, saturation: 100, swatch: "#e65100"],
+    "Yellow": [hue: 16, saturation: 100, swatch: "#f9a825"],
+    "Purple": [hue: 82, saturation: 100, swatch: "#6a1b9a"],
+    "White":  [hue: 0,  saturation: 0,   swatch: "#9e9e9e"]
 ]
+@Field static final String GREY = "#607d8b"        // off
+@Field static final String SLATE = "#37474f"       // on, but not a colour we configured
 
 def mainPage() {
     dynamicPage(name: "mainPage", title: "Garage Barrier Colour", install: true, uninstall: true) {
 
         section("Status") {
-            paragraph statusText()
+            paragraph statusHtml()
         }
 
         section("Barrier") {
@@ -87,13 +89,76 @@ def mainPage() {
     }
 }
 
-private String statusText() {
-    if (!settings.barrier || !settings.lights) return "Pick a contact sensor and a light to get started."
-    String c = settings.barrier.currentValue("contact") ?: "unknown"
-    String want = (c == "open") ? (settings.openColour ?: "Red") : (settings.closedColour ?: "Green")
+private String pill(String label, String colour) {
+    return "<span style='display:inline-block;margin:2px 5px 2px 0;padding:3px 10px;border-radius:11px;" +
+           "background:${colour};color:#fff;font-size:12.5px;font-weight:600'>${label}</span>"
+}
+
+// Snapshot taken when the page is drawn — it does not live-update, same as the
+// sprinkler app's status block.
+private String statusHtml() {
+    if (!settings.barrier || !settings.lights) return "Pick a sensor and a light to get started."
+    StringBuilder out = new StringBuilder()
+
+    String c = settings.barrier.currentValue("contact")
+    String bColour = (c == "closed") ? COLOURS.Green.swatch : (c == "open") ? COLOURS.Red.swatch : GREY
+    out << pill("BARRIER ${(c ?: 'unknown').toUpperCase()}", bColour)
+    out << "<br>"
+
+    settings.lights.each { dev ->
+        out << pill("${dev.displayName}: ${lightStateLabel(dev)}", lightStateColour(dev))
+        out << "<br>"
+    }
+
     Integer off = autoOffMins()
-    String tail = off > 0 ? " Off after ${off} min." : ""
-    return "Barrier is <b>${c}</b> → light should be <b>${want}</b>.${tail}"
+    String want = (c == "open") ? (settings.openColour ?: "Red") : (settings.closedColour ?: "Green")
+    out << "<small>Barrier <b>${c ?: 'unknown'}</b> \u2192 light should be <b>${want}</b>."
+    out << (off > 0 ? " Off ${off} min after the last crossing." : " Auto-off disabled.")
+    out << "</small>"
+    return out.toString()   // paragraph takes a String; handing it a StringBuilder throws at render
+}
+
+// A light that is switched off is grey whatever colour it is holding — that is the
+// state the operator cares about, and hue is meaningless while it is dark.
+private String lightStateColour(dev) {
+    if (isOff(dev)) return GREY
+    Map m = nearestColour(dev)
+    return (m == null) ? SLATE : m.swatch   // grey means OFF and nothing else
+}
+
+private String lightStateLabel(dev) {
+    if (isOff(dev)) return "OFF"
+    Map m = nearestColour(dev)
+    return (m == null) ? "ON" : (m.name as String).toUpperCase()
+}
+
+private boolean isOff(dev) {
+    // Not every colour device reports switch; treat a missing value as "not off"
+    // rather than showing grey for a light that is actually lit.
+    return (dev.currentValue("switch") == "off")
+}
+
+// Match the reported hue back to a configured colour. Hue is circular (0 and 100 are
+// both red), so the distance has to wrap or a red light reading 99 shows as purple.
+private Map nearestColour(dev) {
+    def h = dev.currentValue("hue")
+    if (h == null) return null
+    BigDecimal hue = h as BigDecimal
+    def sat = dev.currentValue("saturation")
+    if (sat != null && (sat as BigDecimal) < 10) return [name: "White"] + COLOURS.White
+
+    Map best = null
+    BigDecimal bestDist = null
+    COLOURS.each { nm, spec ->
+        if (nm == "White") return
+        BigDecimal d = (hue - (spec.hue as BigDecimal)).abs()
+        if (d > 50) d = 100 - d
+        if (bestDist == null || d < bestDist) { bestDist = d; best = [name: nm] + spec }
+    }
+    // Tolerance is deliberately tight. This app sets exact hues, so a real match is
+    // near-exact and only needs slack for driver rounding. At 12 the window was ~43
+    // degrees wide and teal (hue 45) reported as GREEN.
+    return (bestDist != null && bestDist <= 4) ? best : null
 }
 
 def installed() { initialize() }
