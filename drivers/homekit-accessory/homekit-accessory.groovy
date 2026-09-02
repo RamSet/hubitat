@@ -23,9 +23,24 @@
  *   the raw service/characteristic map.
  *
  * Author: RamSet
- * Version: 0.13.4
+ * Version: 0.14.0
  *
  * Changelog:
+ *  v0.14.0 - PURE LISTEN BY DEFAULT. The keepalive/liveness probe now defaults to 0 (off) instead of 30s.
+ *           Rationale, and it is not a guess: hapCore 0.10.12 added real TCP keepalive to the session socket
+ *           (SO_KEEPALIVE via the rawSocket connect options) behind a getMethod fallback, because the driver
+ *           sandbox rejected those options on 2.5.1.138. Re-tested on 2.5.1.152 with a throwaway driver making
+ *           two FRESH connects — a plain control connect and the keepalive one — and the keepalive connect now
+ *           succeeds. So the fallback is no longer being taken and the OS is genuinely holding the socket warm
+ *           and detecting a dead peer (~55s at tcpKeepIdle 25 + 10x3), which closes the socket and fires
+ *           socketStatus -> reconnect. That is exactly the mechanism Apple's controllers use.
+ *           The 30s app-level GET therefore stopped being a keepalive and is now just harmful: hapCore's own
+ *           0.10.12 note records an MSG100 that "dropped in ~90s while polled" but "held 16+ min passively".
+ *           Cheap chips treat the poll as abuse. Events (ev:true) were never the problem and are unchanged.
+ *           Existing devices keep whatever they had saved — set the probe to 0 to pick this up. A device that
+ *           has never been saved no longer inherits hapCore's 30s null-default either; updated() pins it to 0.
+ *           If your accessory stalls silently WITHOUT dropping TCP (the ecobee does this; a Meross does not),
+ *           keepalive cannot see it — raise the probe to a few hundred seconds for that device only.
  *  v0.13.4 - Occupancy sensors (HAP type 86, e.g. Aqara FP2 presence) now ALSO report Hubitat `motion`
  *           (active while occupied) in addition to `presence`, so they're selectable in Room Lighting and any
  *           motion-based rule — not just presence automations. Read-only, no re-pair, no new setting. Pairs with
@@ -150,7 +165,7 @@ metadata {
         input "sessionMode", "enum", title: "Connection mode", options: ["Persistent (event push)","On-demand (poll)"], defaultValue: "Persistent (event push)",
               description: "Persistent = instant updates via a held session (best for well-behaved accessories). On-demand = connect only to read/write + poll (use for flaky accessories like Meross that hard-close the connection)."
         input "pollMins", "number", title: "Poll interval (minutes) — On-demand mode only", defaultValue: 5
-        input "safetyRefreshSecs", "number", title: "Keepalive/liveness probe (seconds) — Persistent mode: hold one session and every N seconds send a tiny 1-characteristic read to keep the link warm and prove it's alive; an unanswered probe reconnects immediately. Keeps a cheap chip (e.g. Meross) from silently idle-dropping the session. 30 recommended; floor 15; 0 = disable probing.", defaultValue: 30
+        input "safetyRefreshSecs", "number", title: "Liveness probe (seconds) — 0 recommended", description: "Leave at 0. The socket now uses real TCP keepalive, so the OS holds the link warm and spots a dead peer in about a minute — the same thing Apple's controllers rely on, and it needs no traffic on the HAP session. Setting this above 0 sends a small read every N seconds, which cheap accessories (Meross and similar) treat as abuse and respond to by dropping the session. Only raise it for an accessory that goes silent WITHOUT closing the connection (an ecobee does this); a few hundred seconds is plenty. Floor 15.", defaultValue: 0
         input "infoLog", "bool", title: "Enable info logging", defaultValue: true
         input "debugLog", "bool", title: "Enable debug logging", defaultValue: false
     }
@@ -216,6 +231,10 @@ def updated(){
         if(c){ device.updateSetting("setupCode",[value:c,type:"string"]); device.updateSetting("setupPayload",[value:"",type:"string"]); logInfo "HAP: decoded HomeKit QR → setup code ${c[0..2]}-${c[3..4]}-${c[5..7]}" }
         else log.warn "HAP: couldn't decode that payload — paste the full X-HM://… string from the accessory's HomeKit QR"
     }
+    // hapCore's safetySecs() falls back to 30 when the setting is null, and an input defaultValue does not
+    // reach settings until the page is submitted — so a freshly paired accessory would poll at 30s despite the
+    // default above. Pin it explicitly; an operator who wants a probe can still set one.
+    if(settings.safetyRefreshSecs == null) device.updateSetting("safetyRefreshSecs",[value:"0",type:"number"])
     if(settings.setupCode && !isPaired()){ logInfo "HAP: setup code entered — pairing"; runIn(1,"pair") }
     else if(isPaired()){ runIn(2,"startSession"); runEvery5Minutes("ensureUp") }   // backstop (now clears stale connInFlight); verifyWatch backoff is the primary retry
 }
