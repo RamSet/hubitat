@@ -62,7 +62,7 @@ mappings {
     path("/calendar.ics")  { action: [GET: "apiCalendar"] }
 }
 
-String getAppVersion() { return "v0.16.0 (2026-08)" }
+String getAppVersion() { return "v0.16.2 (2026-09)" }
 
 // Simple vs Advanced interface. Simple shows only zones, schedule, weather and
 // hardware safety; Advanced exposes everything (moisture, learning, sensors,
@@ -1330,6 +1330,7 @@ def aboutPage() {
             paragraph "v0.12.2 — Fixed pause sensors reporting \"0s remaining\" and skipping ahead when they fired during a soak or the gap between zones. The schedule now tracks soak and between-zone phases as pausable too, so a pause that lands mid-soak reports the real soak time left and resumes that soak (valves stay off) instead of jumping to the next zone."
             paragraph "v0.13.4 — Saving the app now sends a confirmation notification summarizing the schedule: when it will start, how many zones, and the estimated total run time (water + soak). It also doubles as proof the new code is active — if you save and don't get it, the update didn't take."
             paragraph "v0.13.3 — Fixes two scheduling problems. (1) Multiple start times now ALL work: each was scheduled on the same internal handler, so Hubitat overwrote all but the last — only your final start time ran. Each window now has its own handler. (2) A run can no longer start twice from a single trigger: a re-entrancy guard ignores a duplicate scheduled invocation within 15 seconds (and logs it), preventing the double \"starting\" / double watering seen after editing a program near its run time. Re-save each sprinkler app once after updating so the new per-window schedules register."
+            paragraph "v0.16.2 — Fixed a start-up race that produced a phantom manual run and a duplicated \"starting\" notification. The app announced the run and switched on the first zone before it had finished recording that a run was under way. Because that record is only saved once the current step completes, the handlers watching your zone and Run switches still believed nothing was running, so they mistook the app's own switch-on for someone pressing the switch — starting a stray 10-minute manual run on the first zone and kicking off the schedule a second time. The run is now claimed before anything is announced or switched on. Also fixed: the Run switch could ignore a genuine OFF press, because a leftover internal marker from an earlier run was never cleared and swallowed the next one."
             paragraph "v0.13.2 — Pause sensors NEVER skip a run, even a manual one. Previously a manual run (the Run switch or \"Run schedule now\" button) with a pause sensor active (e.g. water heater on) reported \"skipped — pause sensor active\"; now it holds and auto-starts when the sensor clears, exactly like a scheduled run. (A wet rain sensor still skips.)"
             paragraph "v0.13.1 — Pause-sensor hold now applies on EVERY scheduled start regardless of the pause/stop mode (that setting only governs what happens mid-run). Previously a sensor set to 'stop' mode would still skip the cycle at the scheduled start instead of holding."
             paragraph "v0.13.0 — Pause sensors (water heater on, a door/contact open) now HOLD the scheduled run and start it automatically once they clear, instead of skipping the cycle — with a \"waiting for X to clear\" notification. Genuine skips (wet rain sensor, weather rain delay, quiet hours, mode/HSM) still skip the cycle and say why. Also: the completion summary's seasonal figure now shows the actual extra over the scheduled base, so \"watered X of Y · (+delta)\" always reconciles (previously the parenthetical was a theoretical seasonal estimate that didn't match the real watered total)."
@@ -1561,6 +1562,7 @@ def initialize() {
     state.zones = state.zones ?: [:]
     state.lastRunByZone = state.lastRunByZone ?: [:]
     state.running = false
+    clearRunClaim()
     state.currentZoneIdx = 0
     state.zonesPlan = []
     state.deferredRunPending = false   // never carry a held-defer across re-init/reboot
@@ -1796,6 +1798,7 @@ private void pauseRunningSchedule(String reason) {
 
     state.paused = true
     state.running = false  // schedule is no longer actively running
+    clearRunClaim()
     state.pausedReason = reason
     state.pauseStartMs = now()   // for total-paused accounting at finish
 }
@@ -1968,6 +1971,14 @@ def preRunNotifyW3() { preRunNotify() }
 // Schedule entry — fires at the configured time
 // =========================================================================
 
+// True from the instant a run is claimed until state.running has certainly been persisted.
+// Bounded by time so a crashed start can never wedge it permanently.
+private boolean runClaimed() {
+    Long c = (atomicState.runClaimMs ?: 0L) as long
+    return (c > 0L) && ((now() - c) < 60000L)
+}
+private void clearRunClaim() { atomicState.runClaimMs = 0L }
+
 def runSchedule(Map opts = [:]) {
     boolean manual = (opts?.manual == true)
     // Re-entrancy guard: two scheduled invocations seconds apart (e.g. a re-init
@@ -2130,13 +2141,20 @@ def runSchedule(Map opts = [:]) {
         log.info "${app.label}: starting run — plan=${plan}, seasonal=×${seasonalMult}"
     }
     Map est = estimateRunSeconds(plan, seasonalMult)
-    notify("schedule.start", [planSize: plan.size(), seasonalMult: seasonalMult,
-                              estTotal: fmtDuration(est.total), estWater: fmtDuration(est.water),
-                              estSoak: fmtDuration(est.soak)])
 
+    // Claim the run BEFORE announcing it and before any relay is commanded. `state` is
+    // only persisted when the current handler finishes, so a switch-echo handler running
+    // in parallel still read state.running == false and treated OUR OWN zone-on as a user
+    // toggle — producing a phantom "MANUAL <zone>" plus a second "starting". atomicState
+    // writes through immediately, so it is visible to those handlers straight away.
+    atomicState.runClaimMs = now()
     state.zonesPlan = plan
     state.currentZoneIdx = 0
     state.running = true
+
+    notify("schedule.start", [planSize: plan.size(), seasonalMult: seasonalMult,
+                              estTotal: fmtDuration(est.total), estWater: fmtDuration(est.water),
+                              estSoak: fmtDuration(est.soak)])
     state.deferredRunPending = false   // committing to a run clears any held-defer
     syncRunControlSwitch()   // reflect "running" on the HomeKit control switch
     recordRunStart(plan, seasonalMult)
@@ -2385,6 +2403,7 @@ def finishRun() {
     }
     recordRunFinish("completed")
     state.running = false
+    clearRunClaim()
     syncRunControlSwitch()   // reflect "idle" on the HomeKit control switch
     state.currentZoneIdx = 0
     Integer postSec = (settings.pumpSwitch && settings.pumpPostSec) ? (settings.pumpPostSec as int) : 0
@@ -2416,6 +2435,7 @@ def stopAllZones() {
     }
     state.manualActive = [:]
     state.running = false
+    clearRunClaim()
     state.paused = false
     state.pausedRemainingSec = 0
     state.currentZoneIdx = 0
@@ -3177,7 +3197,7 @@ def zoneChildSwitchEvent(evt) {
     if (suppressed) return
     // During an active run the scheduler owns the relays. Don't fight per-event;
     // just reconcile every tile to its relay's real state shortly after.
-    if (state.running) { runIn(2, "syncAllZoneChildren"); return }
+    if (state.running || runClaimed()) { runIn(2, "syncAllZoneChildren"); return }
     // External trigger while idle
     if (evt.value == "on") manualZoneStart(zid)
     else                   manualZoneStop(zid)
@@ -3404,10 +3424,19 @@ private void maintainRunSwitch() {
 def runControlSwitchEvent(evt) {
     String dni = evt?.device?.deviceNetworkId ?: evt?.deviceNetworkId
     if (dni != runCtlDni()) return
+    // Time-bounded, like suppressZoneChild. The old bare-String flag was never pruned, so a
+    // leftover "run:off" sat in state indefinitely and would swallow the user's next real OFF.
     String guard = "run:${evt.value}"
-    if (state.suppressRunCtlEvent == guard) { state.suppressRunCtlEvent = null; return }
+    def g = state.suppressRunCtlEvent
+    boolean isList = (g instanceof List)
+    boolean fresh  = isList && ((now() - (g[1] as long)) < 4000L)
+    boolean ctlSuppressed = fresh && (g[0] == guard)
+    // Prune anything legacy (the old bare String) or expired, and consume on a match. A fresh
+    // non-matching guard is left alone — its own event may still be in flight.
+    if (!isList || !fresh || ctlSuppressed) state.suppressRunCtlEvent = null
+    if (ctlSuppressed) return
     if (evt.value == "on") {
-        if (state.running) return   // already running — nothing to do
+        if (state.running || runClaimed()) return   // already running (or starting) — nothing to do
         log.info "${app.label}: Run switch ON — starting schedule on demand"
         runIn(1, "runSchedule", [data: [manual: true]])
         // Reconcile the switch shortly after: if the run was skipped bounce it
@@ -3449,7 +3478,7 @@ def syncRunControlSwitch() {
     if (!ch) return
     String value = state.running ? "on" : "off"
     if (ch.currentValue("switch") == value) return
-    state.suppressRunCtlEvent = "run:${value}"
+    state.suppressRunCtlEvent = ["run:${value}".toString(), now()]
     try { if (value == "on") ch.on() else ch.off() }
     catch (e) { log.warn "syncRunControlSwitch: ${e.message}" }
 }
