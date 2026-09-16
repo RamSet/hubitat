@@ -62,7 +62,7 @@ mappings {
     path("/calendar.ics")  { action: [GET: "apiCalendar"] }
 }
 
-String getAppVersion() { return "v0.16.5 (2026-09)" }
+String getAppVersion() { return "v0.16.6 (2026-09)" }
 
 // Simple vs Advanced interface. Simple shows only zones, schedule, weather and
 // hardware safety; Advanced exposes everything (moisture, learning, sensors,
@@ -1332,6 +1332,7 @@ def aboutPage() {
             paragraph "v0.12.2 — Fixed pause sensors reporting \"0s remaining\" and skipping ahead when they fired during a soak or the gap between zones. The schedule now tracks soak and between-zone phases as pausable too, so a pause that lands mid-soak reports the real soak time left and resumes that soak (valves stay off) instead of jumping to the next zone."
             paragraph "v0.13.4 — Saving the app now sends a confirmation notification summarizing the schedule: when it will start, how many zones, and the estimated total run time (water + soak). It also doubles as proof the new code is active — if you save and don't get it, the update didn't take."
             paragraph "v0.13.3 — Fixes two scheduling problems. (1) Multiple start times now ALL work: each was scheduled on the same internal handler, so Hubitat overwrote all but the last — only your final start time ran. Each window now has its own handler. (2) A run can no longer start twice from a single trigger: a re-entrancy guard ignores a duplicate scheduled invocation within 15 seconds (and logs it), preventing the double \"starting\" / double watering seen after editing a program near its run time. Re-save each sprinkler app once after updating so the new per-window schedules register."
+            paragraph "v0.16.6 — Fixed the hardware failsafe fighting itself when two schedule instances share a relay controller. The auto-off push writes to every relay on a controller, so if one instance drove a short cap and another a long one on the same device (e.g. a lawn schedule and a veggie schedule both on the same ZEN16), each would overwrite the other — and the new hourly self-heal turned that into an hourly tug-of-war with 'not set' alerts from both. The push now never lowers a relay below the value already on the device, so a shared controller settles on the longest cap any instance needs (safe for everyone; it just can't be lowered from the app without clearing the device's params first). If your schedules use separate controllers this changes nothing."
             paragraph "v0.16.5 — Turning a zone OFF is now verified, not assumed. The app confirmed a valve OPENED (retry + alert) but trusted every OFF command blindly — so a single dropped Z-Wave OFF could leave a valve open with nothing to close it, watering until someone noticed. Now, after a run ends, a manual run stops, or you hit Stop, the app reads each relay back; if one still reports ON it re-sends OFF, and if it still won't close it raises a loud alert ('WATER MAY STILL BE RUNNING — check the valve'). Pairs with the relay hardware auto-off as the last line of defense. Uses the same verify settings as the ON check — nothing new to configure."
             paragraph "v0.16.4 — Fixed a phantom manual run that could start right as a schedule finished. When a zone's relay was slow to report OFF at end of run, the app's own tile-reconcile turned the zone tile back on to match the relay — and the handler watching those tiles mistook that self-generated echo for someone turning the zone on by hand, launching a stray manual run (which then relied on the 10-minute auto-off to end). The suppression flag that marks the app's own tile changes is now written to immediately-durable storage, so the watching handler always sees it and never re-fires the app's own echo as a manual start. Same class of fix as v0.16.2, on the end-of-run path."
             paragraph "v0.16.3 — The hardware relay auto-off failsafe is now self-checking. Before, the app pushed the relays' built-in auto-off timers once and reported that it sent them — but a Z-Wave write that the relay silently dropped (or a relay that later lost its config) would sit un-armed indefinitely while the page still read \"pushed OK\". The hourly relay watchdog now re-confirms the auto-off is actually set on every relay and re-pushes any that drifted, and the Hardware-safety page shows a plain, time-stamped status (\"armed, confirmed 4m ago\" vs \"last confirmed 93 days ago\") read from the last real verification, not from a stale send. A push notification no longer claims the timers are set until the hardware confirms it."
@@ -3037,12 +3038,17 @@ def pushHardwareSafety() {
         // drives on the controller — that would let the hardware cut our own
         // watering short. Raise to the safe floor if the requested value is below.
         Integer floorMin = requiredAutoOffMinForController(dev.id as String)
-        Integer mins = Math.max(requested, floorMin)
-        // Cross-instance heads-up: if the device already holds a larger auto-off
-        // (e.g. another app instance set it higher for a longer relay on a shared
-        // controller), warn before we lower it.
         Map cur = parseConfigVals(dev)
         Integer curMax = ((autoOffParams.collect { cur[it as int] }.findAll { it != null } + [0]).max()) as Integer
+        // Never LOWER a relay's auto-off below what it already holds. A controller SHARED with
+        // another app instance (e.g. Veggies + Irrigation both drive S3) may already carry a
+        // longer timer that the other instance set for its own longer run — lowering it would cut
+        // that run short AND make the two instances fight, each re-pushing its own value every
+        // hour (the self-heal turned that latent conflict into an hourly flap). Arm to the MAX of
+        // (our request, our safe floor, what's already there) so a shared device converges on one
+        // safe value. NOTE: this means a value can only ratchet UP via the app — to genuinely
+        // lower a controller no other instance needs, clear its params on the device first.
+        Integer mins = Math.max(Math.max(requested, floorMin), curMax)
         try {
             // Timer unit = minutes
             unitParams.each { p -> callSetParameter(dev, style, p as int, 1, 0) }
@@ -3054,8 +3060,8 @@ def pushHardwareSafety() {
             if (settings.hwForceDcMotorOff != false) {
                 try { callSetParameter(dev, style, 24, 1, 0) } catch (ignored) {}
             }
-            String note = (mins > requested) ? " — RAISED from ${requested}min (longest single cycle this instance drives here is ~${floorMin - 2}min)" : ""
-            String warn = (curMax > 0 && mins < curMax) ? " — ⚠ this lowers the device's current ${curMax}min; if another instance drives a longer relay on this controller, confirm this won't cut it short" : ""
+            String note = (mins > requested) ? " — RAISED to ${mins}min (safe floor, or a longer timer already on this shared controller — never lowered)" : ""
+            String warn = ""
             log_ << "${dev.displayName} (${model.name}, ${style} order): sent auto-off ${mins}min to P${autoOffParams.join('/P')}${note}${warn}"
             expectedByDev[dev.id as String] = mins
             ok++
