@@ -239,6 +239,7 @@ metadata {
     }
     preferences {
         input "ip", "string", title: "Thermostat IP address", required: true
+        input "mdnsServiceName", "string", title: "HomeKit mDNS service name (optional)", description: "Exact _hap._tcp name, for example Upstairs or Downstairs. Targets discovery when another accessory answers the general browse first. Leave blank to use a previously discovered name.", required: false
         if (!(state.paired==true || settings?.iosLtsk)) {   // settings is null at code-save time -> MUST use safe-nav (settings?.) or it NPEs and the save fails
             input "setupCode", "string", title: "HomeKit setup code — 8 digits, no dashes (e.g. 12345678). Enter and Save to pair.", required: false
         }
