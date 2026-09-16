@@ -62,7 +62,7 @@ mappings {
     path("/calendar.ics")  { action: [GET: "apiCalendar"] }
 }
 
-String getAppVersion() { return "v0.16.2 (2026-09)" }
+String getAppVersion() { return "v0.16.3 (2026-09)" }
 
 // Simple vs Advanced interface. Simple shows only zones, schedule, weather and
 // hardware safety; Advanced exposes everything (moisture, learning, sensors,
@@ -148,7 +148,7 @@ private String  wApiUnit()  { return isMetric() ? "kmh"     : "mph" }
     "sensor.pause.off" : [section: "Sensors",    default: '${app}: pause sensor ${sensor} clear',  defaultOff: true],
 
     // Hardware & watchdog
-    "hardware.push"    : [section: "Hardware",   default: '${app}: Zooz relay watchdog set to ${minutes}min on ${count} controller(s)'],
+    "hardware.push"    : [section: "Hardware",   default: '${app}: Zooz relay watchdog — sent ${minutes}min to ${count} controller(s), confirming at the hardware…'],
     "watchdog.stale"   : [section: "Hardware",   default: '${app}: ${sensor} unreachable for ${hours}h'],
     "relay.failed"     : [section: "Hardware",   default: '${app}: ⚠ ${zone} relay never confirmed ON — ${device} still reads "${reads}" after ${attempts} attempt(s). ${action}.'],
     "relay.recovered"  : [section: "Hardware",   default: '${app}: ${zone} relay only confirmed ON after ${attempts} retry(ies) — ${device}, mesh is marginal'],
@@ -982,7 +982,7 @@ def hardwarePage() {
             section("Push now") {
                 input name: "btnPushHardwareSafety", type: "button",
                       title: "Push recommended Z-Wave parameters to selected controller(s)"
-                paragraph "${state.hwLastPushSummary ?: 'No push performed yet.'}"
+                paragraph "${hwStatusHeadline()}\n\n${state.hwLastPushSummary ?: 'No push performed yet.'}"
             }
             section("Selected controllers") {
                 Map actByParent = (state.lastActuationByParent ?: [:]) as Map
@@ -1330,6 +1330,7 @@ def aboutPage() {
             paragraph "v0.12.2 — Fixed pause sensors reporting \"0s remaining\" and skipping ahead when they fired during a soak or the gap between zones. The schedule now tracks soak and between-zone phases as pausable too, so a pause that lands mid-soak reports the real soak time left and resumes that soak (valves stay off) instead of jumping to the next zone."
             paragraph "v0.13.4 — Saving the app now sends a confirmation notification summarizing the schedule: when it will start, how many zones, and the estimated total run time (water + soak). It also doubles as proof the new code is active — if you save and don't get it, the update didn't take."
             paragraph "v0.13.3 — Fixes two scheduling problems. (1) Multiple start times now ALL work: each was scheduled on the same internal handler, so Hubitat overwrote all but the last — only your final start time ran. Each window now has its own handler. (2) A run can no longer start twice from a single trigger: a re-entrancy guard ignores a duplicate scheduled invocation within 15 seconds (and logs it), preventing the double \"starting\" / double watering seen after editing a program near its run time. Re-save each sprinkler app once after updating so the new per-window schedules register."
+            paragraph "v0.16.3 — The hardware relay auto-off failsafe is now self-checking. Before, the app pushed the relays' built-in auto-off timers once and reported that it sent them — but a Z-Wave write that the relay silently dropped (or a relay that later lost its config) would sit un-armed indefinitely while the page still read \"pushed OK\". The hourly relay watchdog now re-confirms the auto-off is actually set on every relay and re-pushes any that drifted, and the Hardware-safety page shows a plain, time-stamped status (\"armed, confirmed 4m ago\" vs \"last confirmed 93 days ago\") read from the last real verification, not from a stale send. A push notification no longer claims the timers are set until the hardware confirms it."
             paragraph "v0.16.2 — Fixed a start-up race that produced a phantom manual run and a duplicated \"starting\" notification. The app announced the run and switched on the first zone before it had finished recording that a run was under way. Because that record is only saved once the current step completes, the handlers watching your zone and Run switches still believed nothing was running, so they mistook the app's own switch-on for someone pressing the switch — starting a stray 10-minute manual run on the first zone and kicking off the schedule a second time. The run is now claimed before anything is announced or switched on. Also fixed: the Run switch could ignore a genuine OFF press, because a leftover internal marker from an earlier run was never cleared and swallowed the next one."
             paragraph "v0.13.2 — Pause sensors NEVER skip a run, even a manual one. Previously a manual run (the Run switch or \"Run schedule now\" button) with a pause sensor active (e.g. water heater on) reported \"skipped — pause sensor active\"; now it holds and auto-starts when the sensor clears, exactly like a scheduled run. (A wet rain sensor still skips.)"
             paragraph "v0.13.1 — Pause-sensor hold now applies on EVERY scheduled start regardless of the pause/stop mode (that setting only governs what happens mid-run). Previously a sensor set to 'stop' mode would still skip the cycle at the scheduled start instead of holding."
@@ -3092,9 +3093,27 @@ def verifyHardwareSafety() {
         if (allok) { armed++; lines << "${dev.displayName}: ✓ auto-off ${vals.join('/')} min — armed" }
         else { gaps++; lines << "${dev.displayName}: ⚠ auto-off ${vals.join('/')} (want ${mins}) — did NOT take; flip the setParameter-order override above and push again" }
     }
+    boolean wasArmed = (state.hwArmed != false)   // true/unknown => previously considered OK
+    state.hwVerifiedAtMs = now()
+    state.hwArmed = (gaps == 0)
     state.hwLastPushSummary = "Verified @ ${nowString()} — ${armed} armed, ${gaps} with gaps\n" + lines.join("\n")
     log.info "${app.label}: hardware safety verify — ${armed} armed, ${gaps} gaps"
-    if (gaps > 0) notify("error", [detail: "hardware auto-off NOT set on ${gaps} relay controller(s) — open Hardware safety"])
+    // Alert only on the TRANSITION into a gap, so the hourly self-heal re-verify can't spam.
+    if (gaps > 0 && wasArmed) notify("error", [detail: "hardware auto-off NOT set on ${gaps} relay controller(s) — open Hardware safety"])
+    return gaps
+}
+
+// Honest, freshness-stamped headline for the Hardware-safety page. Reads from the last
+// VERIFY (not a push), so a stale "success" banner can never again read as current — the
+// exact trap where a 3-month-old push looked armed while a relay had silently drifted.
+private String hwStatusHeadline() {
+    Long vAt = state.hwVerifiedAtMs as Long
+    if (!vAt) return "⚠ NEVER CONFIRMED at the hardware — press Push; it self-verifies in ~15s."
+    long ageMin = (now() - vAt) / 60000L
+    String ago = ageMin < 60 ? "${ageMin}m ago" : (ageMin < 1440 ? "${(int)(ageMin / 60)}h ago" : "${(int)(ageMin / 1440)}d ago")
+    boolean stale = ageMin > 1560   // >26h: the hourly self-heal re-verify should refresh well within this
+    if (state.hwArmed == true) return stale ? "⚠ ARMED, but last confirmed ${ago} — re-checking hourly." : "✓ ARMED — all relays confirmed ${ago}."
+    return "⛔ NOT ARMED — a relay failed to confirm (last checked ${ago}). Self-heal is re-pushing."
 }
 
 // Parse the jtp10181 driver's "configVals" device data ("[1:1, 2:4, ...]")
@@ -4320,6 +4339,23 @@ def zen16Watchdog() {
     }
     state.watchdogProbeAt = probeAt
     state.watchdogAlerted = alerted
+    // Failsafe ARM check (not just reachability): confirm the hardware auto-off is STILL set
+    // on every relay. A dropped param write, or a device that lost its config, would otherwise
+    // sit un-armed indefinitely — it did, for ~3 months, while the page still read "pushed OK".
+    // Re-verify hourly and self-heal by re-pushing, capped so a truly un-armable relay can't loop.
+    if (state.hwExpectedMins && settings.hwZen16Parents) {
+        Integer gaps = verifyHardwareSafety()
+        if (gaps != null && gaps > 0) {
+            int heals = (state.hwSelfHealCount ?: 0) as int
+            if (heals < 6) {
+                state.hwSelfHealCount = heals + 1
+                log.warn "${app.label}: hardware auto-off drifted on ${gaps} controller(s) — re-pushing (heal ${heals + 1}/6)"
+                pushHardwareSafety()
+            }
+        } else {
+            state.hwSelfHealCount = 0
+        }
+    }
 }
 
 // Record that the app successfully drove a relay, attributed to the controller
