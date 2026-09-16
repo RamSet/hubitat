@@ -62,7 +62,7 @@ mappings {
     path("/calendar.ics")  { action: [GET: "apiCalendar"] }
 }
 
-String getAppVersion() { return "v0.16.3 (2026-09)" }
+String getAppVersion() { return "v0.16.4 (2026-09)" }
 
 // Simple vs Advanced interface. Simple shows only zones, schedule, weather and
 // hardware safety; Advanced exposes everything (moisture, learning, sensors,
@@ -1330,6 +1330,7 @@ def aboutPage() {
             paragraph "v0.12.2 — Fixed pause sensors reporting \"0s remaining\" and skipping ahead when they fired during a soak or the gap between zones. The schedule now tracks soak and between-zone phases as pausable too, so a pause that lands mid-soak reports the real soak time left and resumes that soak (valves stay off) instead of jumping to the next zone."
             paragraph "v0.13.4 — Saving the app now sends a confirmation notification summarizing the schedule: when it will start, how many zones, and the estimated total run time (water + soak). It also doubles as proof the new code is active — if you save and don't get it, the update didn't take."
             paragraph "v0.13.3 — Fixes two scheduling problems. (1) Multiple start times now ALL work: each was scheduled on the same internal handler, so Hubitat overwrote all but the last — only your final start time ran. Each window now has its own handler. (2) A run can no longer start twice from a single trigger: a re-entrancy guard ignores a duplicate scheduled invocation within 15 seconds (and logs it), preventing the double \"starting\" / double watering seen after editing a program near its run time. Re-save each sprinkler app once after updating so the new per-window schedules register."
+            paragraph "v0.16.4 — Fixed a phantom manual run that could start right as a schedule finished. When a zone's relay was slow to report OFF at end of run, the app's own tile-reconcile turned the zone tile back on to match the relay — and the handler watching those tiles mistook that self-generated echo for someone turning the zone on by hand, launching a stray manual run (which then relied on the 10-minute auto-off to end). The suppression flag that marks the app's own tile changes is now written to immediately-durable storage, so the watching handler always sees it and never re-fires the app's own echo as a manual start. Same class of fix as v0.16.2, on the end-of-run path."
             paragraph "v0.16.3 — The hardware relay auto-off failsafe is now self-checking. Before, the app pushed the relays' built-in auto-off timers once and reported that it sent them — but a Z-Wave write that the relay silently dropped (or a relay that later lost its config) would sit un-armed indefinitely while the page still read \"pushed OK\". The hourly relay watchdog now re-confirms the auto-off is actually set on every relay and re-pushes any that drifted, and the Hardware-safety page shows a plain, time-stamped status (\"armed, confirmed 4m ago\" vs \"last confirmed 93 days ago\") read from the last real verification, not from a stale send. A push notification no longer claims the timers are set until the hardware confirms it."
             paragraph "v0.16.2 — Fixed a start-up race that produced a phantom manual run and a duplicated \"starting\" notification. The app announced the run and switched on the first zone before it had finished recording that a run was under way. Because that record is only saved once the current step completes, the handlers watching your zone and Run switches still believed nothing was running, so they mistook the app's own switch-on for someone pressing the switch — starting a stray 10-minute manual run on the first zone and kicking off the schedule a second time. The run is now claimed before anything is announced or switched on. Also fixed: the Run switch could ignore a genuine OFF press, because a leftover internal marker from an earlier run was never cleared and swallowed the next one."
             paragraph "v0.13.2 — Pause sensors NEVER skip a run, even a manual one. Previously a manual run (the Run switch or \"Run schedule now\" button) with a pause sensor active (e.g. water heater on) reported \"skipped — pause sensor active\"; now it holds and auto-starts when the sensor clears, exactly like a scheduled run. (A wet rain sensor still skips.)"
@@ -3205,14 +3206,19 @@ def zoneChildSwitchEvent(evt) {
     // ignore an event that matches a command WE issued in the last few seconds.
     // A stale flag (e.g. left over from a previous run) can never swallow a real
     // user toggle, which is what made an off press get silently ignored before.
-    Map sup = (state.suppressZoneChild ?: [:]) as Map
+    // MUST be atomicState, not state: setZoneChildSwitch() sets the flag then commands
+    // the relay, and this handler fires from that command in a SEPARATE invocation. Plain
+    // `state` isn't persisted until the setting handler returns, so this read saw a stale
+    // map and mistook the app's own reconcile echo for a user toggle — the end-of-run
+    // phantom "MANUAL" run. atomicState writes through immediately, same as runClaimMs.
+    Map sup = (atomicState.suppressZoneChild ?: [:]) as Map
     long t = now()
     def entry = sup[zid.toString()]
     boolean suppressed = (entry instanceof List && entry[0] == evt.value && (t - (entry[1] as long)) < 4000)
     // Drop this zone's entry and prune any other expired ones so the map can't
     // accumulate stale flags.
     sup = sup.findAll { k, v -> k != zid.toString() && (v instanceof List) && (t - (v[1] as long)) < 4000 }
-    state.suppressZoneChild = sup
+    atomicState.suppressZoneChild = sup
     if (suppressed) return
     // During an active run the scheduler owns the relays. Don't fight per-event;
     // just reconcile every tile to its relay's real state shortly after.
@@ -3226,9 +3232,9 @@ private void setZoneChildSwitch(int zid, String value) {
     def ch = getZoneChildVs(zid)
     if (!ch) return
     if (ch.currentValue("switch") == value) return  // no change needed
-    Map sup = (state.suppressZoneChild ?: [:]) as Map
+    Map sup = (atomicState.suppressZoneChild ?: [:]) as Map
     sup[zid.toString()] = [value, now()]   // value + timestamp, honored only while fresh
-    state.suppressZoneChild = sup
+    atomicState.suppressZoneChild = sup    // atomicState so zoneChildSwitchEvent (a separate handler) sees this BEFORE the ch.on()/off() echo lands
     try { if (value == "on") ch.on() else ch.off() }
     catch (e) { log.warn "setZoneChildSwitch(${zid}, ${value}): ${e.message}" }
 }
