@@ -62,7 +62,7 @@ mappings {
     path("/calendar.ics")  { action: [GET: "apiCalendar"] }
 }
 
-String getAppVersion() { return "v0.16.4 (2026-09)" }
+String getAppVersion() { return "v0.16.5 (2026-09)" }
 
 // Simple vs Advanced interface. Simple shows only zones, schedule, weather and
 // hardware safety; Advanced exposes everything (moisture, learning, sensors,
@@ -152,6 +152,8 @@ private String  wApiUnit()  { return isMetric() ? "kmh"     : "mph" }
     "watchdog.stale"   : [section: "Hardware",   default: '${app}: ${sensor} unreachable for ${hours}h'],
     "relay.failed"     : [section: "Hardware",   default: '${app}: ⚠ ${zone} relay never confirmed ON — ${device} still reads "${reads}" after ${attempts} attempt(s). ${action}.'],
     "relay.recovered"  : [section: "Hardware",   default: '${app}: ${zone} relay only confirmed ON after ${attempts} retry(ies) — ${device}, mesh is marginal'],
+    "relay.offFailed"  : [section: "Hardware",   default: '${app}: ⛔ ${zone} did NOT turn OFF — ${device} still reads ON after ${attempts} attempt(s). WATER MAY STILL BE RUNNING — check the valve (the relay hardware auto-off will force it off).'],
+    "relay.offRecovered": [section: "Hardware",  default: '${app}: ${zone} confirmed OFF after ${attempts} retry(ies) — ${device}, mesh is marginal'],
 
     // Test / manual
     "test.run"         : [section: "Test",       default: '${app}: testing ${zone} for ${duration}', defaultOff: true],
@@ -1330,6 +1332,7 @@ def aboutPage() {
             paragraph "v0.12.2 — Fixed pause sensors reporting \"0s remaining\" and skipping ahead when they fired during a soak or the gap between zones. The schedule now tracks soak and between-zone phases as pausable too, so a pause that lands mid-soak reports the real soak time left and resumes that soak (valves stay off) instead of jumping to the next zone."
             paragraph "v0.13.4 — Saving the app now sends a confirmation notification summarizing the schedule: when it will start, how many zones, and the estimated total run time (water + soak). It also doubles as proof the new code is active — if you save and don't get it, the update didn't take."
             paragraph "v0.13.3 — Fixes two scheduling problems. (1) Multiple start times now ALL work: each was scheduled on the same internal handler, so Hubitat overwrote all but the last — only your final start time ran. Each window now has its own handler. (2) A run can no longer start twice from a single trigger: a re-entrancy guard ignores a duplicate scheduled invocation within 15 seconds (and logs it), preventing the double \"starting\" / double watering seen after editing a program near its run time. Re-save each sprinkler app once after updating so the new per-window schedules register."
+            paragraph "v0.16.5 — Turning a zone OFF is now verified, not assumed. The app confirmed a valve OPENED (retry + alert) but trusted every OFF command blindly — so a single dropped Z-Wave OFF could leave a valve open with nothing to close it, watering until someone noticed. Now, after a run ends, a manual run stops, or you hit Stop, the app reads each relay back; if one still reports ON it re-sends OFF, and if it still won't close it raises a loud alert ('WATER MAY STILL BE RUNNING — check the valve'). Pairs with the relay hardware auto-off as the last line of defense. Uses the same verify settings as the ON check — nothing new to configure."
             paragraph "v0.16.4 — Fixed a phantom manual run that could start right as a schedule finished. When a zone's relay was slow to report OFF at end of run, the app's own tile-reconcile turned the zone tile back on to match the relay — and the handler watching those tiles mistook that self-generated echo for someone turning the zone on by hand, launching a stray manual run (which then relied on the 10-minute auto-off to end). The suppression flag that marks the app's own tile changes is now written to immediately-durable storage, so the watching handler always sees it and never re-fires the app's own echo as a manual start. Same class of fix as v0.16.2, on the end-of-run path."
             paragraph "v0.16.3 — The hardware relay auto-off failsafe is now self-checking. Before, the app pushed the relays' built-in auto-off timers once and reported that it sent them — but a Z-Wave write that the relay silently dropped (or a relay that later lost its config) would sit un-armed indefinitely while the page still read \"pushed OK\". The hourly relay watchdog now re-confirms the auto-off is actually set on every relay and re-pushes any that drifted, and the Hardware-safety page shows a plain, time-stamped status (\"armed, confirmed 4m ago\" vs \"last confirmed 93 days ago\") read from the last real verification, not from a stale send. A push notification no longer claims the timers are set until the hardware confirms it."
             paragraph "v0.16.2 — Fixed a start-up race that produced a phantom manual run and a duplicated \"starting\" notification. The app announced the run and switched on the first zone before it had finished recording that a run was under way. Because that record is only saved once the current step completes, the handlers watching your zone and Run switches still believed nothing was running, so they mistook the app's own switch-on for someone pressing the switch — starting a stray 10-minute manual run on the first zone and kicking off the schedule a second time. The run is now claimed before anything is announced or switched on. Also fixed: the Run switch could ignore a genuine OFF press, because a leftover internal marker from an earlier run was never cleared and swallowed the next one."
@@ -2417,6 +2420,11 @@ def finishRun() {
     }
     notify("schedule.finish", finCtx)
     runIn(3, "syncAllZoneChildren")   // clear every zone tile after the run
+    // Safety sweep: confirm EVERY zone valve actually closed at end of run. The last
+    // cycle's off is fire-and-forget; a dropped one would leave a valve open with the
+    // run "finished" and nothing left to close it.
+    Integer zn = (settings.zoneCountPref ?: 0) as int
+    for (int i = 1; i <= zn; i++) { if (settings."zone${i}Switch") armRelayOffConfirm(i, "finish") }
     publishDashboardState()
 }
 
@@ -2434,6 +2442,7 @@ def stopAllZones() {
         if (sw) try { sw.off() } catch (e) { log.warn "stop zone ${i}: ${e.message}" }
         unsubscribeZoneMoisture(i)
         setZoneChildSwitch(i, "off")
+        if (sw) armRelayOffConfirm(i, "stop")   // confirm every valve closed on a stop/abort
     }
     state.manualActive = [:]
     state.running = false
@@ -3318,6 +3327,7 @@ def manualZoneStop(int zid, boolean fromTimeout = false) {
     String zname = settings."zone${zid}Name" ?: "Zone ${zid}"
     if (sw) try { sw.off() } catch (e) { log.warn "manualZoneStop relay off: ${e.message}" }
     setZoneChildSwitch(zid, "off")
+    armRelayOffConfirm(zid, "manual")   // prove the valve actually closed — this is the path that ran ~16 min on 2026-09-16
     if (fromTimeout) {
         if (descTextEnable) log.info "${app.label}: MANUAL ■ ${zname} (timer)"
         notify("zone.manualTimeout", [zone: zname])
@@ -4452,6 +4462,69 @@ private String controllerKeyFor(sw) {
 // two manual zones running at once can't clobber each other's verification the
 // way a single shared state slot would. stage "poke" asks the relay to report,
 // stage "read" believes what it says.
+// ── OFF confirmation — prove the valve actually CLOSED ───────────────────────
+// The dangerous asymmetry that let a zone "run all day": ON was retried and
+// confirmed, but OFF was fire-and-forget. A dropped OFF (or a relay that ignores
+// it) left a valve open with nothing to close it. This mirrors the ON machinery —
+// poke → read → retry → LOUD alert — so a stuck-open valve pages you in seconds
+// instead of waiting on the hardware auto-off. Skips a zone that's legitimately on
+// again (a new run reached it, or a fresh manual start).
+private void armRelayOffConfirm(Integer zid, String ctx, Integer tries = 0, String stage = "poke") {
+    if (settings.relayVerifyEnable == false) return
+    if (!zid || !settings."zone${zid}Switch") return
+    Integer delay = (stage == "poke") ? 3 : relayVerifyDelaySec()
+    runIn(delay, "relayOffConfirmCheck",
+          [data: [zid: zid, ctx: ctx, tries: tries, stage: stage], overwrite: false])
+}
+
+def relayOffConfirmCheck(data) {
+    Integer zid = (data?.zid ?: 0) as int
+    if (zid <= 0) return
+    String ctx = (data?.ctx ?: "stop") as String
+    String stage = (data?.stage ?: "read") as String
+    def sw = settings."zone${zid}Switch"
+    if (!sw) return
+    String zname = settings."zone${zid}Name" ?: "Zone ${zid}"
+    Integer tries = (data?.tries ?: 0) as int
+
+    // Stale guard: the zone is legitimately ON again → this off-confirm is about a
+    // valve we deliberately opened; don't retry it off or false-alarm.
+    if (state.running == true && ((state.currentZoneId ?: 0) as int) == zid && state.currentPhaseType == "water") return
+    if (((state.manualActive ?: [:]) as Map).containsKey(zid.toString())) return
+
+    // Stage 1 — ask the relay to report its own state before we read it.
+    if (stage == "poke") { if (!relayPoke(sw, zname)) return; armRelayOffConfirm(zid, ctx, tries, "read"); return }
+
+    String reads = null
+    try { reads = sw.currentValue("switch") as String } catch (e) { reads = null }
+
+    if (reads == "off") {
+        if (tries > 0) {
+            log.warn "${app.label}: ${zname} relay confirmed OFF only after ${tries} retry(ies) — mesh is marginal"
+            notify("relay.offRecovered", [zone: zname, attempts: tries, device: sw.displayName])
+        }
+        return
+    }
+    if (reads == null) {
+        log.warn "${app.label}: ${zname} — ${sw.displayName} reported no switch state, so OFF can't be confirmed; skipped"
+        return
+    }
+
+    // reads == "on" — the valve did NOT close. Retry, then alarm LOUDLY.
+    Integer maxTries = Math.max(1, (settings.relayVerifyRetries ?: 2) as int)   // OFF always gets at least one retry
+    if (tries < maxTries) {
+        log.warn "${app.label}: ${zname} relay still reads 'on' after OFF — re-sending OFF (retry ${tries + 1}/${maxTries})"
+        try { sw.off() } catch (e) { log.warn "relay retry off: ${e.message}" }
+        setZoneChildSwitch(zid, "off")
+        armRelayOffConfirm(zid, ctx, tries + 1, "poke")
+        return
+    }
+
+    log.error "${app.label}: ${zname} relay did NOT confirm OFF — ${sw.displayName} still reads 'on' after ${maxTries + 1} attempt(s). WATER MAY STILL BE RUNNING."
+    notify("relay.offFailed", [zone: zname, device: sw.displayName, attempts: maxTries + 1])
+    try { sw.off() } catch (e) { }   // one final attempt; the hardware auto-off is the true last line
+}
+
 private void armRelayConfirm(Integer zid, String ctx, Integer tries = 0, String stage = "poke") {
     if (settings.relayVerifyEnable == false) return
     if (!zid || !settings."zone${zid}Switch") return
