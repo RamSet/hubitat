@@ -62,7 +62,7 @@ mappings {
     path("/calendar.ics")  { action: [GET: "apiCalendar"] }
 }
 
-String getAppVersion() { return "v0.16.7 (2026-09)" }
+String getAppVersion() { return "v0.16.8 (2026-09)" }
 
 // Simple vs Advanced interface. Simple shows only zones, schedule, weather and
 // hardware safety; Advanced exposes everything (moisture, learning, sensors,
@@ -985,6 +985,9 @@ def hardwarePage() {
                 input name: "btnPushHardwareSafety", type: "button",
                       title: "Push recommended Z-Wave parameters to selected controller(s)"
                 paragraph "${hwStatusHeadline()}\n\n${state.hwLastPushSummary ?: 'No push performed yet.'}"
+                input name: "hwSelfHeal", type: "bool", defaultValue: true,
+                      title: "Keep this app's hourly auto-off verify + re-push ON"
+                paragraph "Turn OFF to let the ZEN16 driver own the hardware auto-off (set it in each relay's preferences, default 15 min). The app then stops verifying/pushing the timer here — which also avoids two schedule instances fighting over a shared controller — but still watches these controllers for going offline."
             }
             section("Selected controllers") {
                 Map actByParent = (state.lastActuationByParent ?: [:]) as Map
@@ -1332,6 +1335,7 @@ def aboutPage() {
             paragraph "v0.12.2 — Fixed pause sensors reporting \"0s remaining\" and skipping ahead when they fired during a soak or the gap between zones. The schedule now tracks soak and between-zone phases as pausable too, so a pause that lands mid-soak reports the real soak time left and resumes that soak (valves stay off) instead of jumping to the next zone."
             paragraph "v0.13.4 — Saving the app now sends a confirmation notification summarizing the schedule: when it will start, how many zones, and the estimated total run time (water + soak). It also doubles as proof the new code is active — if you save and don't get it, the update didn't take."
             paragraph "v0.13.3 — Fixes two scheduling problems. (1) Multiple start times now ALL work: each was scheduled on the same internal handler, so Hubitat overwrote all but the last — only your final start time ran. Each window now has its own handler. (2) A run can no longer start twice from a single trigger: a re-entrancy guard ignores a duplicate scheduled invocation within 15 seconds (and logs it), preventing the double \"starting\" / double watering seen after editing a program near its run time. Re-save each sprinkler app once after updating so the new per-window schedules register."
+            paragraph "v0.16.8 — You can now hand the hardware auto-off entirely to the ZEN16 driver. Under Hardware safety there's a new switch, 'Keep this app's hourly auto-off verify + re-push ON'; turn it OFF and the app stops managing the relay auto-off (the ZEN16 driver owns it — it now defaults each relay to a 15-min auto-off), while the app still watches the controllers for going offline. This is the clean fix when two schedules share a controller: let the driver hold one value per relay instead of two apps pushing over each other. Leaving the switch ON keeps the previous behavior."
             paragraph "v0.16.7 — The hardware auto-off is now a hard cap: the app pushes exactly the value you set and never changes it on its own. Two behaviors were removed — it no longer auto-raises the timer to cover a longer zone, and no longer ratchets it up to match another instance or a value already on the device (the 0.16.6 behavior). The timer only changes when you change the setting. Trade-off: if you set the cap BELOW a zone's actual run time the hardware will cut that run short and the app will only warn you, not fix it — so pick a value comfortably above your longest single watering cycle. If two schedules share one controller, set them to the SAME cap, or each will keep re-asserting its own."
             paragraph "v0.16.6 — Fixed the hardware failsafe fighting itself when two schedule instances share a relay controller. The auto-off push writes to every relay on a controller, so if one instance drove a short cap and another a long one on the same device (e.g. a lawn schedule and a veggie schedule both on the same ZEN16), each would overwrite the other — and the new hourly self-heal turned that into an hourly tug-of-war with 'not set' alerts from both. The push now never lowers a relay below the value already on the device, so a shared controller settles on the longest cap any instance needs (safe for everyone; it just can't be lowered from the app without clearing the device's params first). If your schedules use separate controllers this changes nothing."
             paragraph "v0.16.5 — Turning a zone OFF is now verified, not assumed. The app confirmed a valve OPENED (retry + alert) but trusted every OFF command blindly — so a single dropped Z-Wave OFF could leave a valve open with nothing to close it, watering until someone noticed. Now, after a run ends, a manual run stops, or you hit Stop, the app reads each relay back; if one still reports ON it re-sends OFF, and if it still won't close it raises a loud alert ('WATER MAY STILL BE RUNNING — check the valve'). Pairs with the relay hardware auto-off as the last line of defense. Uses the same verify settings as the ON check — nothing new to configure."
@@ -4360,7 +4364,7 @@ def zen16Watchdog() {
     // on every relay. A dropped param write, or a device that lost its config, would otherwise
     // sit un-armed indefinitely — it did, for ~3 months, while the page still read "pushed OK".
     // Re-verify hourly and self-heal by re-pushing, capped so a truly un-armable relay can't loop.
-    if (state.hwExpectedMins && settings.hwZen16Parents) {
+    if (settings.hwSelfHeal != false && state.hwExpectedMins && settings.hwZen16Parents) {
         Integer gaps = verifyHardwareSafety()
         if (gaps != null && gaps > 0) {
             int heals = (state.hwSelfHealCount ?: 0) as int
