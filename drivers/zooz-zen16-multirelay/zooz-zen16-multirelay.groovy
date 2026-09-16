@@ -14,6 +14,14 @@
 
 Changelog:
 
+## [1.3.2-rs5] - 2026-09-16 (RamSet fork)
+  - Auto Turn-Off R1/R2/R3 now DEFAULT to 15 minutes (was 0/disabled), so a ZEN16
+    driving sprinkler valves gets a hardware failsafe out of the box — the relay
+    closes itself after 15 min even if the hub/mesh/app dies, no app push needed.
+    This makes the driver (not the app) the owner of the auto-off, which also ends
+    the two-app-instances-fighting-over-one-controller problem. Set a relay's
+    Auto-Off TIME to 0 to disable it for a non-valve load (light/pump/lock).
+
 ## [1.3.2-rs4] - 2026-08-21 (RamSet fork)
   - Added "Invert Sw<N> Sensor Reporting" preference, shown for any Sw input set
     to a sensor type. Normally-closed sensors (most irrigation rain sensors open
@@ -87,7 +95,7 @@ Changelog:
 
 import groovy.transform.Field
 
-@Field static final String VERSION = "1.3.2-rs4"
+@Field static final String VERSION = "1.3.2-rs5"
 @Field static final String DRIVER = "Zooz-ZEN16"
 @Field static final String COMM_LINK = "https://community.hubitat.com/t/zooz-relays-advanced/98194"
 @Field static final Map deviceModelNames = ["A000:A00A":"ZEN16"]
@@ -293,7 +301,7 @@ void debugShowVars() {
 	//R1 Timers
 	timerOffTime1: [ num:6,
 		title: "Auto Turn-Off R1: TIME",
-		size: 4, defaultVal: 0,
+		size: 4, defaultVal: 15,   // 15-min hardware failsafe default (sized for sprinkler valves); set 0 to disable for a non-valve load
 		range: "0..65535"
 	],
 	timerOffUnits1: [ num:15,
@@ -314,7 +322,7 @@ void debugShowVars() {
 	//R2 Timers
 	timerOffTime2: [ num:8,
 		title: "Auto Turn-Off R2: TIME",
-		size: 4, defaultVal: 0,
+		size: 4, defaultVal: 15,   // 15-min hardware failsafe default (sized for sprinkler valves); set 0 to disable for a non-valve load
 		range: "0..65535"
 	],
 	timerOffUnits2: [ num:17,
@@ -335,7 +343,7 @@ void debugShowVars() {
 	//R3 Timers
 	timerOffTime3: [ num:10,
 		title: "Auto Turn-Off R3: TIME",
-		size: 4, defaultVal: 0,
+		size: 4, defaultVal: 15,   // 15-min hardware failsafe default (sized for sprinkler valves); set 0 to disable for a non-valve load
 		range: "0..65535"
 	],
 	timerOffUnits3: [ num:19,
