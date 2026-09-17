@@ -3122,6 +3122,7 @@ def verifyHardwareSafety() {
 // VERIFY (not a push), so a stale "success" banner can never again read as current — the
 // exact trap where a 3-month-old push looked armed while a relay had silently drifted.
 private String hwStatusHeadline() {
+    if (settings.hwSelfHeal == false) return "ℹ Managed by the ZEN16 driver — this app no longer verifies or pushes the auto-off. Set it in each relay's driver preferences (driver default 15 min) and check the device's syncStatus."
     Long vAt = state.hwVerifiedAtMs as Long
     if (!vAt) return "⚠ NEVER CONFIRMED at the hardware — press Push; it self-verifies in ~15s."
     long ageMin = (now() - vAt) / 60000L
