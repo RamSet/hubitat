@@ -50,8 +50,13 @@ def mainPage() {
                   title: "Illuminance sensor(s) that trigger evaluation", multiple: true, required: true
             input "luxThreshold", "number",
                   title: "Act when illuminance is at or below (lux)", defaultValue: 200, required: true
-            input "sunsetOffset", "number",
-                  title: "Start this many minutes BEFORE sunset", defaultValue: 15, required: true
+            input "useSunsetGate", "bool",
+                  title: "Wait for the before-sunset gate (off = lower on lux alone, any time of day)",
+                  defaultValue: true, submitOnChange: true
+            if (settings.useSunsetGate != false) {
+                input "sunsetOffset", "number",
+                      title: "Start this many minutes BEFORE sunset", defaultValue: 15, required: true
+            }
         }
         section("<b>Room devices</b>") {
             input "blinds", "capability.windowShade",
@@ -166,9 +171,11 @@ private String currentStatus() {
     rows << row("Armed for tonight",
                 armed ? pill("yes", "green") : pill("no — already acted", "grey"))
 
+    boolean gateOff = (settings.useSunsetGate == false)
     boolean dark = lightSensors ? isDark() : false
-    rows << row("Dark now (dusk gate)",
-                lightSensors ? (dark ? pill("yes", "indigo") : pill("no", "amber")) : pill("—", "grey"))
+    rows << row(gateOff ? "Dusk gate" : "Dark now (dusk gate)",
+                gateOff ? pill("off — lux only", "grey")
+                        : (lightSensors ? (dark ? pill("yes", "indigo") : pill("no", "amber")) : pill("—", "grey")))
 
     rows << row("Waiting for window to close",
                 state.waitingForWindow ? pill("yes", "amber") : pill("no", "grey"))
@@ -240,6 +247,9 @@ private void notify(String msg) {
 
 // Dark = NOT between sunrise and (sunset - offset). Handles the overnight wrap.
 private boolean isDark() {
+    // Sunset/before-sunset gate is optional: when off, the lux threshold alone decides,
+    // so the blind can lower whenever it's dark enough — at any time of day.
+    if (settings.useSunsetGate == false) return true
     // Negative offset moves sunset earlier, e.g. -15 => "15 minutes before sunset".
     def sun = getSunriseAndSunset(sunsetOffset: "-${(sunsetOffset ?: 0)}")
     def now = new Date()
