@@ -14,6 +14,13 @@
 
 Changelog:
 
+## [1.3.2-rs6] - 2026-09-16 (RamSet fork)
+  - Power-Failure behavior (P1) now DEFAULTS to "All relays turned OFF" (was
+    "restore last state"). Safe for valves: a relay that was ON when power dropped
+    comes back OFF instead of watering unattended after a blip. Also prevents the
+    automatic configure-on-version-change from reverting an app-set OFF back to
+    restore-last. Change per-device for a load that should restore its state.
+
 ## [1.3.2-rs5] - 2026-09-16 (RamSet fork)
   - Auto Turn-Off R1/R2/R3 now DEFAULT to 15 minutes (was 0/disabled), so a ZEN16
     driving sprinkler valves gets a hardware failsafe out of the box — the relay
@@ -95,7 +102,7 @@ Changelog:
 
 import groovy.transform.Field
 
-@Field static final String VERSION = "1.3.2-rs5"
+@Field static final String VERSION = "1.3.2-rs6"
 @Field static final String DRIVER = "Zooz-ZEN16"
 @Field static final String COMM_LINK = "https://community.hubitat.com/t/zooz-relays-advanced/98194"
 @Field static final Map deviceModelNames = ["A000:A00A":"ZEN16"]
@@ -222,7 +229,7 @@ void debugShowVars() {
 [
 	powerFailure: [ num:1,
 		title: "On / Off Status After Power Failure",
-		size: 1, defaultVal: 1,
+		size: 1, defaultVal: 0,   // default OFF (was 1=restore-last): safe for valves — a relay ON at power loss comes back OFF, not watering unattended after a blip. Change per-device for a load that should restore.
 		options: [
 			0:"All relays turned OFF",
 			1:"All relays restores last state",
