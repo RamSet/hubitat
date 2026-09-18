@@ -62,7 +62,7 @@ mappings {
     path("/calendar.ics")  { action: [GET: "apiCalendar"] }
 }
 
-String getAppVersion() { return "v0.16.8 (2026-09)" }
+String getAppVersion() { return "v0.16.9 (2026-09)" }
 
 // Simple vs Advanced interface. Simple shows only zones, schedule, weather and
 // hardware safety; Advanced exposes everything (moisture, learning, sensors,
@@ -985,7 +985,7 @@ def hardwarePage() {
                 input name: "btnPushHardwareSafety", type: "button",
                       title: "Push recommended Z-Wave parameters to selected controller(s)"
                 paragraph "${hwStatusHeadline()}\n\n${state.hwLastPushSummary ?: 'No push performed yet.'}"
-                input name: "hwSelfHeal", type: "bool", defaultValue: true,
+                input name: "hwSelfHeal", type: "bool", defaultValue: true, submitOnChange: true,
                       title: "Keep this app's hourly auto-off verify + re-push ON"
                 paragraph "Turn OFF to let the ZEN16 driver own the hardware auto-off (set it in each relay's preferences, default 15 min). The app then stops verifying/pushing the timer here — which also avoids two schedule instances fighting over a shared controller — but still watches these controllers for going offline."
             }
@@ -1335,6 +1335,7 @@ def aboutPage() {
             paragraph "v0.12.2 — Fixed pause sensors reporting \"0s remaining\" and skipping ahead when they fired during a soak or the gap between zones. The schedule now tracks soak and between-zone phases as pausable too, so a pause that lands mid-soak reports the real soak time left and resumes that soak (valves stay off) instead of jumping to the next zone."
             paragraph "v0.13.4 — Saving the app now sends a confirmation notification summarizing the schedule: when it will start, how many zones, and the estimated total run time (water + soak). It also doubles as proof the new code is active — if you save and don't get it, the update didn't take."
             paragraph "v0.13.3 — Fixes two scheduling problems. (1) Multiple start times now ALL work: each was scheduled on the same internal handler, so Hubitat overwrote all but the last — only your final start time ran. Each window now has its own handler. (2) A run can no longer start twice from a single trigger: a re-entrancy guard ignores a duplicate scheduled invocation within 15 seconds (and logs it), preventing the double \"starting\" / double watering seen after editing a program near its run time. Re-save each sprinkler app once after updating so the new per-window schedules register."
+            paragraph "v0.16.9 — Two fixes. (1) The end-of-run phantom manual run is closed for good: as a schedule finishes, the relays are still reporting their final OFF, and the app's tile-reconcile could echo a tile back on just as the 'run active' guard dropped — which got read as a hand-triggered zone and started a stray manual run (v0.16.4 narrowed this but a ~4s window could still lapse under load). There's now a 20-second grace window after a run ends during which any tile change is treated as reconcile, never a manual start. (2) The 'Keep this app's hourly auto-off verify + re-push ON' switch now saves the moment you toggle it (it previously needed a full page save, so turning it off could silently not take)."
             paragraph "v0.16.8 — You can now hand the hardware auto-off entirely to the ZEN16 driver. Under Hardware safety there's a new switch, 'Keep this app's hourly auto-off verify + re-push ON'; turn it OFF and the app stops managing the relay auto-off (the ZEN16 driver owns it — it now defaults each relay to a 15-min auto-off), while the app still watches the controllers for going offline. This is the clean fix when two schedules share a controller: let the driver hold one value per relay instead of two apps pushing over each other. Leaving the switch ON keeps the previous behavior."
             paragraph "v0.16.7 — The hardware auto-off is now a hard cap: the app pushes exactly the value you set and never changes it on its own. Two behaviors were removed — it no longer auto-raises the timer to cover a longer zone, and no longer ratchets it up to match another instance or a value already on the device (the 0.16.6 behavior). The timer only changes when you change the setting. Trade-off: if you set the cap BELOW a zone's actual run time the hardware will cut that run short and the app will only warn you, not fix it — so pick a value comfortably above your longest single watering cycle. If two schedules share one controller, set them to the SAME cap, or each will keep re-asserting its own."
             paragraph "v0.16.6 — Fixed the hardware failsafe fighting itself when two schedule instances share a relay controller. The auto-off push writes to every relay on a controller, so if one instance drove a short cap and another a long one on the same device (e.g. a lawn schedule and a veggie schedule both on the same ZEN16), each would overwrite the other — and the new hourly self-heal turned that into an hourly tug-of-war with 'not set' alerts from both. The push now never lowers a relay below the value already on the device, so a shared controller settles on the longest cap any instance needs (safe for everyone; it just can't be lowered from the app without clearing the device's params first). If your schedules use separate controllers this changes nothing."
@@ -2414,6 +2415,7 @@ def finishRun() {
     }
     recordRunFinish("completed")
     state.running = false
+    atomicState.runEndedMs = now()   // open the post-run grace window (see zoneChildSwitchEvent)
     clearRunClaim()
     syncRunControlSwitch()   // reflect "idle" on the HomeKit control switch
     state.currentZoneIdx = 0
@@ -2452,6 +2454,7 @@ def stopAllZones() {
     }
     state.manualActive = [:]
     state.running = false
+    atomicState.runEndedMs = now()   // post-run grace window (see zoneChildSwitchEvent)
     clearRunClaim()
     state.paused = false
     state.pausedRemainingSec = 0
@@ -3235,6 +3238,12 @@ def zoneChildSwitchEvent(evt) {
     sup = sup.findAll { k, v -> k != zid.toString() && (v instanceof List) && (t - (v[1] as long)) < 4000 }
     atomicState.suppressZoneChild = sup
     if (suppressed) return
+    // Grace window after a run ENDS: the relays are still settling their reported state, and the
+    // reconcile can echo a tile back on. Treat any change in this window as a reconcile, never a
+    // manual start — so an end-of-run echo can't fire a phantom manual run even when the per-event
+    // suppress flag's short (4s) window has already lapsed under end-of-run load (the actual cause
+    // of the 2026-09-18 phantom "MANUAL Back Play Area").
+    if ((now() - (atomicState.runEndedMs ?: 0L)) < 20000L) { runIn(2, "syncAllZoneChildren"); return }
     // During an active run the scheduler owns the relays. Don't fight per-event;
     // just reconcile every tile to its relay's real state shortly after.
     if (state.running || runClaimed()) { runIn(2, "syncAllZoneChildren"); return }
