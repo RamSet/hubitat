@@ -17,12 +17,13 @@
  *   this driver (HPM does it automatically).
  *
  * Author: RamSet
- * Version: 0.19.6
+ * Version: 0.19.7
  * Date: 2026-08-12
  *
  * REQUIRES library: RamSet.hapCore (installed automatically by Hubitat Package Manager).
  *
  * Changelog:
+ *  v0.19.7 - Add optional preference for mDNS service name to improve connectivity fallback.
  *  v0.19.6 - Passive held session by default. The liveness-probe interval now defaults to 0 (off). With hapCore's
  *           TCP keepalive (Hubitat 2.5.1.145+) holding the socket, the frequent probe is no longer needed — and it
  *           was the cause of the ~10-minute silent-drop/reconnect cycle: proven that turning it off lets the
@@ -239,6 +240,7 @@ metadata {
     }
     preferences {
         input "ip", "string", title: "Thermostat IP address", required: true
+        input "mdnsServiceName", "string", title: "HomeKit mDNS service name (optional)", description: "Exact _hap._tcp name, for example Upstairs or Downstairs. Enables targeted multicast fallback after IP-directed discovery fails. Leave blank to use a previously discovered name. The configured IP remains the primary endpoint.", required: false
         if (!(state.paired==true || settings?.iosLtsk)) {   // settings is null at code-save time -> MUST use safe-nav (settings?.) or it NPEs and the save fails
             input "setupCode", "string", title: "HomeKit setup code — 8 digits, no dashes (e.g. 12345678). Enter and Save to pair.", required: false
         }
