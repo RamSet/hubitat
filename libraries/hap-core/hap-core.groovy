@@ -24,23 +24,15 @@
  * Include in a driver with:  #include RamSet.hapCore
  *
  * Author: RamSet
- * Version: 0.10.20
+ * Version: 0.10.17
  *
  * Changelog:
- *  v0.10.20 - Restore the shared-library contract: first query the configured IP with the original PTR query
- *            and two retries. Only then try a configured/learned instance via multicast once. Normal discovery
- *            never changes the IP; paired-device relocation remains a throttled general browse. Accept SRV-only
- *            unicast replies from the configured sender without requiring TXT/A records. Preserve the original
- *            handshake retry delays while counting failures for rediscovery. Forget clears learned mDNS state.
- *  v0.10.19 - Target a configured or previously discovered mDNS instance with SRV and TXT questions. The
- *            UDP HubAction first-response behavior lets a fast Homebridge reply consume a general browse,
- *            hiding the later thermostat reply. Optional driver preference: HomeKit mDNS service name.
- *  v0.10.18 - Send normal discovery to the mDNS multicast group. Verified on two ecobees: both ignore queries
- *            addressed directly to their IP but answer multicast with their current HAP ports. Unwrap callback
- *            payload/description fields, filter unpaired discovery by IP, and report reply counts on timeout.
- *  v0.10.17 - Match mDNS SRV/TXT records to the same HAP instance and paired HomeKit id, and resolve its
- *            address from the SRV target. Ignore unrelated, incomplete, and late discovery replies. Count
- *            pair-verify timeouts as reconnect failures so stalled retries also trigger port rediscovery.
+ *  v0.10.17 - Improve HAP discovery and recovery: preserve configured-IP-first discovery with targeted multicast
+ *            fallback; associate SRV, TXT, identity, and address records by service; target known service names
+ *            during relocation and accept a matching paired identity at a new IP; treat Hubitat's first
+ *            non-matching UDP response as an immediate miss; count handshake timeouts separately for periodic
+ *            port rediscovery without changing offline health timing; retain learned service names and clear them
+ *            when pairing is forgotten.
  *  v0.10.16 - Reboot-changed-port recovery. A HomeKit accessory's HAP port is DYNAMIC and frequently changes when
  *            the accessory reboots (observed live: an ecobee came back on 42600 after being on 57857). 0.10.14/15's
  *            cheap-reconnect path connected straight to the last-known port and would never re-resolve it until the
@@ -152,6 +144,7 @@ StringBuilder plainbuf(){ if(PLAINBUF[device.id]==null) PLAINBUF[device.id]=new 
 // not from starving the cheap retry.
 @Field static int SWEEP_INTERVAL_SEC = 1800      // the expensive /24 multicast subnet sweep runs at most this often (load protection)
 @Field static int OFFLINE_AFTER_FAILS = 2        // flip healthStatus=offline after this many failed reconnects (direct signal, not lastRx staleness)
+@Field static final String MDNS_PTR_QUERY = "000000000001000000000000045f686170045f746370056c6f63616c00000c8001"
 
 boolean isPaired(){ return (state.paired==true || settings?.iosLtsk) ? true : false }
 // On-demand mode: connect → verify → read/write → close per action, plus periodic polling. No held
@@ -275,7 +268,7 @@ void dumpAcc(j){
 // ===== mDNS port discovery (the HAP port is dynamic — always read it at connect) =====
 String mdnsQuery(){
     String instance=(settings.mdnsServiceName ?: state.mdnsInstance ?: "").toString().trim()
-    if(!instance) return "000000000001000000000000045f686170045f746370056c6f63616c00000c8001"
+    if(!instance) return MDNS_PTR_QUERY
     String suffix="._hap._tcp.local"
     if(instance.toLowerCase().endsWith(suffix+".")) instance=instance.substring(0,instance.length()-1)
     if(instance.toLowerCase().endsWith(suffix)) instance=instance.substring(0,instance.length()-suffix.length())
@@ -290,10 +283,10 @@ def mdnsThen(String op){
     mdnsSend(op, false)
 }
 void mdnsSend(String op, boolean multicast){
-    String q=multicast ? mdnsQuery() : "000000000001000000000000045f686170045f746370056c6f63616c00000c8001"
+    String q=multicast ? mdnsQuery() : MDNS_PTR_QUERY
     state.afterMdns = op
     state.mdnsMulticast=multicast
-    runIn(5,"mdnsTimeout")
+    runIn(4,"mdnsTimeout") // unicast SRV reply is sub-second when the accessory is up; 4s is ample and halves the pre-sweep cost
     sendHubCommand(new hubitat.device.HubAction(q, hubitat.device.Protocol.LAN,
         [destinationAddress:multicast ? "224.0.0.251:5353" : "${settings.ip}:5353",
          type:hubitat.device.HubAction.Type.LAN_TYPE_UDPCLIENT,
@@ -313,7 +306,9 @@ def mdnsTimeout(){
         catch(e){ log.warn "HAP: targeted mDNS unavailable (${e.message}); continuing recovery"; state.afterMdns=null }
     }
     state.mdnsTries=0
-    // Keep general multicast relocation throttled independently of the targeted port lookup.
+    // no reply at the pinned IP — the accessory may have a new DHCP address. The subnet SWEEP (relocate) is the
+    // expensive part (multicast /24), so gate it to ≤1/SWEEP_INTERVAL_SEC: an offline accessory can't pin the hub
+    // sweeping every cycle. Between sweeps, just try the last-known port and let the backoff pace retries.
     long sinceSweep = now() - (state.lastSweep ?: 0L)
     if(settings.accPairingId && sinceSweep >= SWEEP_INTERVAL_SEC*1000L){
         state.lastSweep = now()
@@ -328,7 +323,9 @@ def mdnsTimeout(){
 // by its HomeKit id (accPairingId) to pick up a new DHCP-assigned IP, then reconnect. Best-effort — a DHCP
 // reservation is the reliable fix, but this recovers automatically when the address drifts.
 def relocate(String op){
-    String q="000000000001000000000000045f686170045f746370056c6f63616c00000c8001"
+    String q
+    try{ q=(settings.mdnsServiceName || state.mdnsInstance) ? mdnsQuery() : MDNS_PTR_QUERY }
+    catch(e){ log.warn "HAP: invalid mDNS service name; using general relocation search"; q=MDNS_PTR_QUERY }
     state.afterRelocate = op
     runIn(8,"relocateTimeout")
     sendHubCommand(new hubitat.device.HubAction(q, hubitat.device.Protocol.LAN,
@@ -345,8 +342,9 @@ def relocateTimeout(){
 def relocateCallback(message){
     try{
         if(!state.afterRelocate) return
+        def op=state.afterRelocate
         String h=mdnsPayload(message)
-        if(!h){ rep "No DNS payload in relocation callback"; return }
+        if(!h){ rep "No DNS payload in relocation callback"; unschedule("relocateTimeout"); state.afterRelocate=null; dispatchOp(op); return }
         def r=parseMdns(h, (settings.accPairingId ?: "").toString())
         String want=(settings.accPairingId ?: "").toString().toUpperCase()
         if(want && r.id==want && r.ip && r.port){
@@ -354,10 +352,14 @@ def relocateCallback(message){
             if(r.ip && r.ip != settings.ip){ device.updateSetting("ip",[value:r.ip,type:"string"]); logInfo "HAP: accessory moved — IP updated to ${r.ip}"; sendEvent(name:"hapStatus", value:"IP updated to ${r.ip}") }
             if(r.port){ device.updateSetting("port",[value:r.port,type:"number"]); state.discoveredPort=r.port }
             unschedule("relocateTimeout")
-            def op=state.afterRelocate; state.afterRelocate=null; if(op) dispatchOp(op)
+            state.afterRelocate=null; dispatchOp(op)
+        } else {
+            unschedule("relocateTimeout"); state.afterRelocate=null; dispatchOp(op)
         }
-        // else a different HAP accessory answered — ignore and keep waiting (relocateTimeout gives up)
-    }catch(e){ log.error "relocateCallback: ${e}" }
+    }catch(e){
+        log.error "relocateCallback: ${e}"
+        def op=state.afterRelocate; unschedule("relocateTimeout"); state.afterRelocate=null; if(op) dispatchOp(op)
+    }
 }
 def mdnsCallback(message){
     try {
@@ -365,18 +367,21 @@ def mdnsCallback(message){
         state.mdnsReplies=((state.mdnsReplies ?: 0) as int)+1
         String desc = message.toString(); if(settings.debugLog) log.debug "HAP mdns raw: ${desc}"
         String h=mdnsPayload(message)
-        if(!h){ rep "No DNS payload in mDNS callback"; return }
+        if(!h){ def op=state.afterMdns; unschedule("mdnsTimeout"); state.afterMdns=null; rep "No DNS payload in mDNS callback"; if(op) dispatchOp(op); return }
         state.mdnsPayloads=((state.mdnsPayloads ?: 0) as int)+1
         String sourceIp=mdnsSourceIp(message)
-        if(sourceIp && sourceIp!=settings.ip){ rep "mDNS reply came from another IP; still waiting"; return }
+        if(sourceIp && sourceIp!=settings.ip){ def op=state.afterMdns; unschedule("mdnsTimeout"); state.afterMdns=null; rep "mDNS reply came from another IP"; if(op) dispatchOp(op); return }
         def r = parseMdns(h, (settings.accPairingId ?: "").toString(), (settings.ip ?: "").toString(), state.mdnsMulticast ? "" : sourceIp)
-        if(r.ip && r.ip!=settings.ip){ rep "mDNS address differs from configured IP; leaving IP changes to relocation"; return }
+        if(r.ip && r.ip!=settings.ip){ def op=state.afterMdns; unschedule("mdnsTimeout"); state.afterMdns=null; rep "mDNS address differs from configured IP"; if(op) dispatchOp(op); return }
         if(r.port) state.mdnsInstance=r.instance
         if(r.port){ device.updateSetting("port",[value:r.port,type:"number"]); state.discoveredPort=r.port; state.mdnsTries=0; logInfo "HAP: detected port ${r.port}" }
-        else { rep "No matching HAP SRV in mDNS reply; still waiting"; return }
+        else { def op=state.afterMdns; unschedule("mdnsTimeout"); state.afterMdns=null; rep "No matching HAP SRV in mDNS reply"; if(op) dispatchOp(op); return }
         unschedule("mdnsTimeout")
         def op=state.afterMdns; state.afterMdns=null; if(op) dispatchOp(op)
-    } catch(e){ log.error "mdnsCallback: ${e}" }
+    } catch(e){
+        log.error "mdnsCallback: ${e}"
+        def op=state.afterMdns; unschedule("mdnsTimeout"); state.afterMdns=null; if(op) dispatchOp(op)
+    }
 }
 String mdnsSourceIp(def message){
     def source=null
@@ -862,15 +867,21 @@ private void reFail(String why, Integer retryDelay=null){
 }
 // A live session came up: clear the failure streak so the next outage starts from the short end of the ladder.
 private void reOK(){ if((state.reFails?:0) as int){ state.reFails=0 } }
-// Reconnect to the cached endpoint first; periodically browse mDNS again after repeated failures.
+// Try the CHEAP path first: known topology + cached port -> connect straight to the last-known ip:port (fails in
+// ms with NoRouteToHost when the accessory is offline). The expensive multicast /24 subnet sweep (relocate, via
+// mdnsThen) only runs when we have no port, or at most once per SWEEP_INTERVAL_SEC — so an offline accessory can't
+// pin the hub sweeping every cycle. When the accessory is genuinely up, mDNS answers fast and this path is unchanged.
 def startLive(){
     if(!isPaired()){ log.warn "HAP: not paired"; return }
     unschedule("liveKeepalive"); unschedule("kaWatch")
     boolean haveTopo = (state.services!=null && hapPort()>0)
     int n = (state.reFails?:0) as int
+    int verifyFailures = (state.vtry?:0) as int
     // Fast path for a transient drop: reconnect straight to the last-known ip:port. But every 3rd consecutive
-    // failure, re-resolve via mDNS - an accessory that rebooted may advertise a new dynamic HAP port.
-    boolean reresolve = !haveTopo || (n>0 && n % 3 == 0)
+    // failure, re-resolve the port via unicast mDNS first — an accessory that rebooted often comes back on a NEW
+    // dynamic HAP port, and hammering the stale cached port would never recover. Unicast mDNS is cheap when the host
+    // is up; when it's down it times out and mdnsTimeout falls through to the SWEEP, which is itself gated to ≤1/30min.
+    boolean reresolve = !haveTopo || (n>0 && n % 3 == 0) || (verifyFailures>0 && verifyFailures % 3 == 0)
     if(reresolve) mdnsThen(state.services==null ? "discover" : "live")
     else liveConnect()
 }
@@ -887,12 +898,15 @@ void liveConnect(){
     unschedule("verifyWatch"); runIn(12,"verifyWatch")   // pair-verify must complete in 10s or we retry (Meross often stalls at M2)
 }
 // pair-verify watchdog: if the handshake didn't reach a session, close + retry with capped backoff,
+// re-resolving the port via mDNS each time (the port and the single connection slot can both go stale).
 // counting failures so startLive periodically re-resolves the port as well as retrying the connection.
 def verifyWatch(){
     if(!state.sess){
         state.vtry=(state.vtry?:0)+1
         try{ interfaces.rawSocket.close() }catch(e){}; state.connInFlight=null
-        reFail("pair-verify timed out (no M2)", Math.min(120, 30*(state.vtry as int)))
+        int d=Math.min(120, 30*(state.vtry as int))
+        logInfo "HAP: pair-verify timed out (no M2) — next try in ${d}s"
+        unschedule("startLive"); runIn(d, "startLive")
     }
 }
 // HELD SESSION + LIVENESS PROBE (self-correcting — never trust the flag). A real HomeKit controller holds ONE

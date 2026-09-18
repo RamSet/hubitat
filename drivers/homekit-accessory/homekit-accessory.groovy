@@ -23,9 +23,10 @@
  *   the raw service/characteristic map.
  *
  * Author: RamSet
- * Version: 0.14.0
+ * Version: 0.14.1
  *
  * Changelog:
+ *  v0.14.1 - Add optional preference for mDNS service name to improve connectivity fallback.
  *  v0.14.0 - PURE LISTEN BY DEFAULT. The keepalive/liveness probe now defaults to 0 (off) instead of 30s.
  *           Rationale, and it is not a guess: hapCore 0.10.12 added real TCP keepalive to the session socket
  *           (SO_KEEPALIVE via the rawSocket connect options) behind a getMethod fallback, because the driver

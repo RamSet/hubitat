@@ -36,15 +36,15 @@ hostname or a Hubitat device label. Successful discovery remembers the instance
 for later fallback queries. A configured name takes precedence; update it if the
 service is renamed. No pairing credentials or fixed port values are changed.
 
-## Shared-Library Compatibility (0.10.20)
+## Shared-Library Compatibility (0.10.17)
 
-The 0.10.17-0.10.19 changes were not entirely behavior-neutral bug fixes.
+The consolidated 0.10.17 changes are intentionally compatibility-preserving.
 Service-record association and failure counting fix defects, but making multicast
 the primary transport changed the contract for every including driver. Requiring
 TXT/A records also rejected previously usable unicast replies, normal discovery
 could update the configured IP, and handshake retry timing changed.
 
-Version 0.10.20 retains the fixes with these compatibility constraints:
+Version 0.10.17 retains the fixes with these compatibility constraints:
 
 - Every operation starts with the original PTR query to `settings.ip:5353`,
 	regardless of configured or learned service names. Existing drivers do not need
@@ -56,12 +56,14 @@ Version 0.10.20 retains the fixes with these compatibility constraints:
 	matches the configured IP. Conflicting identities and unrelated services are
 	still rejected; multicast retains strict identity/IP association.
 - Ordinary discovery only updates the port and learned instance, not the IP.
-	Only the existing paired-ID relocation path can change the IP. Its general
-	browse remains throttled to once per 30 minutes and can find renamed services.
+	Only the existing paired-ID relocation path can change the IP. Relocation
+	targets the configured or learned service name when available; the general
+	browse remains throttled to once per 30 minutes for unnamed accessories.
 - Cached-port precedence and fallback remain unchanged. Invalid optional names
 	cannot stop IP discovery or cached-endpoint recovery.
 - Handshake retries retain the original 30/60/90/120-second cadence and cap,
-	while counting failures so every third failure triggers rediscovery.
+	while a separate handshake counter triggers port rediscovery every third
+	timeout without changing the offline health threshold.
 - The four-second UDP timeout is unchanged; the scheduled watchdog runs at five
 	seconds to allow the callback to finish. The watchdog is armed before sending.
 

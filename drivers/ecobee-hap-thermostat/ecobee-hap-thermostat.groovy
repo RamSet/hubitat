@@ -17,12 +17,13 @@
  *   this driver (HPM does it automatically).
  *
  * Author: RamSet
- * Version: 0.19.6
+ * Version: 0.19.7
  * Date: 2026-08-12
  *
  * REQUIRES library: RamSet.hapCore (installed automatically by Hubitat Package Manager).
  *
  * Changelog:
+ *  v0.19.7 - Add optional preference for mDNS service name to improve connectivity fallback.
  *  v0.19.6 - Passive held session by default. The liveness-probe interval now defaults to 0 (off). With hapCore's
  *           TCP keepalive (Hubitat 2.5.1.145+) holding the socket, the frequent probe is no longer needed — and it
  *           was the cause of the ~10-minute silent-drop/reconnect cycle: proven that turning it off lets the

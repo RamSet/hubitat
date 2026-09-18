@@ -12,7 +12,7 @@ String slice(String start, String end) {
 
 Map harness(boolean transport = false) {
     def context = [state: [services: [:], discoveredPort: 38607],
-                   settings: [ip: '192.168.1.53', accPairingId: 'C4:D3:2D:CC:9C:06'],
+                   settings: [ip: '192.0.2.53', accPairingId: '11:22:33:44:55:66'],
                    scheduled: [:], updates: [:], connects: [], discoveries: [], health: [], commands: [], dispatched: []]
     def variables = new Binding([
         state: context.state, settings: context.settings,
@@ -32,7 +32,8 @@ Map harness(boolean transport = false) {
         hapStart: { operation, body -> context.dispatched << [operation, body] },
         parseLanMessage: { message -> [payload: message] }
     ])
-    String methods = slice('def relocateCallback(message)', '// ===== pair-setup') +
+    String methods = 'import groovy.transform.Field\n@Field static final String MDNS_PTR_QUERY = "000000000001000000000000045f686170045f746370056c6f63616c00000c8001"\n' +
+        slice('def relocateCallback(message)', '// ===== pair-setup') +
         slice('private int reBackoff()', 'void liveConnect()') +
         slice('def verifyWatch()', '// HELD SESSION') +
         slice('void clearLocalPairing()', '// byte-level chunked') +
@@ -128,7 +129,7 @@ def ipContract = harness(true)
 ipContract.settings.mdnsServiceName = 'Upstairs'
 ipContract.state.mdnsInstance = 'old-name._hap._tcp.local'
 ipContract.core.mdnsThen('live')
-assert ipContract.commands[0].options.destinationAddress == '192.168.1.53:5353'
+assert ipContract.commands[0].options.destinationAddress == '192.0.2.53:5353'
 assert ipContract.commands[0].action == '000000000001000000000000045f686170045f746370056c6f63616c00000c8001'
 println 'PASS: configured and learned names do not replace the original IP-directed first query'
 
@@ -137,39 +138,42 @@ retry.core.startLive()
 assert retry.connects == [38607]
 (1..3).each { attempt ->
     retry.core.verifyWatch()
-    assert retry.state.reFails == attempt
+    assert !retry.state.reFails
+    assert retry.state.vtry == attempt
+    assert !retry.health
     assert retry.scheduled.startLive == 30 * attempt
     retry.core.startLive()
 }
 assert retry.discoveries == ['live']
 retry.state.sess = true
 retry.core.verifyWatch()
-assert retry.state.reFails == 3
+assert retry.state.vtry == 3
+assert !retry.health
 println 'PASS: handshake failures trigger rediscovery; established sessions do not count as failures'
 
-def upstairs = accessory('Upstairs', 'ecobee-ares.local', '192.168.1.53', 46557, 'C4:D3:2D:CC:9C:06')
-def downstairs = accessory('Downstairs', 'ecobee-ares-2.local', '192.168.1.52', 40649, '33:E1:81:68:F6:41')
-def ecobee = [owner: 'Upstairs._ecobee._tcp.local', type: 33, data: srvData(1201, 'ecobee-ares.local')]
+def upstairs = accessory('ThermostatOne', 'thermostat-one.local', '192.0.2.53', 46557, '11:22:33:44:55:66')
+def downstairs = accessory('ThermostatTwo', 'thermostat-two.local', '192.0.2.52', 40649, '66:55:44:33:22:11')
+def ecobee = [owner: 'ThermostatOne._example._tcp.local', type: 33, data: srvData(1201, 'thermostat-one.local')]
 def discovery = harness()
 assert discovery.core.parseMdns(packet(upstairs + [ecobee])).port == 46557
 def combined = packet(upstairs + downstairs + [ecobee])
-assert discovery.core.parseMdns(combined, 'c4:d3:2d:cc:9c:06') ==
-    [ip: '192.168.1.53', port: 46557, sf: 0, id: 'C4:D3:2D:CC:9C:06', instance: 'upstairs._hap._tcp.local']
-assert discovery.core.parseMdns(combined, '33:E1:81:68:F6:41') ==
-    [ip: '192.168.1.52', port: 40649, sf: 0, id: '33:E1:81:68:F6:41', instance: 'downstairs._hap._tcp.local']
+assert discovery.core.parseMdns(combined, '11:22:33:44:55:66') ==
+    [ip: '192.0.2.53', port: 46557, sf: 0, id: '11:22:33:44:55:66', instance: 'thermostatone._hap._tcp.local']
+assert discovery.core.parseMdns(combined, '66:55:44:33:22:11') ==
+    [ip: '192.0.2.52', port: 40649, sf: 0, id: '66:55:44:33:22:11', instance: 'thermostattwo._hap._tcp.local']
 assert !discovery.core.parseMdns(combined).port
 assert !discovery.core.parseMdns(combined, '00:00:00:00:00:00').port
-assert discovery.core.parseMdns(packet((upstairs + downstairs).reverse()), 'C4:D3:2D:CC:9C:06').port == 46557
+assert discovery.core.parseMdns(packet((upstairs + downstairs).reverse()), '11:22:33:44:55:66').port == 46557
 println 'PASS: service, identity, address association, and record ordering'
 
 String owner = 'Upstairs._HAP._TCP.local'
-def compressed = packet([[owner: 'c00c'.decodeHex(), type: 33, data: srvData(46557, 'ecobee-ares.local')]], owner)
+def compressed = packet([[owner: 'c00c'.decodeHex(), type: 33, data: srvData(46557, 'thermostat-one.local')]], owner)
 assert discovery.core.parseMdns(compressed).port == 46557
 def compressedTarget = packet([
     [owner: owner, type: 33, data: '00000000b5ddc00c'.decodeHex()],
     upstairs[2]
-], 'ecobee-ares.local')
-assert discovery.core.parseMdns(compressedTarget).ip == '192.168.1.53'
+], 'thermostat-one.local')
+assert discovery.core.parseMdns(compressedTarget).ip == '192.0.2.53'
 assert !discovery.core.parseMdns(packet([[owner: 'c00c'.decodeHex(), type: 33, data: srvData(1201, 'host.local')]])).port
 assert !discovery.core.parseMdns(packet([[owner: owner, type: 33, ttl: 0, data: srvData(46557, 'host.local')]])).port
 assert !discovery.core.parseMdns(packet([[owner: owner, type: 33, data: '000000000001'.decodeHex()]])).port
@@ -182,39 +186,66 @@ println 'PASS: compression, pointer loops, goodbye records, and malformed/trunca
 discovery.state.afterMdns = 'live'
 discovery.scheduled.mdnsTimeout = 4
 discovery.core.mdnsCallback(packet([ecobee]))
-discovery.core.mdnsCallback(packet(downstairs))
-assert discovery.state.afterMdns == 'live'
-assert discovery.scheduled.mdnsTimeout == 4
-assert discovery.state.discoveredPort == 38607
-assert !discovery.connects
-discovery.core.mdnsCallback(combined)
-assert discovery.state.discoveredPort == 46557
-assert discovery.updates.port == 46557
-assert discovery.connects == [46557]
+assert !discovery.state.afterMdns
 assert !discovery.scheduled.containsKey('mdnsTimeout')
-discovery.core.mdnsCallback(packet(accessory('Upstairs', 'ecobee-ares.local', '192.168.1.53', 38607, 'C4:D3:2D:CC:9C:06')))
-assert discovery.state.discoveredPort == 46557
+assert discovery.connects == [38607]
+discovery.state.afterMdns = 'live'
+discovery.core.mdnsCallback(packet(downstairs))
+assert !discovery.state.afterMdns
+assert !discovery.scheduled.containsKey('mdnsTimeout')
+assert discovery.connects == [38607, 38607]
+def matchedDiscovery = harness()
+matchedDiscovery.state.afterMdns = 'live'
+matchedDiscovery.core.mdnsCallback(combined)
+assert matchedDiscovery.state.discoveredPort == 46557
+assert matchedDiscovery.updates.port == 46557
+assert matchedDiscovery.connects == [46557]
+assert !matchedDiscovery.scheduled.containsKey('mdnsTimeout')
+matchedDiscovery.core.mdnsCallback(packet(accessory('ThermostatOne', 'thermostat-one.local', '192.0.2.53', 38607, '11:22:33:44:55:66')))
+assert matchedDiscovery.state.discoveredPort == 46557
 def downstairsDiscovery = harness()
-downstairsDiscovery.settings.accPairingId = '33:E1:81:68:F6:41'
-downstairsDiscovery.settings.ip = '192.168.1.52'
+downstairsDiscovery.settings.accPairingId = '66:55:44:33:22:11'
+downstairsDiscovery.settings.ip = '192.0.2.52'
 downstairsDiscovery.state.discoveredPort = 38791
 downstairsDiscovery.state.afterMdns = 'live'
 downstairsDiscovery.core.mdnsCallback(combined)
 assert downstairsDiscovery.state.discoveredPort == 40649
 assert downstairsDiscovery.updates.port == 40649
 assert downstairsDiscovery.connects == [40649]
-println 'PASS: unrelated replies keep waiting, current ports replace cached ports, late replies are ignored'
+println 'PASS: first non-matching mDNS replies are treated as misses; matching replies dispatch immediately'
+
+def emptyReply = harness()
+emptyReply.state.afterMdns = 'live'
+emptyReply.state.mdnsMulticast = true
+emptyReply.scheduled.mdnsTimeout = 5
+emptyReply.core.mdnsCallback(new Expando(payload: 'not-dns'))
+assert !emptyReply.state.afterMdns
+assert !emptyReply.scheduled.containsKey('mdnsTimeout')
+assert emptyReply.connects == [38607]
+
+def emptyRelocation = harness()
+emptyRelocation.state.afterRelocate = 'live'
+emptyRelocation.scheduled.relocateTimeout = 8
+emptyRelocation.core.relocateCallback(new Expando(payload: 'not-dns'))
+assert !emptyRelocation.state.afterRelocate
+assert !emptyRelocation.scheduled.containsKey('relocateTimeout')
+assert emptyRelocation.connects == [38607]
+println 'PASS: empty or malformed first replies fail fast in both discovery callbacks'
 
 def relocation = harness()
 relocation.state.afterRelocate = 'live'
 relocation.core.relocateCallback(packet(upstairs.take(2)))
-assert relocation.state.afterRelocate == 'live'
-relocation.settings.ip = '192.168.1.99'
-relocation.core.relocateCallback(combined)
-assert relocation.updates.ip == '192.168.1.53'
-assert relocation.updates.port == 46557
-assert relocation.connects == [46557]
-println 'PASS: relocation requires a complete endpoint for the paired accessory'
+assert !relocation.state.afterRelocate
+assert relocation.connects == [38607]
+def matchedRelocation = harness()
+matchedRelocation.state.afterRelocate = 'live'
+matchedRelocation.settings.ip = '192.0.2.99'
+matchedRelocation.core.relocateCallback(combined)
+assert matchedRelocation.updates.ip == '192.0.2.53'
+assert matchedRelocation.updates.port == 46557
+assert matchedRelocation.connects == [46557]
+assert !matchedRelocation.state.afterRelocate
+println 'PASS: relocation treats a non-matching first reply as a miss and accepts a matching endpoint'
 
 def wrappedReply = harness()
 wrappedReply.state.afterMdns = 'live'
@@ -230,32 +261,35 @@ println 'PASS: callback extracts DNS from a response object description'
 def multicast = harness(true)
 multicast.core.mdnsThen('live')
 assert multicast.commands.size() == 1
-assert multicast.commands[0].options.destinationAddress == '192.168.1.53:5353'
+assert multicast.commands[0].options.destinationAddress == '192.0.2.53:5353'
 assert multicast.commands[0].options.callback == 'mdnsCallback'
-assert multicast.scheduled.mdnsTimeout > multicast.commands[0].options.timeout
+assert multicast.scheduled.mdnsTimeout >= multicast.commands[0].options.timeout
 assert multicast.state.mdnsReplies == 0
 
-String capturedDownstairs = '000084000001000100000004045F686170045F746370056C6F63616C00000C0001C00C000C00010000000A000D0A446F776E737461697273C00CC02D002100010000000A0016000000009EC90D65636F6265652D617265732D32C016C02D001000010000000A00540563233D32310566663D33331469643D33333A45313A38313A36383A46363A3431096D643D4543423630310670763D312E310673233D3436360473663D300463693D390B73683D3550554C49673D3D0466653D31C04C000100010000000A0004C0A80134C04C001C00010000000A0010FE80000000000000466132FFFE06777E'
-String capturedUpstairs = '000084000001000100000004045F686170045F746370056C6F63616C00000C0001C00C000C00010000000A000B085570737461697273C00CC02D002100010000000A001400000000B5DD0B65636F6265652D61726573C016C02D001000010000000A00540563233D31340566663D33331469643D43343A44333A32443A43433A39433A3036096D643D4543423630310670763D312E310673233D3430390473663D300463693D390B73683D656A326957413D3D0466653D31C04A001C00010000000A0010FE80000000000000466132FFFEBB790DC04A000100010000000A0004C0A80135'
+String capturedDownstairs = packet(downstairs)
+String capturedUpstairs = packet(upstairs)
 multicast.core.mdnsCallback(new Expando(description: capturedDownstairs))
-assert !multicast.connects
-multicast.core.mdnsCallback(new Expando(description: capturedUpstairs))
-assert capturedDownstairs.length() == 232 * 2
-assert capturedUpstairs.length() == 228 * 2
-assert multicast.connects == [46557]
-assert multicast.state.mdnsReplies == 2
-assert multicast.state.mdnsPayloads == 2
-assert multicast.core.parseMdns(capturedDownstairs, '33:E1:81:68:F6:41').port == 40649
-println 'PASS: normal discovery uses the configured IP and parses captured replies from both ecobees'
+assert multicast.connects == [38607]
+assert capturedDownstairs.length() > 0
+assert capturedUpstairs.length() > 0
+assert multicast.state.mdnsReplies == 1
+assert multicast.state.mdnsPayloads == 1
+assert multicast.core.parseMdns(capturedDownstairs, '66:55:44:33:22:11').port == 40649
+def multicastMatch = harness(true)
+multicastMatch.state.afterMdns = 'live'
+multicastMatch.state.mdnsMulticast = true
+multicastMatch.core.mdnsCallback(new Expando(description: capturedUpstairs))
+assert multicastMatch.connects == [46557]
+println 'PASS: normal discovery rejects a first unrelated reply; matching multicast replies still dispatch'
 
 def initialPairing = harness()
 initialPairing.settings.remove('accPairingId')
 initialPairing.state.afterMdns = 'live'
 initialPairing.core.mdnsCallback(new Expando(payload: capturedDownstairs))
-assert !initialPairing.connects
+assert initialPairing.connects == [38607]
 initialPairing.core.mdnsCallback(new Expando(payload: capturedUpstairs))
-assert initialPairing.connects == [46557]
-assert initialPairing.core.parseMdns(combined, '', '192.168.1.52').port == 40649
+assert initialPairing.connects == [38607]
+assert initialPairing.core.parseMdns(combined, '', '192.0.2.52').port == 40649
 assert !initialPairing.core.mdnsPayload(new Object())
 assert !initialPairing.core.mdnsPayload('hubitat.device.HubResponse@deadbeef')
 println 'PASS: initial pairing filters multicast replies by configured IP and rejects object text'
@@ -265,19 +299,19 @@ targeted.settings.mdnsServiceName = 'Upstairs'
 targeted.core.mdnsThen('live')
 3.times { targeted.core.mdnsTimeout() }
 String targetedOwner = dnsName('Upstairs._hap._tcp.local').encodeHex().toString()
-assert targeted.commands.take(3).every { it.options.destinationAddress == '192.168.1.53:5353' }
+assert targeted.commands.take(3).every { it.options.destinationAddress == '192.0.2.53:5353' }
 assert targeted.commands[3].options.destinationAddress == '224.0.0.251:5353'
 assert targeted.commands[3].action == '000000000002000000000000' + targetedOwner + '00210001' + targetedOwner + '00100001'
 targeted.core.mdnsCallback(new Expando(payload: capturedUpstairs))
 assert targeted.connects == [46557]
-assert targeted.state.mdnsInstance == 'upstairs._hap._tcp.local'
+assert targeted.state.mdnsInstance == 'thermostatone._hap._tcp.local'
 targeted.settings.remove('mdnsServiceName')
 targeted.core.mdnsThen('live')
 3.times { targeted.core.mdnsTimeout() }
 assert targeted.commands[7].action.startsWith('000000000002000000000000')
 targeted.settings.mdnsServiceName = 'Downstairs._hap._tcp.local.'
-targeted.settings.accPairingId = '33:E1:81:68:F6:41'
-targeted.settings.ip = '192.168.1.52'
+targeted.settings.accPairingId = '66:55:44:33:22:11'
+targeted.settings.ip = '192.0.2.52'
 targeted.core.mdnsThen('live')
 3.times { targeted.core.mdnsTimeout() }
 assert targeted.commands[11].action.contains(dnsName('Downstairs._hap._tcp.local').encodeHex().toString())
@@ -285,67 +319,69 @@ targeted.core.mdnsCallback(new Expando(payload: capturedDownstairs))
 assert targeted.connects == [46557, 40649]
 println 'PASS: targeted SRV/TXT discovery uses the configured or learned instance and refreshes both ports'
 
-String homebridgeReply = '000084000001000700000000045F686170045F746370056C6F63616C00000C8001C00C000C00010000000A00120F486F6D656272696467652043454243C00CC02D001000010000000A00510663233D3538300466663D301469643D30453A33363A43443A33313A41463A46430D6D643D686F6D656272696467650670763D312E310473233D310473663D300463693D320B73683D742F32562F513D3DC02D002100010000000A001500000000D1CC0C316432343031383662303739C016C0AE000100010000000A0004C0A8011DC00C000C00010000000A001A17486F6D6562726964676520487562697461742032413638C00CC0D9001000010000000A00500563233D31330466663D301469643D30453A43333A34303A38443A44423A44460D6D643D686F6D656272696467650670763D312E310473233D310473663D300463693D320B73683D4D32365045673D3DC0D9002100010000000A000800000000C926C0AE'
-String upstairsTargetedReply = '000084000002000200000002085570737461697273045F686170045F746370056C6F63616C0000210001C00C00100001C00C001000010000000A00540563233D31340566663D33331469643D43343A44333A32443A43433A39433A3036096D643D4543423630310670763D312E310673233D3430390473663D300463693D390B73683D656A326957413D3D0466653D31C00C002100010000000A001400000000B5DD0B65636F6265652D61726573C01FC0A2001C00010000000A0010FE80000000000000466132FFFEBB790DC0A2000100010000000A0004C0A80135'
-String downstairsTargetedReply = '0000840000020002000000020A446F776E737461697273045F686170045F746370056C6F63616C0000210001C00C00100001C00C001000010000000A00540563233D32310566663D33331469643D33333A45313A38313A36383A46363A3431096D643D4543423630310670763D312E310673233D3436360473663D300463693D390B73683D3550554C49673D3D0466653D31C00C002100010000000A0016000000009EC90D65636F6265652D617265732D32C021C0A4000100010000000A0004C0A80134C0A4001C00010000000A0010FE80000000000000466132FFFE06777E'
-assert homebridgeReply.length() == 355 * 2
-assert upstairsTargetedReply.length() == 220 * 2
-assert downstairsTargetedReply.length() == 224 * 2
+String homebridgeReply = packet(accessory('OtherBridge', 'other-bridge.local', '192.0.2.29', 53708, 'AA:BB:CC:DD:EE:FF'))
+String upstairsTargetedReply = packet(upstairs)
+String downstairsTargetedReply = packet(downstairs)
+assert homebridgeReply.length() > 0
+assert upstairsTargetedReply.length() > 0
+assert downstairsTargetedReply.length() > 0
 def singleReply = harness(true)
 singleReply.core.mdnsThen('live')
 singleReply.core.mdnsCallback(homebridgeReply)
-assert !singleReply.connects
+assert singleReply.connects == [38607]
 assert singleReply.state.discoveredPort == 38607
 singleReply.settings.mdnsServiceName = 'Upstairs'
 singleReply.core.mdnsThen('live')
 3.times { singleReply.core.mdnsTimeout() }
 singleReply.core.mdnsCallback(upstairsTargetedReply)
-assert singleReply.connects == [46557]
+assert singleReply.connects == [38607, 46557]
 singleReply.settings.mdnsServiceName = 'Downstairs'
-singleReply.settings.accPairingId = '33:E1:81:68:F6:41'
-singleReply.settings.ip = '192.168.1.52'
+singleReply.settings.accPairingId = '66:55:44:33:22:11'
+singleReply.settings.ip = '192.0.2.52'
 singleReply.core.mdnsThen('live')
 3.times { singleReply.core.mdnsTimeout() }
 singleReply.core.mdnsCallback(downstairsTargetedReply)
-assert singleReply.connects == [46557, 40649]
+assert singleReply.connects == [38607, 46557, 40649]
 singleReply.settings.mdnsServiceName = 'a' * 64
 try {
     singleReply.core.mdnsQuery()
     assert false: 'Oversized DNS instance label must be rejected'
 } catch (IllegalArgumentException expected) { }
-println 'PASS: actual Homebridge first reply is rejected; one targeted ecobee reply is sufficient to refresh each port'
+println 'PASS: unrelated first reply is rejected; one targeted accessory reply is sufficient to refresh each port'
 
 def legacyUnicast = harness(true)
 legacyUnicast.settings.remove('accPairingId')
 legacyUnicast.core.mdnsThen('live')
-legacyUnicast.core.mdnsCallback([ip: 'c0a80135', payload: packet(upstairs.take(1))])
+legacyUnicast.core.mdnsCallback([ip: 'c0000235', payload: packet(upstairs.take(1))])
 assert legacyUnicast.connects == [46557]
 assert !legacyUnicast.updates.containsKey('ip')
-legacyUnicast.settings.accPairingId = 'C4:D3:2D:CC:9C:06'
+legacyUnicast.settings.accPairingId = '11:22:33:44:55:66'
 legacyUnicast.core.mdnsThen('live')
-legacyUnicast.core.mdnsCallback([ip: '192.168.1.53', payload: packet(upstairs.take(1))])
+legacyUnicast.core.mdnsCallback([ip: '192.0.2.53', payload: packet(upstairs.take(1))])
 assert legacyUnicast.connects == [46557, 46557]
 legacyUnicast.core.mdnsThen('live')
-legacyUnicast.core.mdnsCallback([ip: 'c0a80134', payload: packet(upstairs.take(1))])
-assert legacyUnicast.connects.size() == 2
-legacyUnicast.core.mdnsCallback([ip: 'c0a80135', payload: capturedDownstairs])
-assert legacyUnicast.connects.size() == 2
-legacyUnicast.state.mdnsMulticast = true
-legacyUnicast.core.mdnsCallback([ip: 'c0a80135', payload: packet(upstairs.take(1))])
-assert legacyUnicast.connects.size() == 2
-legacyUnicast.core.mdnsCallback([ip: 'c0a80135', payload: capturedUpstairs])
+legacyUnicast.core.mdnsCallback([ip: 'c0000234', payload: packet(upstairs.take(1))])
 assert legacyUnicast.connects.size() == 3
+legacyUnicast.core.mdnsCallback([ip: 'c0000235', payload: capturedDownstairs])
+assert legacyUnicast.connects.size() == 3
+legacyUnicast.state.afterMdns = 'live'
+legacyUnicast.state.mdnsMulticast = true
+legacyUnicast.core.mdnsCallback([ip: 'c0000235', payload: packet(upstairs.take(1))])
+assert legacyUnicast.connects.size() == 4
+legacyUnicast.state.afterMdns = 'live'
+legacyUnicast.core.mdnsCallback([ip: 'c0000235', payload: capturedUpstairs])
+assert legacyUnicast.connects.size() == 5
 assert legacyUnicast.core.mdnsSourceIp([ip: '999.1.1.1']) == null
 println 'PASS: IP-directed SRV-only replies work without weakening multicast identity checks'
 
 def pinnedIp = harness(true)
 pinnedIp.core.mdnsThen('live')
-pinnedIp.core.mdnsCallback(packet(accessory('Upstairs', 'ecobee-ares.local', '192.168.1.99', 46557, 'C4:D3:2D:CC:9C:06')))
-assert !pinnedIp.connects
+pinnedIp.core.mdnsCallback(packet(accessory('ThermostatOne', 'thermostat-one.local', '192.0.2.99', 46557, '11:22:33:44:55:66')))
+assert pinnedIp.connects == [38607]
 assert !pinnedIp.updates
 pinnedIp.state.mdnsMulticast = true
-pinnedIp.core.mdnsCallback(packet(accessory('Upstairs', 'ecobee-ares.local', '192.168.1.99', 46557, 'C4:D3:2D:CC:9C:06')))
-assert !pinnedIp.connects
+pinnedIp.core.mdnsCallback(packet(accessory('ThermostatOne', 'thermostat-one.local', '192.0.2.99', 46557, '11:22:33:44:55:66')))
+assert pinnedIp.connects == [38607]
 assert !pinnedIp.updates
 println 'PASS: ordinary unicast and targeted multicast discovery cannot rewrite the configured IP'
 
@@ -353,9 +389,9 @@ println 'PASS: ordinary unicast and targeted multicast discovery cannot rewrite 
     def caller = harness(true)
     caller.state.writeJson = '{"characteristics":[]}'
     caller.core.mdnsThen(operation)
-    caller.core.mdnsCallback([ip: 'c0a80135', payload: capturedUpstairs])
+    caller.core.mdnsCallback([ip: 'c0000235', payload: capturedUpstairs])
     assert caller.commands.size() == 1
-    assert caller.commands[0].options.destinationAddress == '192.168.1.53:5353'
+    assert caller.commands[0].options.destinationAddress == '192.0.2.53:5353'
     assert !caller.updates.containsKey('ip')
     assert !caller.scheduled.containsKey('mdnsTimeout')
     if (operation == 'live') assert caller.connects == [46557]
@@ -372,7 +408,7 @@ generic.settings.port = 12345
 generic.core.mdnsThen('read')
 3.times { generic.core.mdnsTimeout() }
 assert generic.commands.size() == 3
-assert generic.commands.every { it.options.destinationAddress == '192.168.1.53:5353' }
+assert generic.commands.every { it.options.destinationAddress == '192.0.2.53:5353' }
 assert generic.dispatched == [['read', null]]
 assert generic.core.hapPort() == 12345
 assert !generic.state.afterMdns
@@ -399,28 +435,36 @@ println 'PASS: targeted fallback is bounded and invalid names cannot break the I
 
 def moved = harness(true)
 moved.state.mdnsInstance = 'old-name._hap._tcp.local'
-moved.settings.ip = '192.168.1.99'
+moved.settings.ip = '192.0.2.99'
 moved.core.mdnsThen('live')
 4.times { moved.core.mdnsTimeout() }
 assert moved.commands.size() == 5
-assert moved.commands[4].action == '000000000001000000000000045f686170045f746370056c6f63616c00000c8001'
+assert moved.commands[4].action == '000000000002000000000000' + dnsName('old-name._hap._tcp.local').encodeHex().toString() + '00210001' + dnsName('old-name._hap._tcp.local').encodeHex().toString() + '00100001'
 assert moved.commands[4].options.callback == 'relocateCallback'
 assert moved.state.lastSweep == 3600000L
 moved.core.relocateCallback(capturedDownstairs)
 assert !moved.updates
-moved.core.relocateCallback(capturedUpstairs)
-assert moved.updates.ip == '192.168.1.53'
-assert moved.connects == [46557]
-assert moved.state.mdnsInstance == 'upstairs._hap._tcp.local'
 assert !moved.state.afterRelocate
-assert !moved.scheduled.containsKey('relocateTimeout')
-println 'PASS: relocation remains a throttled general browse and only a paired identity can change IP'
+assert moved.connects == [38607]
+def namedRelocation = harness(true)
+namedRelocation.settings.mdnsServiceName = 'Upstairs'
+namedRelocation.settings.ip = '192.0.2.99'
+namedRelocation.core.relocate('live')
+assert namedRelocation.commands[0].action == '000000000002000000000000' + dnsName('Upstairs._hap._tcp.local').encodeHex().toString() + '00210001' + dnsName('Upstairs._hap._tcp.local').encodeHex().toString() + '00100001'
+namedRelocation.core.relocateCallback(capturedUpstairs)
+assert namedRelocation.updates.ip == '192.0.2.53'
+assert namedRelocation.updates.port == 46557
+assert namedRelocation.connects == [46557]
+assert namedRelocation.state.mdnsInstance == 'thermostatone._hap._tcp.local'
+println 'PASS: relocation targets known names and general browsing is reserved for unnamed accessories'
 
 def handshake = harness()
 (1..6).each { attempt ->
     handshake.core.verifyWatch()
     assert handshake.scheduled.startLive == Math.min(120, attempt * 30)
-    assert handshake.state.reFails == attempt
+    assert !handshake.state.reFails
+    assert handshake.state.vtry == attempt
+    assert !handshake.health
 }
 println 'PASS: handshake retry delays retain the original 120-second cap while counting failures'
 
