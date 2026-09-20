@@ -839,10 +839,13 @@ private void updateWindowShadeUndefined() {
 }
 
 // called from updatePosition(), setPosition(), endOfMovement()
-private void updateWindowShadeArrived(int positionParam=null) {
-    int position = positionParam
-    if (position == null)  {
-        position = device.currentValue('position') ?: INVALID_POSITION
+private void updateWindowShadeArrived(Integer positionParam=null) {
+    // RamSet: was "int positionParam=null" - a primitive defaulted to null, so the guard
+    // below compared a primitive to null and was ALWAYS false: the no-argument fallback was
+    // dead code. A no-arg call would unbox null (NPE) or coerce to 0, which reads as closed.
+    Integer position = positionParam
+    if (position == null) {
+        position = (device.currentValue('position') ?: INVALID_POSITION) as Integer
     }
     logDebug("updateWindowShadeArrived: position=${position}")
     if (position == INVALID_POSITION || position < 0 || position > 100) {
@@ -974,8 +977,13 @@ void setLevel(BigDecimal level, BigDecimal duration = null) {
 }
 
 void setPosition(final BigDecimal positionParam) {
+    // RamSet: test the argument BEFORE coercing. "null as int" is 0 in Groovy, so a null
+    // argument silently became setPosition(0) - a full close - instead of being rejected.
+    if (positionParam == null) {
+        throw new Exception('Invalid position: null. Position must be between 0 and 100 inclusive.')
+    }
     int position = positionParam as int
-    if (position == null || position < 0 || position > 100) {
+    if (position < 0 || position > 100) {
         throw new Exception("Invalid position ${position}. Position must be between 0 and 100 inclusive.")
     }
     state.target = position
