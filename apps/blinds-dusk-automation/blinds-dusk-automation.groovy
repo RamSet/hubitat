@@ -77,6 +77,17 @@ def mainPage() {
             input "blindTravelSec", "number", title: "Seconds to allow for the blind to finish closing before checking", defaultValue: 45, required: true
             input "blindRetries", "number", title: "Re-send close this many times before alerting", defaultValue: 2, required: true
         }
+        section("<b>If the window never closes</b>") {
+            paragraph "When the window is open at dusk the app waits for it to close before lowering the blind. That wait has no end: if the window is left open all night you get one message at dusk and then silence, with the blind still up. These reminders stop it going quiet. The blind is never lowered onto an open window — lowering a shade onto an open sash or screen is the worse outcome, so the app keeps telling you instead of acting."
+            input "windowWaitRemindMins", "number",
+                  title: "Remind me every this many minutes while still waiting (0 = never remind)",
+                  defaultValue: 60, required: true
+            input "windowWaitMaxReminders", "number",
+                  title: "Send at most this many reminders",
+                  defaultValue: 3, required: true
+            input "windowWaitMsg", "text", title: "Reminder message",
+                  defaultValue: "Window is STILL open - the blind has not been lowered."
+        }
         section("<b>Notifications</b>") {
             input "notifiers", "capability.notification",
                   title: "Notification device(s)", multiple: true, required: false
@@ -133,6 +144,7 @@ def illuminanceHandler(evt) {
         notify(windowOpenMsg)
         state.waitingForWindow = true
         subscribe(windowSensor, "contact.closed", windowClosedHandler)
+        armWindowWaitReminder()
     } else {
         lowerBlinds()
         if (motionSensor && motionSensor.currentValue("motion") == "active") {
@@ -145,6 +157,7 @@ def illuminanceHandler(evt) {
 def windowClosedHandler(evt) {
     if (!state.waitingForWindow) return
     state.waitingForWindow = false
+    unschedule("windowWaitReminder")
     unsubscribe(windowSensor)
     notify(windowClosedMsg)
     Integer delay = (windowCloseDelay ?: 0) as Integer
@@ -162,7 +175,40 @@ def resetHandler() {
     state.actedTonight = false
     if (state.waitingForWindow) {
         state.waitingForWindow = false
+        unschedule("windowWaitReminder")
         if (windowSensor) unsubscribe(windowSensor)
+    }
+}
+
+// The window-open wait is open-ended by design: we will not lower a blind onto an open
+// window. But an open-ended wait must not be a silent one, so remind while it holds.
+private void armWindowWaitReminder() {
+    Integer mins = windowWaitMins()
+    state.windowRemindersSent = 0
+    if (mins <= 0) return
+    runIn(mins * 60, "windowWaitReminder", [overwrite: true])
+    if (logEnable) log.debug "window wait: first reminder in ${mins} min"
+}
+
+private Integer windowWaitMins() {
+    return ((settings.windowWaitRemindMins == null ? 60 : settings.windowWaitRemindMins) as Integer)
+}
+
+def windowWaitReminder() {
+    if (!state.waitingForWindow) return
+    // The window may have closed between the schedule firing and now.
+    if (windowSensor?.currentValue("contact") != "open") {
+        if (logEnable) log.debug "window no longer open; dropping reminder"
+        return
+    }
+    Integer maxN = ((settings.windowWaitMaxReminders == null ? 3 : settings.windowWaitMaxReminders) as Integer)
+    Integer sent = ((state.windowRemindersSent ?: 0) as Integer) + 1
+    state.windowRemindersSent = sent
+    notify(settings.windowWaitMsg ?: "Window is STILL open - the blind has not been lowered.")
+    if (logEnable) log.debug "window still open: reminder ${sent} of ${maxN}"
+    Integer mins = windowWaitMins()
+    if (sent < maxN && mins > 0) {
+        runIn(mins * 60, "windowWaitReminder", [overwrite: true])
     }
 }
 
@@ -184,7 +230,9 @@ private String currentStatus() {
                         : (lightSensors ? (dark ? pill("yes", "indigo") : pill("no", "amber")) : pill("—", "grey")))
 
     rows << row("Waiting for window to close",
-                state.waitingForWindow ? pill("yes", "amber") : pill("no", "grey"))
+                state.waitingForWindow
+                    ? pill("yes — ${(state.windowRemindersSent ?: 0)} reminder(s) sent", "amber")
+                    : pill("no", "grey"))
 
     if (lightSensors) {
         lightSensors.each { s ->
