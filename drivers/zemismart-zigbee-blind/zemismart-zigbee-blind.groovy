@@ -768,6 +768,7 @@ private void updateMode(int modeValue) {
 
 private void updatePosition(final int position) {
     logDebug "updatePosition(): position=${position}"
+    state.pendingMoveMs = null    // RamSet: device told us where it is - nothing outstanding
     sendEvent(name: 'position', value: position, unit: '%')
     sendEvent(name: 'level', value: position, unit: '%')
     if (position <= maxClosedPosition) {
@@ -885,6 +886,7 @@ void close() {  // 0 %
     }
     else {
         state.target = 0
+        state.pendingMoveMs = now()    // RamSet
         state.isTargetRcvd = true
         sendEvent(name: 'targetPosition', value: 0, type: 'digital')
         restartPositionReportTimeout()
@@ -911,6 +913,7 @@ void open() {   // 100 %
     }
     else {
         state.target = 100
+        state.pendingMoveMs = now()    // RamSet
         state.isTargetRcvd = true
         sendEvent(name: 'targetPosition', value: 100, type: 'digital')
         restartPositionReportTimeout()
@@ -990,6 +993,7 @@ void setPosition(final BigDecimal positionParam) {
     if (invertPosition == true) {
         position = 100 - position
     }
+    state.pendingMoveMs = now()    // RamSet
     restartPositionReportTimeout()
     state.isTargetRcvd = false
     sendTuyaCommand(DP_ID_TARGET_POSITION, DP_TYPE_VALUE, position.intValue(), 8)
@@ -1076,7 +1080,9 @@ void endOfMovement() {
     // RamSet: a commanded move that never reported is NOT evidence the blind is still where it was.
     // Concluding from the stale position announces the opposite of the command (e.g. 'open' in the
     // middle of a close) on any blind slower than positionReportTimeout, or whenever a report is lost.
-    if (target != null && lastPos != null && Math.abs(lastPos - target) > 1) {
+    // state.target alone is NOT sufficient: the driver never clears it, so it is stale after a
+    // mid-travel stop or a remote/manual move and would wrongly flip a good "partially open".
+    if (state.pendingMoveMs != null && target != null && lastPos != null && Math.abs(lastPos - target) > 1) {
         logWarn "endOfMovement(): no position report - last known ${lastPos}% != commanded ${target}%, reporting unknown"
         sendEvent(name: 'windowShade', value: 'unknown')
         return
