@@ -505,7 +505,12 @@ void parseSetDataResponse(final Map descMap) {
     int dataValue = zigbee.convertHexToInt(data[6..-1].join())
     switch (dp) {
         case 0x01 :      // DP_ID_COMMAND
-            restartPositionReportTimeout()
+            // RamSet: a "stopping" report means the motor has FINISHED. Re-arming the timer
+            // here made endOfMovement() fire ~one timeout after every completed move, logging
+            // a bogus "endOfMovement() timeout!" warning each time (measured).
+            if (dataValue != getDpCommandStop()) {
+                restartPositionReportTimeout()
+            }
             if (dataValue == getDpCommandOpen()) {        // OPEN - typically 0x00
                 logDebug("parse (01): opening (DP=1, data=${dataValue})")
                 updateWindowShadeOpening()
@@ -607,6 +612,24 @@ void parseSetDataResponse(final Map descMap) {
             else if (isZM85EL()) {
                 logDebug("parse (07): moving from ZM85 up/down keys (data=${dataValue})")
                 updateWindowShadeUndefined()
+            }
+            else if (isAM43()) {
+                // RamSet (measured on _TZE200_zah67ekd): this DP carries the DIRECTION of every
+                // hub-commanded move - 0 = opening, 1 = closing - not just remote presses. The
+                // generic branch below cannot use it because _TZE200_68nvbio9 sends 0x00 for both,
+                // so value 1 fell through to "Unexpected" and warned on every single close.
+                if (dataValue == 0) {
+                    logDebug("parse (07): opening (data=${descMap.data})")
+                    updateWindowShadeOpening()
+                }
+                else if (dataValue == 1) {
+                    logDebug("parse (07): closing (data=${descMap.data})")
+                    updateWindowShadeClosing()
+                }
+                else {
+                    logWarn "parse (07): Unexpected DP_ID_COMMAND_REMOTE (data=${descMap.data} dataValue=${dataValue})"
+                }
+                restartPositionReportTimeout()
             }
             else {
                 if (dataValue == 0) {
