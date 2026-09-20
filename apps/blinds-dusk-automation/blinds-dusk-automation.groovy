@@ -270,7 +270,7 @@ def confirmBlindsClosed(data) {
         String st = (b.currentValue("windowShade") ?: "").toString().toLowerCase()
         Integer pos = null; try { pos = (b.currentValue("position") as Integer) } catch (e) { }
         if (st == "closed") return
-        else if (st == "closing" || st == "opening") moving << b
+        else if (st == "closing" || st == "opening" || st == "moving") moving << b
         else if (st == "" || st == "unknown") {
             if (pos != null) { if (pos > ((settings.blindClosedPos ?: 2) as int)) stuck << b }
             else unverifiable << b
