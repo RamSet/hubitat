@@ -282,7 +282,11 @@ void configure(boolean fullInit = true) {
     state.isTargetRcvd = false
 
     sendEvent(name: 'numberOfButtons', value: 5, type: 'digital')
-    sendEvent(name: 'targetPosition', value: 50, type: 'digital')
+    // RamSet: was a hardcoded 50. configure() runs on every preference save, so it published a
+    // targetPosition the blind was not targeting - HomeKit then shows it aiming at 50%. state.target
+    // is already preserved on the line above; report where the blind actually is instead.
+    Integer curPos = device.currentValue('position') as Integer
+    sendEvent(name: 'targetPosition', value: (curPos != null ? curPos : (state.target ?: 0)), type: 'digital')
     unschedule()    // added 2022/12/10
 
     // Must run async otherwise, one will block the other
