@@ -71,6 +71,12 @@ def mainPage() {
             input "roomLight", "capability.switch",
                   title: "Room light to turn on when occupied", required: false
         }
+        section("<b>Confirm the blind actually closed</b>") {
+            paragraph "Closing a shade is fire-and-forget: if the motor is offline or ignores the command, the app would otherwise finish for the night with the shade still up. With this on, a while after commanding close the app reads the shade back, re-sends close if it isn't closed, and alerts you if it never confirms."
+            input "blindVerifyEnable", "bool", title: "Verify the blind reaches 'closed'", defaultValue: true
+            input "blindTravelSec", "number", title: "Seconds to allow for the blind to finish closing before checking", defaultValue: 45, required: true
+            input "blindRetries", "number", title: "Re-send close this many times before alerting", defaultValue: 2, required: true
+        }
         section("<b>Notifications</b>") {
             input "notifiers", "capability.notification",
                   title: "Notification device(s)", multiple: true, required: false
@@ -239,6 +245,59 @@ void lowerBlinds() {
     blinds?.close()
     blinds?.close()
     if (logEnable) log.debug "lowering blind(s): ${blinds*.displayName}"
+    // Verify they actually reach 'closed'. close() is fire-and-forget — a shade that
+    // ignores it (offline / dead motor) would otherwise leave the night 'done' with the
+    // blind still up (exactly what happened 2026-09-19). Read back, re-send, then alert.
+    if (settings.blindVerifyEnable != false) armBlindConfirm(0, 0)
+}
+
+private Integer blindTravelSec() { return Math.max(5, (settings.blindTravelSec ?: 45) as int) }
+
+private void armBlindConfirm(Integer tries, Integer grace) {
+    runIn(blindTravelSec(), "confirmBlindsClosed", [data: [tries: tries, grace: grace], overwrite: true])
+}
+
+// Read each shade back after it's had time to travel; re-send close to any that aren't
+// closed and alert loudly if one never confirms. A shade still 'closing' just gets more
+// time (up to a couple of grace cycles) rather than a wasted retry. Falls back to the
+// position value when the driver reports no windowShade state.
+def confirmBlindsClosed(data) {
+    Integer tries = (data?.tries ?: 0) as int
+    Integer grace = (data?.grace ?: 0) as int
+    def stuck = []; def moving = []; def unverifiable = []
+    blinds?.each { b ->
+        try { if (b.hasCommand("refresh")) b.refresh() } catch (e) { }
+        String st = (b.currentValue("windowShade") ?: "").toString().toLowerCase()
+        Integer pos = null; try { pos = (b.currentValue("position") as Integer) } catch (e) { }
+        if (st == "closed") return
+        else if (st == "closing" || st == "opening") moving << b
+        else if (st == "" || st == "unknown") {
+            if (pos != null) { if (pos > ((settings.blindClosedPos ?: 2) as int)) stuck << b }
+            else unverifiable << b
+        } else stuck << b   // open / partially open / anything not closed
+    }
+    // Still physically moving and nothing outright stuck → give it another travel window,
+    // but cap the grace so a shade that reports 'closing' forever can't loop endlessly.
+    if (moving && !stuck) {
+        if (grace < 2) { armBlindConfirm(tries, grace + 1); return }
+        stuck = moving   // grace exhausted — treat a perpetually-'closing' shade as failed
+    }
+    if (unverifiable && !stuck) {
+        log.warn "${app.label}: can't confirm ${unverifiable*.displayName.join(', ')} closed (shade reports no state) — verification skipped"
+        return
+    }
+    if (!stuck) { if (logEnable) log.debug "blind(s) confirmed closed"; return }
+
+    List names = stuck*.displayName
+    Integer maxTries = Math.max(1, (settings.blindRetries ?: 2) as int)
+    if (tries < maxTries) {
+        log.warn "${app.label}: blind(s) not closed (${names.join(', ')}) — re-sending close (retry ${tries + 1}/${maxTries})"
+        stuck.each { try { it.close() } catch (e) { } }
+        armBlindConfirm(tries + 1, 0)
+        return
+    }
+    log.error "${app.label}: blind(s) did NOT close after ${maxTries + 1} attempt(s): ${names.join(', ')}"
+    notify("⚠ ${app.label}: blind did NOT close — ${names.join(', ')} still up after ${maxTries + 1} tries. Check the shade.")
 }
 
 private void notify(String msg) {
