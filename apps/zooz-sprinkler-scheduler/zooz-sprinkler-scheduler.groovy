@@ -62,7 +62,7 @@ mappings {
     path("/calendar.ics")  { action: [GET: "apiCalendar"] }
 }
 
-String getAppVersion() { return "v0.16.9 (2026-09)" }
+String getAppVersion() { return "v0.16.10 (2026-09)" }
 
 // Simple vs Advanced interface. Simple shows only zones, schedule, weather and
 // hardware safety; Advanced exposes everything (moisture, learning, sensors,
@@ -117,6 +117,7 @@ private String  wApiUnit()  { return isMetric() ? "kmh"     : "mph" }
     "zone.finish"      : [section: "Lifecycle",  default: '${app}: ■ ${zone} done', defaultOff: true],
     "pre-run"          : [section: "Lifecycle",  default: '${app}: schedule starts in ${minutes} minute(s) — clear the yard'],
     "error"            : [section: "Lifecycle",  default: '${app}: error — ${detail}'],
+    "run.stalled"      : [section: "Lifecycle",  default: '${app}: ⚠ run ended early — ${reason}. All valves closed.'],
 
     // Skips
     "skip.manual"      : [section: "Skips",      default: '${app}: skipped — manual pause'],
@@ -1335,6 +1336,7 @@ def aboutPage() {
             paragraph "v0.12.2 — Fixed pause sensors reporting \"0s remaining\" and skipping ahead when they fired during a soak or the gap between zones. The schedule now tracks soak and between-zone phases as pausable too, so a pause that lands mid-soak reports the real soak time left and resumes that soak (valves stay off) instead of jumping to the next zone."
             paragraph "v0.13.4 — Saving the app now sends a confirmation notification summarizing the schedule: when it will start, how many zones, and the estimated total run time (water + soak). It also doubles as proof the new code is active — if you save and don't get it, the update didn't take."
             paragraph "v0.13.3 — Fixes two scheduling problems. (1) Multiple start times now ALL work: each was scheduled on the same internal handler, so Hubitat overwrote all but the last — only your final start time ran. Each window now has its own handler. (2) A run can no longer start twice from a single trigger: a re-entrancy guard ignores a duplicate scheduled invocation within 15 seconds (and logs it), preventing the double \"starting\" / double watering seen after editing a program near its run time. Re-save each sprinkler app once after updating so the new per-window schedules register."
+            paragraph "v0.16.10 — A run that dies before it finishes no longer blocks your other schedules. If a run stopped advancing — the hub restarted mid-run, or the app lost track of a run it had just started — nothing ever reached the end of the run, so the shared coordination switch stayed ON and every other schedule skipped with 'coordination switch held' until someone turned it off by hand (a schedule could even block itself). The app now checks every hour and before each scheduled start: a run that can no longer finish is ended the way Stop would end it — all valves closed, the Run switch turned off, the coordination switch released — and you get a 'run ended early' notification saying why. Saving the app's settings while a run is in progress now ends that run the same way, instead of leaving it half-stopped with the switch still held."
             paragraph "v0.16.9 — Two fixes. (1) The end-of-run phantom manual run is closed for good: as a schedule finishes, the relays are still reporting their final OFF, and the app's tile-reconcile could echo a tile back on just as the 'run active' guard dropped — which got read as a hand-triggered zone and started a stray manual run (v0.16.4 narrowed this but a ~4s window could still lapse under load). There's now a 20-second grace window after a run ends during which any tile change is treated as reconcile, never a manual start. (2) The 'Keep this app's hourly auto-off verify + re-push ON' switch now saves the moment you toggle it (it previously needed a full page save, so turning it off could silently not take)."
             paragraph "v0.16.8 — You can now hand the hardware auto-off entirely to the ZEN16 driver. Under Hardware safety there's a new switch, 'Keep this app's hourly auto-off verify + re-push ON'; turn it OFF and the app stops managing the relay auto-off (the ZEN16 driver owns it — it now defaults each relay to a 15-min auto-off), while the app still watches the controllers for going offline. This is the clean fix when two schedules share a controller: let the driver hold one value per relay instead of two apps pushing over each other. Leaving the switch ON keeps the previous behavior."
             paragraph "v0.16.7 — The hardware auto-off is now a hard cap: the app pushes exactly the value you set and never changes it on its own. Two behaviors were removed — it no longer auto-raises the timer to cover a longer zone, and no longer ratchets it up to match another instance or a value already on the device (the 0.16.6 behavior). The timer only changes when you change the setting. Trade-off: if you set the cap BELOW a zone's actual run time the hardware will cut that run short and the app will only warn you, not fix it — so pick a value comfortably above your longest single watering cycle. If two schedules share one controller, set them to the SAME cap, or each will keep re-asserting its own."
@@ -1573,6 +1575,14 @@ def initialize() {
     unsubscribe()
     state.zones = state.zones ?: [:]
     state.lastRunByZone = state.lastRunByZone ?: [:]
+    // updated() has just unscheduled every timer, so a run that was open (running, paused,
+    // or still starting) can never advance again. End it the way Stop would — valves, Run
+    // switch, shared coordination lock — instead of silently orphaning it. A run that had
+    // already died gets the sweep's own reason first.
+    runStallSweep()
+    if (state.running || state.paused || ((atomicState.runClaimMs ?: 0L) as long) > 0L) {
+        endStalledRun("settings were saved mid-run")
+    }
     state.running = false
     clearRunClaim()
     state.currentZoneIdx = 0
@@ -1810,7 +1820,7 @@ private void pauseRunningSchedule(String reason) {
 
     state.paused = true
     state.running = false  // schedule is no longer actively running
-    clearRunClaim()
+    // The run claim stays set: a paused run is still open and still owns the lock.
     state.pausedReason = reason
     state.pauseStartMs = now()   // for total-paused accounting at finish
 }
@@ -1834,6 +1844,10 @@ def doResumeAfterPause() {
     state.pauseStartMs = 0L
     state.paused = false
     state.running = true
+    // Stamp the resume as the latest step so runStallSweep() measures from now, not from
+    // before the pause (the no-zone / nothing-left paths below hand off without a phase).
+    state.currentPhaseStartMs = now()
+    state.currentPhaseDurationSec = 0
 
     if (zid == 0) {
         // No zone context — fall back to advancing the plan.
@@ -1983,13 +1997,55 @@ def preRunNotifyW3() { preRunNotify() }
 // Schedule entry — fires at the configured time
 // =========================================================================
 
-// True from the instant a run is claimed until state.running has certainly been persisted.
-// Bounded by time so a crashed start can never wedge it permanently.
+// atomicState.runClaimMs is stamped when a run is claimed and cleared only when the run
+// ends (finishRun / stopAllZones), so it also marks the run as open — runStallSweep() relies
+// on that. runClaimed() looks only at the first 60s: true from the claim until state.running
+// has certainly been persisted, bounded so a crashed start can never wedge it permanently.
 private boolean runClaimed() {
     Long c = (atomicState.runClaimMs ?: 0L) as long
     return (c > 0L) && ((now() - c) < 60000L)
 }
 private void clearRunClaim() { atomicState.runClaimMs = 0L }
+
+@groovy.transform.Field static final long STALL_GRACE_MS = 15L * 60L * 1000L
+
+// Find a run that stopped advancing but never ended. Either its state says idle while its
+// claim is still open (the run's own state write was lost — 2026-09-20), or it says running
+// but its current step is long overdue (a hub restart dropped the timer that would have
+// advanced it — 2026-09-09). No handler will ever move such a run forward or reach
+// finishRun(), so its valves, Run switch and the shared coordination lock stay as it left
+// them — and every schedule sharing the lock skips until someone clears it by hand.
+// Paused runs are left alone: they wait for their sensor by design and keep the lock.
+def runStallSweep() {
+    if (state.paused) return
+    if (state.running) {
+        long phaseEnd = ((state.currentPhaseStartMs ?: 0L) as long) + ((state.currentPhaseDurationSec ?: 0) as long) * 1000L
+        if (now() - phaseEnd < STALL_GRACE_MS) return
+        // Measure from the claim too: a run that just started hasn't stamped its first step.
+        long lastStep = Math.max(phaseEnd, (atomicState.runClaimMs ?: 0L) as long)
+        long overdueMs = now() - lastStep
+        if (overdueMs < STALL_GRACE_MS) return
+        endStalledRun("no step has advanced in ${fmtDuration((int) (overdueMs / 1000L))}")
+    } else {
+        Long claimMs = (atomicState.runClaimMs ?: 0L) as long
+        if (claimMs == 0L || runClaimed()) return
+        endStalledRun("it lost track of its own progress after starting")
+    }
+}
+
+private void endStalledRun(String why) {
+    log.warn "${app.label}: ending a run that can no longer finish — ${why}"
+    // When the state write was lost, the run record went with it. Rebuild a stub from the
+    // claim so the history shows when the dead run actually started.
+    Long claimMs = (atomicState.runClaimMs ?: 0L) as long
+    if (!state.currentRunRecord && claimMs > 0L) {
+        state.currentRunRecord = [startedAt: new Date(claimMs).format("yyyy-MM-dd HH:mm", location?.timeZone ?: TimeZone.getDefault()),
+                                  startedMs: claimMs, zoneSummaries: [], outcome: "running"]
+    }
+    stopAllZones()
+    recordRunFinish("aborted — ${why}")
+    notify("run.stalled", [reason: why])
+}
 
 def runSchedule(Map opts = [:]) {
     boolean manual = (opts?.manual == true)
@@ -2004,6 +2060,10 @@ def runSchedule(Map opts = [:]) {
         return
     }
     if (!manual) state.lastSchedEntryMs = nowMs
+    // A dead run of our own would otherwise block this one: it leaves the shared lock ON
+    // (the coordination check below would defer against ourselves) or leaves state.running
+    // set (the "previous run still active" skip). Clear it first.
+    runStallSweep()
     // Manual/on-demand runs bypass SCHEDULING holds (off-cycle day, quiet hours,
     // weather forecast, forced rain delay, pause-for-hours) but ALWAYS respect
     // ACTIVE SAFETY: pause sensors (wind/contacts), a wet rain sensor, mode/HSM.
@@ -3398,6 +3458,10 @@ private void maintainDashboardChild() {
 }
 
 def publishDashboardState() {
+    // This is the hourly timer every installed instance already has scheduled — a new
+    // runEvery1Hour would only register once each app is re-saved. The sweep's in-run
+    // path reads nothing but state, so the many mid-run calls stay cheap.
+    runStallSweep()
     def ch = getDashboardChild()
     if (!ch) return
     String swState = state.running ? "on" : "off"
