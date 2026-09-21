@@ -1,6 +1,11 @@
 /*
  * HAP Core — HomeKit Accessory Protocol controller engine (Hubitat Library)
  *
+ * TEST BUILD — branch test/pair-method (GitHub issue #1). Not in HPM; an HPM update overwrites it.
+ *   - Pair-setup method is selectable (settings.pairMethod: 0 = Pair Setup, 1 = Pair Setup with Auth).
+ *     Unset or 0 sends the same M1 bytes as the release build.
+ *   - Debug logging traces pair-setup: M1 in full, M2 in full, later stages as TLV types and lengths only.
+ *
  * Reusable, device-agnostic HAP CONTROLLER core, extracted from the proven
  * RamSet ecobee-hap-thermostat driver. It contains everything needed to pair
  * with and talk to a LAN/Wi-Fi HomeKit accessory, with no knowledge of any
@@ -464,7 +469,20 @@ void pairConnect(){
         log.error "connect: $e"; state.connTry=0; return
     }
     state.connTry=0
-    sendHttpTlv("/pair-setup", tlv([[6,[1] as byte[]],[0,[0] as byte[]]]))   // State=M1, Method=PairSetup
+    int method = pairMethod()
+    byte[] m1 = tlv([[6,[1] as byte[]],[0,[method] as byte[]]])   // State=M1, Method=PairSetup (0) or PairSetupWithAuth (1)
+    rep("pair-setup TX M1 (method ${method}): ${hx(m1)}")
+    sendHttpTlv("/pair-setup", m1)
+}
+int pairMethod(){ return ((settings.pairMethod ?: "0") as String) == "1" ? 1 : 0 }
+// Trace a pair-setup response. M2 (salt + the accessory's SRP public key) is safe to log in full. Later stages log
+// only TLV types and lengths: M2 together with our M3 would let anyone reading a posted log brute-force the setup code.
+void psTrace(String headers, byte[] body){
+    if(!settings.debugLog) return
+    String status = headers ? headers.split("\r\n")[0] : "?"
+    if(state.psstage=="2"){ rep("pair-setup RX M2: ${status} | ${body.length}B ${hx(body)}"); return }
+    String tl = tdec(body).collect{ k, v -> (k==6 || k==7) ? "${k}=${hx(v)}" : "${k}:${v?.length}B" }.join(" ")
+    rep("pair-setup RX M${state.psstage}: ${status} | ${body.length}B TLVs ${tl}")
 }
 void routePS(Map tv){ if(state.psstage=="2") psM2(tv) else if(state.psstage=="4") psM4(tv) else psM6(tv) }
 // decode a HAP pairing error (kTLVType_Error, 0x07) into a plain-English message
@@ -492,6 +510,7 @@ void psM2(Map tv){
     byte[] hN=sha512(bigBe(SRP_N,384)); byte[] hg=sha512([5] as byte[]); byte[] hxor=new byte[64]; for(int i=0;i<64;i++) hxor[i]=(byte)(hN[i]^hg[i])
     byte[] M1=sha512(cat(hxor, sha512("Pair-Setup".getBytes("UTF-8")), salt, Ab, Bb, K))
     state.srpK=hx(K); state.srpA=hx(Ab); state.srpM1=hx(M1); state.psstage="4"; rxbuf().setLength(0)
+    rep("pair-setup TX M3: A ${Ab.length}B, proof ${M1.length}B")
     sendHttpTlv("/pair-setup", tlv([[6,[3] as byte[]],[3,Ab],[4,M1]]))
 }
 void psM4(Map tv){
@@ -708,7 +727,7 @@ def parse(String message){
         String hh=new String(hex(buf.substring(0,p))); def m=(hh =~ /(?i)content-length:\s*(\d+)/); int cl=m.find()?(m.group(1) as int):0
         int need=p+8+cl*2; if(buf.length()<need) return
         byte[] body=hex(buf.substring(p+8,need)); rxbuf().delete(0,need); def tv=tdec(body)
-        if(state.op=="pairsetup"){ routePS(tv) }
+        if(state.op=="pairsetup"){ psTrace(hh, body); routePS(tv) }
         else if(state.vstage=="m4"){ doM4(tv) } else { doM2(tv) }
     } else { handleSession() }
   } catch(Throwable e){

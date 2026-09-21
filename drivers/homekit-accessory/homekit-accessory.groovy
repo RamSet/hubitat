@@ -1,6 +1,9 @@
 /*
  * HomeKit Accessory (HAP Import)
  *
+ * TEST BUILD — branch test/pair-method (GitHub issue #1). Adds the "Pair-setup method" preference;
+ * requires the hapCore library from the same branch. Not in HPM; an HPM update overwrites it.
+ *
  * Description:
  *   Imports a LAN/Wi-Fi HomeKit (HAP) accessory into Hubitat. Enter the
  *   accessory's IP and 8-digit HomeKit setup code; this driver pairs to it,
@@ -160,6 +163,7 @@ metadata {
         input "ip", "string", title: "Accessory IP address", required: true
         if (!(state.paired==true || settings?.iosLtsk)) {   // settings is null at code-save time -> MUST use safe-nav
             input "setupCode", "string", title: "HomeKit setup code — 8 digits, no dashes (e.g. 12345678). Enter and Save to pair.", required: false
+            input "pairMethod", "enum", title: "Pair-setup method (troubleshooting — leave at 0 unless asked)", options: ["0":"0 — Pair Setup (default)", "1":"1 — Pair Setup with Auth"], defaultValue: "0", required: false
             input "setupPayload", "string", title: "…or paste the HomeKit QR payload (X-HM://…). For accessories with no printed code / a dynamic code (Eufy Homebase, Nanoleaf, etc.): open the maker app's 'Add to HomeKit' screen, scan the QR with any generic QR reader to get the X-HM://… text, and paste it here — the setup code is decoded from it automatically.", required: false
         }
         input "sessionMode", "enum", title: "Connection mode", options: ["Persistent (event push)","On-demand (poll)"], defaultValue: "Persistent (event push)",
