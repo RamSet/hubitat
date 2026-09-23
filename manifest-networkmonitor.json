@@ -1,8 +1,8 @@
 {
   "packageName": "Network Monitor Health Check",
   "author": "RamSet",
-  "version": "1.4.2",
-  "releaseNotes": "v1.4.2 - Fixes a fresh-install crash (driver used an app-only call), surfaces warnings at the info log level, and removes a stray undeclared-attribute event. Monitors Internet/LAN/optional custom host over HTTP with a manual check command.",
+  "version": "1.5.0",
+  "releaseNotes": "v1.5.0 - New optional setting, Check Interval While Offline: while any checked host is unreachable, the device checks at this shorter interval, so it notices the connection coming back much sooner than the normal interval would. Leave it blank to keep a single interval (no change for existing setups). v1.4.2 - Fixes a fresh-install crash (driver used an app-only call), surfaces warnings at the info log level, and removes a stray undeclared-attribute event. Monitors Internet/LAN/optional custom host over HTTP with a manual check command.",
   "category": "Monitoring",
   "tags": "Network, Health Check, Ping, Monitoring",
   "dateReleased": "2025-04-26",
