@@ -62,7 +62,7 @@ mappings {
     path("/calendar.ics")  { action: [GET: "apiCalendar"] }
 }
 
-String getAppVersion() { return "v0.16.10 (2026-09)" }
+String getAppVersion() { return "v0.17.0 (2026-09)" }
 
 // Simple vs Advanced interface. Simple shows only zones, schedule, weather and
 // hardware safety; Advanced exposes everything (moisture, learning, sensors,
@@ -266,6 +266,12 @@ private String statusHtml() {
     }
     out << "<br>"
 
+    if (wateringSeasonConfigured()) {
+        boolean inSeason = inWateringSeason(now())
+        out << sPill(inSeason ? "in watering season (${wateringSeasonRangeString()}) \u2713"
+                              : "OUT OF SEASON \u2014 scheduled runs resume ${seasonDateString(settings.wateringSeasonStartMonth, settings.wateringSeasonStartDay)}",
+                     inSeason ? GREEN : AMBER)
+    }
     if (settings.pauseContacts || settings.pauseSwitches) {
         boolean on = externalPauseActive()
         out << sPill(on ? "PAUSE SENSOR ON \u2014 ${externalPauseReason()}" : "pause sensors clear \u2713", on ? RED : GREEN)
@@ -351,7 +357,7 @@ def mainPage() {
                 href name: "dashboardPage", title: "Dashboard tile", page: "dashboardPage",
                      image: openmoji("1F4F1"),
                      description: dashboardSummaryString()
-                href name: "restrictionsPage", title: "Restrictions (quiet hours / mode / HSM)", page: "restrictionsPage",
+                href name: "restrictionsPage", title: "Restrictions (season / quiet hours / mode / HSM)", page: "restrictionsPage",
                      image: openmoji("1F6AB"),
                      description: restrictionsSummaryString()
                 href name: "previewPage", title: "Next 7 days preview", page: "previewPage",
@@ -1121,6 +1127,26 @@ def diagnosticsPage() {
 
 def restrictionsPage() {
     dynamicPage(name: "restrictionsPage", title: "Restrictions") {
+        section("Watering season") {
+            paragraph "Scheduled runs only happen between these two dates, both included — for example May 1 to October 1. Outside the range the schedule stays configured but doesn't water. Run now, the Run switch and turning a zone on by hand still work. The range can wrap over New Year (for example November 1 to March 31)."
+            input name: "wateringSeasonEnabled", type: "bool",
+                  title: "Only water within a date range", defaultValue: false, submitOnChange: true
+            if (settings.wateringSeasonEnabled) {
+                input name: "wateringSeasonStartMonth", type: "enum", title: "Season starts — month",
+                      options: MONTH_NAMES, required: true, submitOnChange: true
+                input name: "wateringSeasonStartDay", type: "number", title: "Season starts — day of month",
+                      range: "1..31", required: true, submitOnChange: true
+                input name: "wateringSeasonEndMonth", type: "enum", title: "Season ends — month",
+                      options: MONTH_NAMES, required: true, submitOnChange: true
+                input name: "wateringSeasonEndDay", type: "number", title: "Season ends — day of month (this day still waters)",
+                      range: "1..31", required: true, submitOnChange: true
+                if (wateringSeasonConfigured()) {
+                    paragraph inWateringSeason(now()) ? "✓ In season now (${wateringSeasonRangeString()})"
+                                                      : "❄ Out of season now — scheduled runs resume ${seasonDateString(settings.wateringSeasonStartMonth, settings.wateringSeasonStartDay)}"
+                }
+            }
+        }
+
         section("Quiet hours blackout") {
             paragraph "Block runs between these times. If a scheduled trigger falls in the quiet window, it's skipped. Optionally, an in-progress run is stopped when quiet hours begin (the rest of the plan is skipped — pick up next scheduled window)."
             input name: "quietHoursEnabled", type: "bool",
@@ -1176,7 +1202,7 @@ def restrictionsPage() {
 def previewPage() {
     dynamicPage(name: "previewPage", title: "Next 7 days preview") {
         section {
-            paragraph "Calendar view of the next 7 days. Shows when each window would run, after accounting for skip-next, forced rain delay, day-of-week filters, and quiet hours. (Weather rain-skip is dynamic and can't be predicted ahead of time.)"
+            paragraph "Calendar view of the next 7 days. Shows when each window would run, after accounting for skip-next, forced rain delay, day-of-week filters, the watering season, and quiet hours. (Weather rain-skip is dynamic and can't be predicted ahead of time.)"
         }
         section("Schedule") {
             paragraph previewNextSevenDaysHtml()
@@ -1336,6 +1362,7 @@ def aboutPage() {
             paragraph "v0.12.2 — Fixed pause sensors reporting \"0s remaining\" and skipping ahead when they fired during a soak or the gap between zones. The schedule now tracks soak and between-zone phases as pausable too, so a pause that lands mid-soak reports the real soak time left and resumes that soak (valves stay off) instead of jumping to the next zone."
             paragraph "v0.13.4 — Saving the app now sends a confirmation notification summarizing the schedule: when it will start, how many zones, and the estimated total run time (water + soak). It also doubles as proof the new code is active — if you save and don't get it, the update didn't take."
             paragraph "v0.13.3 — Fixes two scheduling problems. (1) Multiple start times now ALL work: each was scheduled on the same internal handler, so Hubitat overwrote all but the last — only your final start time ran. Each window now has its own handler. (2) A run can no longer start twice from a single trigger: a re-entrancy guard ignores a duplicate scheduled invocation within 15 seconds (and logs it), preventing the double \"starting\" / double watering seen after editing a program near its run time. Re-save each sprinkler app once after updating so the new per-window schedules register."
+            paragraph "v0.17.0 — New watering season on the Restrictions page: pick the dates scheduled watering is allowed between (for example May 1 to October 1, both days included). Outside that range scheduled runs are skipped quietly; Run now, the Run switch and turning a zone on by hand still work. A range can wrap over New Year. The 7-day preview, calendar export, next-run text, status line and 'schedule saved' notification all show the season. Two related fixes: a Run-now press that was held by a pause sensor now still counts as manual when it starts, so the season and every-N-days checks no longer drop it; and the pre-run 'starts in N minutes' warning is no longer sent on days that won't water (off-cycle days in every-N-days mode, or outside the season)."
             paragraph "v0.16.10 — A run that dies before it finishes no longer blocks your other schedules. If a run stopped advancing — the hub restarted mid-run, or the app lost track of a run it had just started — nothing ever reached the end of the run, so the shared coordination switch stayed ON and every other schedule skipped with 'coordination switch held' until someone turned it off by hand (a schedule could even block itself). The app now checks every hour and before each scheduled start: a run that can no longer finish is ended the way Stop would end it — all valves closed, the Run switch turned off, the coordination switch released — and you get a 'run ended early' notification saying why. Saving the app's settings while a run is in progress now ends that run the same way, instead of leaving it half-stopped with the switch still held."
             paragraph "v0.16.9 — Two fixes. (1) The end-of-run phantom manual run is closed for good: as a schedule finishes, the relays are still reporting their final OFF, and the app's tile-reconcile could echo a tile back on just as the 'run active' guard dropped — which got read as a hand-triggered zone and started a stray manual run (v0.16.4 narrowed this but a ~4s window could still lapse under load). There's now a 20-second grace window after a run ends during which any tile change is treated as reconcile, never a manual start. (2) The 'Keep this app's hourly auto-off verify + re-push ON' switch now saves the moment you toggle it (it previously needed a full page save, so turning it off could silently not take)."
             paragraph "v0.16.8 — You can now hand the hardware auto-off entirely to the ZEN16 driver. Under Hardware safety there's a new switch, 'Keep this app's hourly auto-off verify + re-push ON'; turn it OFF and the app stops managing the relay auto-off (the ZEN16 driver owns it — it now defaults each relay to a 15-min auto-off), while the app still watches the controllers for going offline. This is the clean fix when two schedules share a controller: let the driver hold one value per relay instead of two apps pushing over each other. Leaving the switch ON keeps the previous behavior."
@@ -1588,6 +1615,7 @@ def initialize() {
     state.currentZoneIdx = 0
     state.zonesPlan = []
     state.deferredRunPending = false   // never carry a held-defer across re-init/reboot
+    state.deferredRunManual = false
     state.lastSchedEntryMs = 0L         // reset the double-start guard window
     state.pauseActiveSince = [:]        // per-sensor debounce clocks start fresh
 
@@ -1692,6 +1720,11 @@ def hsmChanged(evt) {
 def preRunNotify() {
     Integer lead = (settings.preRunLeadMinutes ?: 0) as int
     if (lead <= 0) return
+    // Warn only for a start that will actually water. The pre-run cron fires daily in interval mode and all year
+    // round, so check the start this warning is for against the cycle and the watering season.
+    long startMs = now() + lead * 60000L
+    if (isIntervalMode() && !isIntervalRunDayMs(startMs)) return
+    if (!inWateringSeason(startMs)) return
     String msg = "${app.label}: schedule starts in ${lead} minute${lead == 1 ? '' : 's'}"
     notify("pre-run", msg)
     if (descTextEnable) log.info msg
@@ -2087,6 +2120,12 @@ def runSchedule(Map opts = [:]) {
         if (descTextEnable) log.info "${app.label}: off-cycle day (every ${settings.scheduleIntervalDays ?: 2} days) — no run"
         return
     }
+    // Watering-season gate (Restrictions page). Quiet like an off-cycle day: the cron keeps firing all year, and a
+    // notification for every skipped day all winter would be noise. Manual runs and per-zone manual runs are exempt.
+    if (!manual && !inWateringSeason(now())) {
+        if (descTextEnable) log.info "${app.label}: outside the watering season (${wateringSeasonRangeString()}) — no run"
+        return
+    }
     Long rd = (state.forcedRainDelayUntilMs ?: 0L) as long
     if (!manual && rd > now()) {
         String until = new Date(rd).format("yyyy-MM-dd HH:mm", location?.timeZone ?: TimeZone.getDefault())
@@ -2138,6 +2177,9 @@ def runSchedule(Map opts = [:]) {
     if (externalPauseActive()) {
         String who = externalPauseReason()
         log.info "${app.label}: pause sensor active (${who}) — holding run until it clears"
+        // Remember a manual request (sticky if a scheduled trigger lands on top of it) so the held run relaunches
+        // as manual — otherwise the off-cycle and watering-season gates would silently drop a Run-now press.
+        state.deferredRunManual = manual || (state.deferredRunPending == true && state.deferredRunManual == true)
         state.deferredRunPending = true
         notify("schedule.defer", [sensor: who])
         return
@@ -2228,6 +2270,7 @@ def runSchedule(Map opts = [:]) {
                               estTotal: fmtDuration(est.total), estWater: fmtDuration(est.water),
                               estSoak: fmtDuration(est.soak)])
     state.deferredRunPending = false   // committing to a run clears any held-defer
+    state.deferredRunManual = false
     syncRunControlSwitch()   // reflect "running" on the HomeKit control switch
     recordRunStart(plan, seasonalMult)
     // Acquire the shared coordination lock for the duration of this run
@@ -2255,7 +2298,7 @@ def startDeferredRun() {
         return
     }
     log.info "${app.label}: launching held run — pause sensors clear"
-    runSchedule([:])
+    runSchedule([manual: (state.deferredRunManual == true)])
 }
 
 // =========================================================================
@@ -2936,6 +2979,7 @@ private void notifyScheduleSaved() {
     String when = times.join(" & ")
     String days = isIntervalMode() ? "every ${settings.scheduleIntervalDays ?: 2} days"
                                    : ((settings.scheduleDays ?: []) as List).join(", ")
+    if (wateringSeasonConfigured()) days += ", ${wateringSeasonRangeString()} only"
     List<Integer> plan = []
     Integer n = (settings.zoneCountPref ?: 0) as int
     for (int i = 1; i <= n; i++) {
@@ -3738,8 +3782,11 @@ private String nextScheduledRunString() {
     // configured days + first window. Good enough for the dashboard.
     String t = settings.scheduleStartTime
     if (t?.contains("T")) t = t.tokenize("T")[1].substring(0,5)
-    if (isIntervalMode()) return "every ${settings.scheduleIntervalDays ?: 2} day(s)  @ ${t}"
-    return "${(settings.scheduleDays as List).join(',')}  @ ${t}"
+    String base = isIntervalMode() ? "every ${settings.scheduleIntervalDays ?: 2} day(s)  @ ${t}"
+                                   : "${(settings.scheduleDays as List).join(',')}  @ ${t}"
+    if (!wateringSeasonConfigured()) return base
+    if (inWateringSeason(now())) return "${base} · season ${wateringSeasonRangeString()}"
+    return "${base} · out of season until ${seasonDateString(settings.wateringSeasonStartMonth, settings.wateringSeasonStartDay)}"
 }
 
 // =========================================================================
@@ -3945,6 +3992,38 @@ private String currentWeekIso() {
 // Quiet hours / mode / HSM gating
 // =========================================================================
 
+// ---- Watering season (Restrictions page) ----
+@groovy.transform.Field static final Map MONTH_NAMES = ["1":"January", "2":"February", "3":"March", "4":"April",
+    "5":"May", "6":"June", "7":"July", "8":"August", "9":"September", "10":"October", "11":"November", "12":"December"]
+
+private boolean wateringSeasonConfigured() {
+    return settings.wateringSeasonEnabled && settings.wateringSeasonStartMonth && settings.wateringSeasonStartDay &&
+           settings.wateringSeasonEndMonth && settings.wateringSeasonEndDay
+}
+// month*100 + day, so dates compare as plain integers regardless of year.
+private int seasonKey(def month, def day) {
+    return ((month as String).toBigDecimal().intValue() * 100) + (day as String).toBigDecimal().intValue()
+}
+// True when the local date containing `ms` is in the watering season, or no season is set. Both ends are
+// included; a start later in the year than the end wraps over New Year.
+private boolean inWateringSeason(long ms) {
+    if (!wateringSeasonConfigured()) return true
+    Calendar c = Calendar.getInstance(location?.timeZone ?: TimeZone.getDefault())
+    c.setTimeInMillis(ms)
+    int today = seasonKey(c.get(Calendar.MONTH) + 1, c.get(Calendar.DAY_OF_MONTH))
+    int start = seasonKey(settings.wateringSeasonStartMonth, settings.wateringSeasonStartDay)
+    int end   = seasonKey(settings.wateringSeasonEndMonth, settings.wateringSeasonEndDay)
+    return (start <= end) ? (today >= start && today <= end) : (today >= start || today <= end)
+}
+private String seasonDateString(def month, def day) {
+    String m = (MONTH_NAMES[(month as String).toBigDecimal().intValue() as String] ?: "?") as String
+    return "${m.take(3)} ${(day as String).toBigDecimal().intValue()}"
+}
+private String wateringSeasonRangeString() {
+    return "${seasonDateString(settings.wateringSeasonStartMonth, settings.wateringSeasonStartDay)} – " +
+           "${seasonDateString(settings.wateringSeasonEndMonth, settings.wateringSeasonEndDay)}"
+}
+
 private boolean quietHoursActive() {
     if (!settings.quietHoursEnabled) return false
     if (!settings.quietStartTime || !settings.quietEndTime) return false
@@ -4027,6 +4106,7 @@ private String previewNextSevenDaysHtml() {
         String windowsStr = runsToday ? windows.join(", ") : "—"
         List<String> blockers = []
         if (!runsToday) blockers << (isIntervalMode() ? "off-cycle day" : "not a watering day")
+        if (runsToday && !inWateringSeason(day.getTime())) blockers << "outside watering season"
         if (d == 0 && skipNextArmed) blockers << "next-run will be skipped"
         if (skipUntilMs > day.getTime() && skipUntilMs > now()) {
             String until = new Date(skipUntilMs).format("yyyy-MM-dd HH:mm", location?.timeZone ?: TimeZone.getDefault())
@@ -4227,7 +4307,8 @@ private String renderCalendarIcs() {
 
     Calendar c = Calendar.getInstance(location?.timeZone ?: TimeZone.getDefault())
     for (int d = 0; d < 30; d++) {
-        if (isIntervalMode() ? isIntervalRunDayMs(c.getTimeInMillis()) : wantDow.contains(c.get(Calendar.DAY_OF_WEEK))) {
+        if ((isIntervalMode() ? isIntervalRunDayMs(c.getTimeInMillis()) : wantDow.contains(c.get(Calendar.DAY_OF_WEEK)))
+                && inWateringSeason(c.getTimeInMillis())) {
             String dateStr = c.getTime().format("yyyyMMdd", location?.timeZone ?: TimeZone.getDefault())
             windows.each { String iso ->
                 String hhmm = timeFmt(iso)
@@ -4288,6 +4369,11 @@ private String exportConfigJson() {
         rainPopThreshold:       settings.rainPopThreshold,
         rainAmountThreshold:    settings.rainAmountThreshold,
         seasonalEnabled:        settings.seasonalEnabled,
+        wateringSeasonEnabled:    settings.wateringSeasonEnabled,
+        wateringSeasonStartMonth: settings.wateringSeasonStartMonth,
+        wateringSeasonStartDay:   settings.wateringSeasonStartDay,
+        wateringSeasonEndMonth:   settings.wateringSeasonEndMonth,
+        wateringSeasonEndDay:     settings.wateringSeasonEndDay,
         seasonalMaxPct:         settings.seasonalMaxPct,
         quietHoursEnabled:      settings.quietHoursEnabled,
         quietStartTime:         settings.quietStartTime,
@@ -4856,6 +4942,7 @@ private String diagnosticsSummaryString() {
 
 private String restrictionsSummaryString() {
     List parts = []
+    if (wateringSeasonConfigured()) parts << "season ${wateringSeasonRangeString()}"
     if (settings.quietHoursEnabled) parts << "quiet ${timeFmt(settings.quietStartTime)}-${timeFmt(settings.quietEndTime)}"
     if (settings.pauseModes) parts << "mode-pause: ${(settings.pauseModes as List).join(',')}"
     if (settings.hsmPauseEnabled) parts << "HSM-pause"
