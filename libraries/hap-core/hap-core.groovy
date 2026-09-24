@@ -24,9 +24,25 @@
  * Include in a driver with:  #include RamSet.hapCore
  *
  * Author: RamSet
- * Version: 0.10.16
+ * Version: 0.11.0
  *
  * Changelog:
+ *  v0.11.0 - Pairs accessories that reject the standard pair-setup method, and reads back accessories that frame
+ *            their HTTP response in pieces. Three fixes, all found on an iSmartGate bridge (GitHub issue #1):
+ *            (1) PAIR-SETUP METHOD: M1 goes out as Method 0 (Pair Setup) as before; if the accessory answers 0x01
+ *            "unknown" — which the iSmartGate does while advertising sf=1 — it retries once with Method 1 (Pair
+ *            Setup with Auth) and remembers the method that worked. Deliberately NOT keyed off the accessory's ff
+ *            flag: accessories that advertise ff=1 (an ecobee, for one) pair fine with Method 0, and switching
+ *            them would risk what already works. A "Pair-setup method" preference pins one for support.
+ *            (2) ONE-SHOT RESPONSE FRAMING: a response now ends on its real HTTP framing (Content-Length reached,
+ *            or the chunked terminator) instead of on "a decrypted frame under 1024 bytes", which is a guess about
+ *            how the accessory splits its frames. An accessory that sends headers in one frame and the body in the
+ *            next ended the response at the headers, so /accessories parsed an empty body ("Text must not be null
+ *            or empty") and no children were created. Falls back to the old guess when a response carries neither
+ *            framing, so accessories that work today are untouched.
+ *            (3) DUPLICATE MDNS DISPATCH: an mDNS reply and its timeout could both claim the same pending op,
+ *            because driver state is only saved when an execution ends — sending pair-setup M1 twice on two
+ *            sockets. The op is now claimed atomically, so exactly one path acts on it.
  *  v0.10.16 - Reboot-changed-port recovery. A HomeKit accessory's HAP port is DYNAMIC and frequently changes when
  *            the accessory reboots (observed live: an ecobee came back on 42600 after being on 57857). 0.10.14/15's
  *            cheap-reconnect path connected straight to the last-known port and would never re-resolve it until the
@@ -180,6 +196,12 @@ library(
 import groovy.transform.Field
 
 // ===== in-memory buffers (keyed by device.id — @Field static is shared across ALL instances) =====
+// Pending post-lookup op, claimed atomically. An mDNS reply and its timeout can run at the same instant (and a
+// reply to a retried query can arrive after the first reply), and driver `state` is only written when each
+// execution ENDS — so both read the same pending op and both dispatch it, which sent pair-setup M1 twice on two
+// sockets. replace() hands the op to exactly one caller: the first gets it, later callers get the "" sentinel.
+// state.afterMdns / state.afterRelocate stay as the after-restart fallback, when this map is empty.
+@Field static java.util.concurrent.ConcurrentHashMap OPCLAIM = new java.util.concurrent.ConcurrentHashMap()
 @Field static Map RXBUF = [:]
 @Field static Map PLAINBUF = [:]
 StringBuilder rxbuf(){ if(RXBUF[device.id]==null) RXBUF[device.id]=new StringBuilder(); return RXBUF[device.id] }
@@ -337,9 +359,16 @@ void dumpAcc(j){
 }
 
 // ===== mDNS port discovery (the HAP port is dynamic — always read it at connect) =====
+private void armOpClaim(String kind, String op){ OPCLAIM.put("${device.id}:${kind}".toString(), op) }
+private String takeOpClaim(String kind, def fallback){
+    String prev = OPCLAIM.replace("${device.id}:${kind}".toString(), "")
+    if(prev == null) return (fallback ?: null) as String   // nothing armed since restart: use the saved state
+    return prev ?: null                                     // "" means another execution already took it
+}
+
 def mdnsThen(String op){
     if(!settings.ip){ log.warn "HAP: set IP first"; return }
-    state.afterMdns = op
+    state.afterMdns = op; armOpClaim("mdns", op)
     String q="000000000001000000000000045f686170045f746370056c6f63616c00000c8001"
     sendHubCommand(new hubitat.device.HubAction(q, hubitat.device.Protocol.LAN,
         [destinationAddress:"${settings.ip}:5353",
@@ -349,7 +378,7 @@ def mdnsThen(String op){
     runIn(4,"mdnsTimeout")   // unicast SRV reply is sub-second when the accessory is up; 4s is ample and halves the pre-sweep cost
 }
 def mdnsTimeout(){
-    def op=state.afterMdns; state.afterMdns=null; if(!op) return
+    def op=takeOpClaim("mdns", state.afterMdns); state.afterMdns=null; if(!op) return
     int tries=(state.mdnsTries?:0) as int
     if(tries < 2){   // the port can change after a reboot/power-cycle, so getting the CURRENT one matters
         state.mdnsTries=tries+1
@@ -372,7 +401,7 @@ def mdnsTimeout(){
 // by its HomeKit id (accPairingId) to pick up a new DHCP-assigned IP, then reconnect. Best-effort — a DHCP
 // reservation is the reliable fix, but this recovers automatically when the address drifts.
 def relocate(String op){
-    state.afterRelocate = op
+    state.afterRelocate = op; armOpClaim("relocate", op)
     String q="000000000001000000000000045f686170045f746370056c6f63616c00000c8001"
     sendHubCommand(new hubitat.device.HubAction(q, hubitat.device.Protocol.LAN,
         [destinationAddress:"224.0.0.251:5353",
@@ -382,7 +411,7 @@ def relocate(String op){
     runIn(8,"relocateTimeout")
 }
 def relocateTimeout(){
-    def op=state.afterRelocate; state.afterRelocate=null; if(!op) return
+    def op=takeOpClaim("relocate", state.afterRelocate); state.afterRelocate=null; if(!op) return
     log.warn "HAP: could not find the accessory on the network (it may be offline — a DHCP reservation is recommended); trying last-known IP"
     dispatchOp(op)
 }
@@ -397,7 +426,7 @@ def relocateCallback(message){
             if(r.ip && r.ip != settings.ip){ device.updateSetting("ip",[value:r.ip,type:"string"]); logInfo "HAP: accessory moved — IP updated to ${r.ip}"; sendEvent(name:"hapStatus", value:"IP updated to ${r.ip}") }
             if(r.port){ device.updateSetting("port",[value:r.port,type:"number"]); state.discoveredPort=r.port }
             unschedule("relocateTimeout")
-            def op=state.afterRelocate; state.afterRelocate=null; if(op) dispatchOp(op)
+            def op=takeOpClaim("relocate", state.afterRelocate); state.afterRelocate=null; if(op) dispatchOp(op)
         }
         // else a different HAP accessory answered — ignore and keep waiting (relocateTimeout gives up)
     }catch(e){ log.error "relocateCallback: ${e}" }
@@ -411,7 +440,7 @@ def mdnsCallback(message){
         if(r.port){ device.updateSetting("port",[value:r.port,type:"number"]); state.discoveredPort=r.port; state.mdnsTries=0; logInfo "HAP: detected port ${r.port}" }
         else log.warn "HAP: no SRV in mDNS reply"
         unschedule("mdnsTimeout")
-        def op=state.afterMdns; state.afterMdns=null; if(op) dispatchOp(op)
+        def op=takeOpClaim("mdns", state.afterMdns); state.afterMdns=null; if(op) dispatchOp(op)
     } catch(e){ log.error "mdnsCallback: ${e}" }
 }
 // minimal mDNS/DNS answer walker -> [ip, port, sf, id]
@@ -446,6 +475,7 @@ int hapPort(){ return (state.discoveredPort ?: settings.port ?: 0) as int }
 def pair(){
     if(!settings.setupCode){ log.error "Enter the HomeKit setup code first"; return }
     if(!settings.ip){ log.error "Set the accessory IP first"; return }
+    state.pairRetried = false   // a fresh request gets the method ladder again (remembered method stays)
     mdnsThen("pairsetup")
 }
 void pairConnect(){
@@ -464,7 +494,24 @@ void pairConnect(){
         log.error "connect: $e"; state.connTry=0; return
     }
     state.connTry=0
-    sendHttpTlv("/pair-setup", tlv([[6,[1] as byte[]],[0,[0] as byte[]]]))   // State=M1, Method=PairSetup
+    int method = pairMethod()
+    rep("pair-setup M1 method=${method}")
+    sendHttpTlv("/pair-setup", tlv([[6,[1] as byte[]],[0,[method] as byte[]]]))   // State=M1, Method 0/1
+}
+// Which pair-setup method to send. Method 0 (Pair Setup) is the default and what every accessory paired here has
+// used; some — an iSmartGate bridge, GitHub issue #1 — answer it with 0x01 "unknown" while advertising themselves
+// as pairable, and pair only with Method 1 (Pair Setup with Auth). Choosing by the accessory's ff flag would move
+// working accessories onto an untried path (an ecobee advertises ff=1 and pairs fine with Method 0), so instead we
+// try 0 and retry once with 1 — see pairMethodAfterError(). The method that worked is remembered for this device.
+private int pairMethod(){
+    if(settings.pairMethod in ["0","1"]) return settings.pairMethod as int   // support override
+    return ((state.pairMethodUse ?: 0) as int)
+}
+// Method to retry with after an M2 error, or -1 to report the error and stop.
+private int pairMethodAfterError(int err, int usedMethod, boolean alreadyRetried, def override){
+    if(override in ["0","1"]) return -1        // operator pinned a method: don't second-guess it
+    if(err != 1 || alreadyRetried || usedMethod != 0) return -1
+    return 1
 }
 void routePS(Map tv){ if(state.psstage=="2") psM2(tv) else if(state.psstage=="4") psM4(tv) else psM6(tv) }
 // decode a HAP pairing error (kTLVType_Error, 0x07) into a plain-English message
@@ -480,7 +527,16 @@ String pairErr(byte[] e){
     return m ?: "error 0x${hx(e)}"
 }
 void psM2(Map tv){
-    if(tv[7]!=null){ String m=pairErr(tv[7]); sendEvent(name:"hapStatus",value:"pair failed: ${m}"); log.error "HAP pair-setup M2 error 0x${hx(tv[7])}: ${m}"; interfaces.rawSocket.close(); return }
+    if(tv[7]!=null){
+        int err = (tv[7] && tv[7].length>0) ? (tv[7][0]&0xff) : 0
+        int retry = pairMethodAfterError(err, pairMethod(), (state.pairRetried == true), settings.pairMethod)
+        if(retry >= 0){
+            state.pairRetried = true; state.pairMethodUse = retry
+            log.warn "HAP: accessory rejected pair-setup method ${pairMethod()} (0x${hx(tv[7])}) — retrying with Pair Setup with Auth"
+            try{ interfaces.rawSocket.close() }catch(ig){}
+            runIn(2, "pairConnect"); return
+        }
+        String m=pairErr(tv[7]); sendEvent(name:"hapStatus",value:"pair failed: ${m}"); log.error "HAP pair-setup M2 error 0x${hx(tv[7])}: ${m}"; interfaces.rawSocket.close(); return }
     if(tv[2]==null || tv[3]==null){ sendEvent(name:"hapStatus",value:"pair fail: no M2 (device busy? wait & retry)"); log.error "M2 missing salt/key"; interfaces.rawSocket.close(); return }
     byte[] salt=tv[2]; byte[] Bb=tv[3]; java.math.BigInteger B=beBig(Bb)
     java.math.BigInteger a=beBig(rnd32()); byte[] Ab=bigBe(SRP_G.modPow(a,SRP_N),384)
@@ -768,10 +824,24 @@ void handleSession(){
         byte[] aad=hex(buf.substring(0,4)); byte[] blk=hex(buf.substring(4,need)); rxbuf().delete(0,need); buf=rxbuf().toString()
         byte[] pt=chachaDec(hex(state.a2c),nctr(state.inCtr),blk,aad); state.inCtr=(state.inCtr as long)+1; state.lastRx=now(); plainbuf().append(hx(pt))
         dlog("RXframe ln=${ln} inCtr=${state.inCtr} plain=${(int)(plainbuf().length()/2)}b rxLeft=${(int)(rxbuf().length()/2)}b")
-        if(state.op!="live" && ln<1024){ finish(); return }
+        if(state.op!="live" && sessionResponseComplete(ln)){ finish(); return }
     }
     if(state.op=="live") processLiveStream()
 }
+// True once the decrypted buffer holds one COMPLETE HTTP response. The old test — "a frame shorter than 1024
+// bytes ends the response" — was a guess about how the accessory chose to split its frames. An accessory that
+// sends its header block in one small frame and the body in the next (iSmartGate, GitHub issue #1) ended the
+// response at the headers, so /accessories parsed an empty body: "json ... Text must not be null or empty".
+private boolean sessionResponseComplete(int lastFrameLen){
+    String s = new String(hex(plainbuf().toString()), "ISO-8859-1")
+    int he = s.indexOf("\r\n\r\n"); if(he < 0) return false          // headers still arriving
+    String head = s.substring(0, he); int bodyStart = he + 4
+    if(head.toLowerCase().contains("chunked")) return s.indexOf("0\r\n\r\n", bodyStart) >= 0
+    def m = (head =~ /(?i)content-length:\s*(\d+)/)
+    if(m.find()) return (s.length() - bodyStart) >= ((m.group(1) as int))
+    return lastFrameLen < 1024    // no length and not chunked: keep the old end-of-response guess
+}
+
 void finish(){
     unschedule("oneshotWatch"); state.connInFlight=null
     byte[] resp=hex(plainbuf().toString()); String s=new String(resp,"UTF-8"); state.sess=false; state.vstage=null
@@ -790,6 +860,7 @@ void finish(){
         while(rest.length()>0){ int nl=rest.indexOf("\r\n"); if(nl<0) break; int n=Integer.parseInt(rest.substring(0,nl).trim(),16); if(n==0) break; sb.append(rest.substring(nl+2,nl+2+n)); rest=rest.substring(nl+2+n+2) }
         body=sb.toString()
     }
+    rep("ONESHOT ${head.split('\r\n')[0]} body=${body.length()}b")
     def j; try{ j=new groovy.json.JsonSlurper().parseText(body) }catch(e){ rep("ERR json ${e}; head=${head.split('\r\n')[0]}"); return }
     if(state.op=="discover"){ onAccessories(j); runIn(1,"startSession"); return }
     onCharacteristics(j)
