@@ -5,6 +5,9 @@
  *   - Pair-setup method is selectable (settings.pairMethod: 0 = Pair Setup, 1 = Pair Setup with Auth).
  *     Unset or 0 sends the same M1 bytes as the release build.
  *   - Debug logging traces pair-setup: M1 in full, M2 in full, later stages as TLV types and lengths only.
+ *   - A one-shot session response now ends on its real HTTP framing (Content-Length / chunked terminator)
+ *     instead of on "a frame under 1024 bytes", which cut /accessories off after the headers on an accessory
+ *     that frames headers and body separately.
  *
  * Reusable, device-agnostic HAP CONTROLLER core, extracted from the proven
  * RamSet ecobee-hap-thermostat driver. It contains everything needed to pair
@@ -787,10 +790,24 @@ void handleSession(){
         byte[] aad=hex(buf.substring(0,4)); byte[] blk=hex(buf.substring(4,need)); rxbuf().delete(0,need); buf=rxbuf().toString()
         byte[] pt=chachaDec(hex(state.a2c),nctr(state.inCtr),blk,aad); state.inCtr=(state.inCtr as long)+1; state.lastRx=now(); plainbuf().append(hx(pt))
         dlog("RXframe ln=${ln} inCtr=${state.inCtr} plain=${(int)(plainbuf().length()/2)}b rxLeft=${(int)(rxbuf().length()/2)}b")
-        if(state.op!="live" && ln<1024){ finish(); return }
+        if(state.op!="live" && sessionResponseComplete(ln)){ finish(); return }
     }
     if(state.op=="live") processLiveStream()
 }
+// True once the decrypted buffer holds one COMPLETE HTTP response. The old test — "a frame shorter than 1024
+// bytes ends the response" — was a guess about how the accessory chose to split its frames. An accessory that
+// sends its headers in one small frame and the body in the next (iSmartGate, GitHub issue #1) ended the response
+// at the headers, so /accessories parsed an empty body: "json ... Text must not be null or empty".
+private boolean sessionResponseComplete(int lastFrameLen){
+    String s = new String(hex(plainbuf().toString()), "ISO-8859-1")
+    int he = s.indexOf("\r\n\r\n"); if(he < 0) return false          // headers still arriving
+    String head = s.substring(0, he); int bodyStart = he + 4
+    if(head.toLowerCase().contains("chunked")) return s.indexOf("0\r\n\r\n", bodyStart) >= 0
+    def m = (head =~ /(?i)content-length:\s*(\d+)/)
+    if(m.find()) return (s.length() - bodyStart) >= ((m.group(1) as int))
+    return lastFrameLen < 1024    // no length and not chunked: keep the old end-of-response guess
+}
+
 void finish(){
     unschedule("oneshotWatch"); state.connInFlight=null
     byte[] resp=hex(plainbuf().toString()); String s=new String(resp,"UTF-8"); state.sess=false; state.vstage=null
@@ -809,6 +826,7 @@ void finish(){
         while(rest.length()>0){ int nl=rest.indexOf("\r\n"); if(nl<0) break; int n=Integer.parseInt(rest.substring(0,nl).trim(),16); if(n==0) break; sb.append(rest.substring(nl+2,nl+2+n)); rest=rest.substring(nl+2+n+2) }
         body=sb.toString()
     }
+    rep("ONESHOT ${head.split('\r\n')[0]} body=${body.length()}b")
     def j; try{ j=new groovy.json.JsonSlurper().parseText(body) }catch(e){ rep("ERR json ${e}; head=${head.split('\r\n')[0]}"); return }
     if(state.op=="discover"){ onAccessories(j); runIn(1,"startSession"); return }
     onCharacteristics(j)
