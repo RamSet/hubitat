@@ -24,9 +24,10 @@
  * Include in a driver with:  #include RamSet.hapCore
  *
  * Author: RamSet
- * Version: 0.11.0
+ * Version: 0.11.1
  *
  * Changelog:
+ *  v0.11.1 - Resolve the merge of targeted mDNS recovery with atomic operation claiming.
  *  v0.10.17 - Improve HAP discovery and recovery: preserve configured-IP-first discovery with targeted multicast
  *            fallback; associate SRV, TXT, identity, and address records by service; target known service names
  *            during relocation; accept any reply whose TXT id matches the paired accessory wherever it arrived
