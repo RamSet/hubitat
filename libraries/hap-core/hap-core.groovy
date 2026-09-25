@@ -831,6 +831,24 @@ def socketStatus(String s){
     else if(!l.contains("close")) log.warn "socket: $s"
 }
 
+private void recoverDecryptFailure(){
+    String op=state.op
+    state.live=false; state.sess=false; state.connInFlight=null
+    state.probeAt=null; rxbuf().setLength(0); plainbuf().setLength(0)
+    try{ interfaces.rawSocket.close() }catch(ignored){}
+    unschedule("liveKeepalive"); unschedule("kaWatch"); unschedule("oneshotWatch"); unschedule("verifyWatch")
+    unschedule("retryEncrypted")
+    runIn(2,"retryEncrypted")
+    dlog("HAP: encrypted session reset after tag failure (${op})")
+}
+def retryEncrypted(){
+    if(!isPaired()) return
+    if(state.op=="live"){ startLive(); return }
+    if(state.op=="write" && state.writeJson){ hapStart("write", state.writeJson); return }
+    if(state.op in ["read","discover","unpair"]){ startSession(); return }
+    startSession()
+}
+
 // ===== socket receive + framing =====
 def parse(String message){
   try {
@@ -854,8 +872,10 @@ def parse(String message){
     if(state.live && (es.contains("AEADBadTag") || es.contains("Tag mismatch") || es.contains("BadPadding"))){
         dlog("HAP: session desynced (decrypt failed) — reconnecting for fresh keys")   // benign self-healing re-key; debug-only (fires often on busy multi-sensor thermostats)
         rep("ERR parse ${state.op}/${state.vstage}: ${e.class.simpleName}: ${e.message}")
-        state.live=false; state.sess=false; try{ interfaces.rawSocket.close() }catch(ig){}; state.connInFlight=null
-        unschedule("liveKeepalive"); unschedule("kaWatch"); runIn(2,"startLive")
+        recoverDecryptFailure()
+    } else if(es.contains("AEADBadTag") || es.contains("Tag mismatch") || es.contains("BadPadding")){
+        log.warn "parse: encrypted session desynchronized (${state.op}); reconnecting"
+        recoverDecryptFailure()
     } else {
         log.error "parse: ${e}"; rep("ERR parse ${state.op}/${state.vstage}: ${e.class.simpleName}: ${e.message}")
     }
