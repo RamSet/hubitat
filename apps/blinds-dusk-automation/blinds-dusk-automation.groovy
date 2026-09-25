@@ -50,8 +50,13 @@ def mainPage() {
                   title: "Illuminance sensor(s) that trigger evaluation", multiple: true, required: true
             input "luxThreshold", "number",
                   title: "Act when illuminance is at or below (lux)", defaultValue: 200, required: true
-            input "sunsetOffset", "number",
-                  title: "Start this many minutes BEFORE sunset", defaultValue: 15, required: true
+            input "useSunsetGate", "bool",
+                  title: "Wait for the before-sunset gate (off = lower on lux alone, any time of day)",
+                  defaultValue: true, submitOnChange: true
+            if (settings.useSunsetGate != false) {
+                input "sunsetOffset", "number",
+                      title: "Start this many minutes BEFORE sunset", defaultValue: 15, required: true
+            }
         }
         section("<b>Room devices</b>") {
             input "blinds", "capability.windowShade",
@@ -65,6 +70,23 @@ def mainPage() {
                   title: "Motion sensor (room light turns on only if active)", required: false
             input "roomLight", "capability.switch",
                   title: "Room light to turn on when occupied", required: false
+        }
+        section("<b>Confirm the blind actually closed</b>") {
+            paragraph "Closing a shade is fire-and-forget: if the motor is offline or ignores the command, the app would otherwise finish for the night with the shade still up. With this on, a while after commanding close the app reads the shade back, re-sends close if it isn't closed, and alerts you if it never confirms."
+            input "blindVerifyEnable", "bool", title: "Verify the blind reaches 'closed'", defaultValue: true
+            input "blindTravelSec", "number", title: "Seconds to allow for the blind to finish closing before checking", defaultValue: 45, required: true
+            input "blindRetries", "number", title: "Re-send close this many times before alerting", defaultValue: 2, required: true
+        }
+        section("<b>If the window never closes</b>") {
+            paragraph "When the window is open at dusk the app waits for it to close before lowering the blind. That wait has no end: if the window is left open all night you get one message at dusk and then silence, with the blind still up. These reminders stop it going quiet. The blind is never lowered onto an open window — lowering a shade onto an open sash or screen is the worse outcome, so the app keeps telling you instead of acting."
+            input "windowWaitRemindMins", "number",
+                  title: "Remind me every this many minutes while still waiting (0 = never remind)",
+                  defaultValue: 60, required: true
+            input "windowWaitMaxReminders", "number",
+                  title: "Send at most this many reminders",
+                  defaultValue: 3, required: true
+            input "windowWaitMsg", "text", title: "Reminder message",
+                  defaultValue: "Window is STILL open - the blind has not been lowered."
         }
         section("<b>Notifications</b>") {
             input "notifiers", "capability.notification",
@@ -122,6 +144,7 @@ def illuminanceHandler(evt) {
         notify(windowOpenMsg)
         state.waitingForWindow = true
         subscribe(windowSensor, "contact.closed", windowClosedHandler)
+        armWindowWaitReminder()
     } else {
         lowerBlinds()
         if (motionSensor && motionSensor.currentValue("motion") == "active") {
@@ -134,6 +157,7 @@ def illuminanceHandler(evt) {
 def windowClosedHandler(evt) {
     if (!state.waitingForWindow) return
     state.waitingForWindow = false
+    unschedule("windowWaitReminder")
     unsubscribe(windowSensor)
     notify(windowClosedMsg)
     Integer delay = (windowCloseDelay ?: 0) as Integer
@@ -151,7 +175,40 @@ def resetHandler() {
     state.actedTonight = false
     if (state.waitingForWindow) {
         state.waitingForWindow = false
+        unschedule("windowWaitReminder")
         if (windowSensor) unsubscribe(windowSensor)
+    }
+}
+
+// The window-open wait is open-ended by design: we will not lower a blind onto an open
+// window. But an open-ended wait must not be a silent one, so remind while it holds.
+private void armWindowWaitReminder() {
+    Integer mins = windowWaitMins()
+    state.windowRemindersSent = 0
+    if (mins <= 0) return
+    runIn(mins * 60, "windowWaitReminder", [overwrite: true])
+    if (logEnable) log.debug "window wait: first reminder in ${mins} min"
+}
+
+private Integer windowWaitMins() {
+    return ((settings.windowWaitRemindMins == null ? 60 : settings.windowWaitRemindMins) as Integer)
+}
+
+def windowWaitReminder() {
+    if (!state.waitingForWindow) return
+    // The window may have closed between the schedule firing and now.
+    if (windowSensor?.currentValue("contact") != "open") {
+        if (logEnable) log.debug "window no longer open; dropping reminder"
+        return
+    }
+    Integer maxN = ((settings.windowWaitMaxReminders == null ? 3 : settings.windowWaitMaxReminders) as Integer)
+    Integer sent = ((state.windowRemindersSent ?: 0) as Integer) + 1
+    state.windowRemindersSent = sent
+    notify(settings.windowWaitMsg ?: "Window is STILL open - the blind has not been lowered.")
+    if (logEnable) log.debug "window still open: reminder ${sent} of ${maxN}"
+    Integer mins = windowWaitMins()
+    if (sent < maxN && mins > 0) {
+        runIn(mins * 60, "windowWaitReminder", [overwrite: true])
     }
 }
 
@@ -166,12 +223,16 @@ private String currentStatus() {
     rows << row("Armed for tonight",
                 armed ? pill("yes", "green") : pill("no — already acted", "grey"))
 
+    boolean gateOff = (settings.useSunsetGate == false)
     boolean dark = lightSensors ? isDark() : false
-    rows << row("Dark now (dusk gate)",
-                lightSensors ? (dark ? pill("yes", "indigo") : pill("no", "amber")) : pill("—", "grey"))
+    rows << row(gateOff ? "Dusk gate" : "Dark now (dusk gate)",
+                gateOff ? pill("off — lux only", "grey")
+                        : (lightSensors ? (dark ? pill("yes", "indigo") : pill("no", "amber")) : pill("—", "grey")))
 
     rows << row("Waiting for window to close",
-                state.waitingForWindow ? pill("yes", "amber") : pill("no", "grey"))
+                state.waitingForWindow
+                    ? pill("yes — ${(state.windowRemindersSent ?: 0)} reminder(s) sent", "amber")
+                    : pill("no", "grey"))
 
     if (lightSensors) {
         lightSensors.each { s ->
@@ -232,6 +293,59 @@ void lowerBlinds() {
     blinds?.close()
     blinds?.close()
     if (logEnable) log.debug "lowering blind(s): ${blinds*.displayName}"
+    // Verify they actually reach 'closed'. close() is fire-and-forget — a shade that
+    // ignores it (offline / dead motor) would otherwise leave the night 'done' with the
+    // blind still up (exactly what happened 2026-09-19). Read back, re-send, then alert.
+    if (settings.blindVerifyEnable != false) armBlindConfirm(0, 0)
+}
+
+private Integer blindTravelSec() { return Math.max(5, (settings.blindTravelSec ?: 45) as int) }
+
+private void armBlindConfirm(Integer tries, Integer grace) {
+    runIn(blindTravelSec(), "confirmBlindsClosed", [data: [tries: tries, grace: grace], overwrite: true])
+}
+
+// Read each shade back after it's had time to travel; re-send close to any that aren't
+// closed and alert loudly if one never confirms. A shade still 'closing' just gets more
+// time (up to a couple of grace cycles) rather than a wasted retry. Falls back to the
+// position value when the driver reports no windowShade state.
+def confirmBlindsClosed(data) {
+    Integer tries = (data?.tries ?: 0) as int
+    Integer grace = (data?.grace ?: 0) as int
+    def stuck = []; def moving = []; def unverifiable = []
+    blinds?.each { b ->
+        try { if (b.hasCommand("refresh")) b.refresh() } catch (e) { }
+        String st = (b.currentValue("windowShade") ?: "").toString().toLowerCase()
+        Integer pos = null; try { pos = (b.currentValue("position") as Integer) } catch (e) { }
+        if (st == "closed") return
+        else if (st == "closing" || st == "opening" || st == "moving") moving << b
+        else if (st == "" || st == "unknown") {
+            if (pos != null) { if (pos > ((settings.blindClosedPos ?: 2) as int)) stuck << b }
+            else unverifiable << b
+        } else stuck << b   // open / partially open / anything not closed
+    }
+    // Still physically moving and nothing outright stuck → give it another travel window,
+    // but cap the grace so a shade that reports 'closing' forever can't loop endlessly.
+    if (moving && !stuck) {
+        if (grace < 2) { armBlindConfirm(tries, grace + 1); return }
+        stuck = moving   // grace exhausted — treat a perpetually-'closing' shade as failed
+    }
+    if (unverifiable && !stuck) {
+        log.warn "${app.label}: can't confirm ${unverifiable*.displayName.join(', ')} closed (shade reports no state) — verification skipped"
+        return
+    }
+    if (!stuck) { if (logEnable) log.debug "blind(s) confirmed closed"; return }
+
+    List names = stuck*.displayName
+    Integer maxTries = Math.max(1, (settings.blindRetries ?: 2) as int)
+    if (tries < maxTries) {
+        log.warn "${app.label}: blind(s) not closed (${names.join(', ')}) — re-sending close (retry ${tries + 1}/${maxTries})"
+        stuck.each { try { it.close() } catch (e) { } }
+        armBlindConfirm(tries + 1, 0)
+        return
+    }
+    log.error "${app.label}: blind(s) did NOT close after ${maxTries + 1} attempt(s): ${names.join(', ')}"
+    notify("⚠ ${app.label}: blind did NOT close — ${names.join(', ')} still up after ${maxTries + 1} tries. Check the shade.")
 }
 
 private void notify(String msg) {
@@ -240,6 +354,9 @@ private void notify(String msg) {
 
 // Dark = NOT between sunrise and (sunset - offset). Handles the overnight wrap.
 private boolean isDark() {
+    // Sunset/before-sunset gate is optional: when off, the lux threshold alone decides,
+    // so the blind can lower whenever it's dark enough — at any time of day.
+    if (settings.useSunsetGate == false) return true
     // Negative offset moves sunset earlier, e.g. -15 => "15 minutes before sunset".
     def sun = getSunriseAndSunset(sunsetOffset: "-${(sunsetOffset ?: 0)}")
     def now = new Date()

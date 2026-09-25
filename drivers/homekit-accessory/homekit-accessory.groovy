@@ -23,9 +23,20 @@
  *   the raw service/characteristic map.
  *
  * Author: RamSet
- * Version: 0.15.0
+ * Version: 0.16.0
  *
  * Changelog:
+ *  v0.16.0 - Garage doors reach Apple Home through Hubitat's built-in HomeKit Bridge. The Bridge only offers a
+ *           device as a Garage Door when its driver carries ContactSensor as well as GarageDoorControl, so the
+ *           Garage Door child (0.3.0) declares both — and the door state is mirrored onto `contact` here, rather
+ *           than declaring a capability whose attribute never fills in. Settled states only: `contact` reads
+ *           closed when the door is closed and open when it is open, and holds its last value while the door is
+ *           moving, the same convention the garage-door combiner uses. Reported on GitHub issue #1.
+ *  v0.15.0 - Pairs accessories that reject the standard pair-setup method (needs hapCore 0.11.0). M1 still goes
+ *           out as Method 0; an accessory that answers 0x01 "unknown" — an iSmartGate bridge does, while
+ *           advertising itself as pairable — is retried once with Method 1 (Pair Setup with Auth), and the
+ *           method that worked is remembered. Nothing to configure: the new "Pair-setup method" preference
+ *           (shown until the accessory is paired) only exists to pin one for support.
  *  v0.15.0 - Reconnects itself after a hub reboot via Initialize capability. Add optional preference for mDNS
  *           service name to improve connectivity fallback. Leverages improved hapCore session management.
  *  v0.14.0 - PURE LISTEN BY DEFAULT. The keepalive/liveness probe now defaults to 0 (off) instead of 30s.
@@ -164,6 +175,9 @@ metadata {
         input "mdnsServiceName", "string", title: "HomeKit mDNS service name (optional)", description: "Exact _hap._tcp service name. Enables targeted multicast fallback after IP-directed discovery fails. Leave blank to use a previously discovered name. The configured IP remains the primary endpoint.", required: false
         if (!(state.paired==true || settings?.iosLtsk)) {   // settings is null at code-save time -> MUST use safe-nav
             input "setupCode", "string", title: "HomeKit setup code — 8 digits, no dashes (e.g. 12345678). Enter and Save to pair.", required: false
+            input "pairMethod", "enum", title: "Pair-setup method — leave on Automatic unless asked",
+                  options: ["auto":"Automatic (try standard, retry with Auth)", "0":"Pair Setup (standard)", "1":"Pair Setup with Auth"],
+                  defaultValue: "auto", required: false
             input "setupPayload", "string", title: "…or paste the HomeKit QR payload (X-HM://…). For accessories with no printed code / a dynamic code (Eufy Homebase, Nanoleaf, etc.): open the maker app's 'Add to HomeKit' screen, scan the QR with any generic QR reader to get the X-HM://… text, and paste it here — the setup code is decoded from it automatically.", required: false
         }
         input "sessionMode", "enum", title: "Connection mode", options: ["Persistent (event push)","On-demand (poll)"], defaultValue: "Persistent (event push)",
@@ -397,7 +411,7 @@ void onCharacteristics(j){
                 case "tSetpoint":   cd.sendEvent(name:"thermostatSetpoint", value: cToHub(v)); break
                 case "tCoolSet":    cd.sendEvent(name:"coolingSetpoint", value: cToHub(v)); break
                 case "tHeatSet":    cd.sendEvent(name:"heatingSetpoint", value: cToHub(v)); break
-                case "doorCurrent": cd.sendEvent(name:"door",        value: ([0:"open",1:"closed",2:"opening",3:"closing",4:"unknown"][v as int] ?: "unknown")); break
+                case "doorCurrent": setDoorState(cd, ([0:"open",1:"closed",2:"opening",3:"closing",4:"unknown"][v as int] ?: "unknown")); break
                 case "doorTarget":  break   // CurrentDoorState is authoritative; TargetDoorState is only used for write-back
                 case "secCurrent":  cd.sendEvent(name:"securitySystem", value: ([0:"armed home",1:"armed away",2:"armed night",3:"disarmed",4:"triggered"][v as int] ?: "unknown")); cd.sendEvent(name:"alarmState", value: ((v as int)==4 ? "triggered":"clear")); break
                 case "secTarget":   break   // CurrentState is authoritative; TargetState is only used for write-back
@@ -427,6 +441,14 @@ private boolean writeKey(cd, String key, val){
     def s=svcOf(cd); if(!s || s.chars[key]==null){ log.warn "HAP: ${cd?.deviceNetworkId} has no '${key}' characteristic"; return false }
     writeChar(s.aid, s.chars[key] as int, val); return true
 }
+// Push a door state to a Garage Door child, keeping `contact` in step. Hubitat's HomeKit Bridge needs the child
+// to carry ContactSensor before it will offer it as a Garage Door, so the attribute has to mean something: it
+// tracks the settled states (open / closed) and holds its last value while the door is moving.
+private void setDoorState(cd, String v){
+    cd.sendEvent(name:"door", value: v)
+    if(v in ["open","closed"]) cd.sendEvent(name:"contact", value: v)
+}
+
 def componentRefresh(cd){ refresh() }
 // Switch / Outlet / Light / Fan on-off (FanV2 uses Active instead of On)
 def componentOn(cd){ def s=svcOf(cd); if(s?.chars?.active!=null) writeKey(cd,"active",1) else writeKey(cd,"switch",true); cd.sendEvent(name:"switch", value:"on") }
@@ -461,11 +483,11 @@ def componentArmNight(cd){ writeKey(cd,"secTarget",2); cd.sendEvent(name:"securi
 def componentDisarm(cd){   writeKey(cd,"secTarget",3); cd.sendEvent(name:"securitySystem", value:"disarmed") }
 // open/close is shared: GarageDoorOpener writes TargetDoorState (0=open,1=closed); WindowShade writes TargetPosition (100=open,0=closed)
 def componentOpen(cd){ def s=svcOf(cd)
-    if(s?.chars?.doorTarget!=null){ writeChar(s.aid, s.chars.doorTarget as int, 0); cd.sendEvent(name:"door", value:"opening") }
+    if(s?.chars?.doorTarget!=null){ writeChar(s.aid, s.chars.doorTarget as int, 0); setDoorState(cd, "opening") }
     else if(s?.chars?.posTarget!=null){ writeChar(s.aid, s.chars.posTarget as int, 100); cd.sendEvent(name:"windowShade", value:"opening") }
 }
 def componentClose(cd){ def s=svcOf(cd)
-    if(s?.chars?.doorTarget!=null){ writeChar(s.aid, s.chars.doorTarget as int, 1); cd.sendEvent(name:"door", value:"closing") }
+    if(s?.chars?.doorTarget!=null){ writeChar(s.aid, s.chars.doorTarget as int, 1); setDoorState(cd, "closing") }
     else if(s?.chars?.posTarget!=null){ writeChar(s.aid, s.chars.posTarget as int, 0); cd.sendEvent(name:"windowShade", value:"closing") }
 }
 // Thermostat: TargetHeatingCoolingState 0=off/1=heat/2=cool/3=auto. In auto the active setpoints are the

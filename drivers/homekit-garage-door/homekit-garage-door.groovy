@@ -7,9 +7,14 @@
  * from the parent's session.
  *
  * Author: RamSet
- * Version: 0.2.0
+ * Version: 0.3.0
  *
  * Changelog:
+ *  v0.3.0 - Exports to Apple Home through Hubitat's built-in HomeKit Bridge. The Bridge only offers a device as a
+ *           Garage Door when the driver carries ContactSensor alongside GarageDoorControl (GarageDoorControl on its
+ *           own isn't offered at all), so both are declared now, plus Actuator/Sensor. The parent keeps `contact`
+ *           tracking the real door state — closed when the door is closed, open when it is open — instead of
+ *           declaring the capability and leaving the attribute empty. Reported on GitHub issue #1.
  *  v0.2.0 - Added obstruction (ObstructionDetected) attribute + accessory info attributes.
  *  v0.1.0 - Initial release. Validated on a Meross MSG100.
  *
@@ -18,6 +23,9 @@
 metadata {
     definition(name: "HomeKit HAP Garage Door", namespace: "RamSet", author: "RamSet", importUrl: "https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/drivers/homekit-garage-door/homekit-garage-door.groovy") {
         capability "GarageDoorControl"
+        capability "ContactSensor"   // required: Hubitat's HomeKit Bridge won't offer a Garage Door without it
+        capability "Actuator"
+        capability "Sensor"
         capability "Refresh"
         attribute "obstruction", "enum", ["obstructed","clear"]   // HomeKit ObstructionDetected
         attribute "manufacturer", "string"

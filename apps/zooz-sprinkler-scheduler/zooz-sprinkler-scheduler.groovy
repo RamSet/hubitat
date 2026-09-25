@@ -62,7 +62,7 @@ mappings {
     path("/calendar.ics")  { action: [GET: "apiCalendar"] }
 }
 
-String getAppVersion() { return "v0.16.2 (2026-09)" }
+String getAppVersion() { return "v0.17.0 (2026-09)" }
 
 // Simple vs Advanced interface. Simple shows only zones, schedule, weather and
 // hardware safety; Advanced exposes everything (moisture, learning, sensors,
@@ -117,6 +117,7 @@ private String  wApiUnit()  { return isMetric() ? "kmh"     : "mph" }
     "zone.finish"      : [section: "Lifecycle",  default: '${app}: ■ ${zone} done', defaultOff: true],
     "pre-run"          : [section: "Lifecycle",  default: '${app}: schedule starts in ${minutes} minute(s) — clear the yard'],
     "error"            : [section: "Lifecycle",  default: '${app}: error — ${detail}'],
+    "run.stalled"      : [section: "Lifecycle",  default: '${app}: ⚠ run ended early — ${reason}. All valves closed.'],
 
     // Skips
     "skip.manual"      : [section: "Skips",      default: '${app}: skipped — manual pause'],
@@ -148,10 +149,12 @@ private String  wApiUnit()  { return isMetric() ? "kmh"     : "mph" }
     "sensor.pause.off" : [section: "Sensors",    default: '${app}: pause sensor ${sensor} clear',  defaultOff: true],
 
     // Hardware & watchdog
-    "hardware.push"    : [section: "Hardware",   default: '${app}: Zooz relay watchdog set to ${minutes}min on ${count} controller(s)'],
+    "hardware.push"    : [section: "Hardware",   default: '${app}: Zooz relay watchdog — sent ${minutes}min to ${count} controller(s), confirming at the hardware…'],
     "watchdog.stale"   : [section: "Hardware",   default: '${app}: ${sensor} unreachable for ${hours}h'],
     "relay.failed"     : [section: "Hardware",   default: '${app}: ⚠ ${zone} relay never confirmed ON — ${device} still reads "${reads}" after ${attempts} attempt(s). ${action}.'],
     "relay.recovered"  : [section: "Hardware",   default: '${app}: ${zone} relay only confirmed ON after ${attempts} retry(ies) — ${device}, mesh is marginal'],
+    "relay.offFailed"  : [section: "Hardware",   default: '${app}: ⛔ ${zone} did NOT turn OFF — ${device} still reads ON after ${attempts} attempt(s). WATER MAY STILL BE RUNNING — check the valve (the relay hardware auto-off will force it off).'],
+    "relay.offRecovered": [section: "Hardware",  default: '${app}: ${zone} confirmed OFF after ${attempts} retry(ies) — ${device}, mesh is marginal'],
 
     // Test / manual
     "test.run"         : [section: "Test",       default: '${app}: testing ${zone} for ${duration}', defaultOff: true],
@@ -263,6 +266,12 @@ private String statusHtml() {
     }
     out << "<br>"
 
+    if (wateringSeasonConfigured()) {
+        boolean inSeason = inWateringSeason(now())
+        out << sPill(inSeason ? "in watering season (${wateringSeasonRangeString()}) \u2713"
+                              : "OUT OF SEASON \u2014 scheduled runs resume ${seasonDateString(settings.wateringSeasonStartMonth, settings.wateringSeasonStartDay)}",
+                     inSeason ? GREEN : AMBER)
+    }
     if (settings.pauseContacts || settings.pauseSwitches) {
         boolean on = externalPauseActive()
         out << sPill(on ? "PAUSE SENSOR ON \u2014 ${externalPauseReason()}" : "pause sensors clear \u2713", on ? RED : GREEN)
@@ -348,7 +357,7 @@ def mainPage() {
                 href name: "dashboardPage", title: "Dashboard tile", page: "dashboardPage",
                      image: openmoji("1F4F1"),
                      description: dashboardSummaryString()
-                href name: "restrictionsPage", title: "Restrictions (quiet hours / mode / HSM)", page: "restrictionsPage",
+                href name: "restrictionsPage", title: "Restrictions (season / quiet hours / mode / HSM)", page: "restrictionsPage",
                      image: openmoji("1F6AB"),
                      description: restrictionsSummaryString()
                 href name: "previewPage", title: "Next 7 days preview", page: "previewPage",
@@ -982,7 +991,10 @@ def hardwarePage() {
             section("Push now") {
                 input name: "btnPushHardwareSafety", type: "button",
                       title: "Push recommended Z-Wave parameters to selected controller(s)"
-                paragraph "${state.hwLastPushSummary ?: 'No push performed yet.'}"
+                paragraph "${hwStatusHeadline()}\n\n${state.hwLastPushSummary ?: 'No push performed yet.'}"
+                input name: "hwSelfHeal", type: "bool", defaultValue: true, submitOnChange: true,
+                      title: "Keep this app's hourly auto-off verify + re-push ON"
+                paragraph "Turn OFF to let the ZEN16 driver own the hardware auto-off (set it in each relay's preferences, default 15 min). The app then stops verifying/pushing the timer here — which also avoids two schedule instances fighting over a shared controller — but still watches these controllers for going offline."
             }
             section("Selected controllers") {
                 Map actByParent = (state.lastActuationByParent ?: [:]) as Map
@@ -1115,6 +1127,26 @@ def diagnosticsPage() {
 
 def restrictionsPage() {
     dynamicPage(name: "restrictionsPage", title: "Restrictions") {
+        section("Watering season") {
+            paragraph "Scheduled runs only happen between these two dates, both included — for example May 1 to October 1. Outside the range the schedule stays configured but doesn't water. Run now, the Run switch and turning a zone on by hand still work. The range can wrap over New Year (for example November 1 to March 31)."
+            input name: "wateringSeasonEnabled", type: "bool",
+                  title: "Only water within a date range", defaultValue: false, submitOnChange: true
+            if (settings.wateringSeasonEnabled) {
+                input name: "wateringSeasonStartMonth", type: "enum", title: "Season starts — month",
+                      options: MONTH_NAMES, required: true, submitOnChange: true
+                input name: "wateringSeasonStartDay", type: "number", title: "Season starts — day of month",
+                      range: "1..31", required: true, submitOnChange: true
+                input name: "wateringSeasonEndMonth", type: "enum", title: "Season ends — month",
+                      options: MONTH_NAMES, required: true, submitOnChange: true
+                input name: "wateringSeasonEndDay", type: "number", title: "Season ends — day of month (this day still waters)",
+                      range: "1..31", required: true, submitOnChange: true
+                if (wateringSeasonConfigured()) {
+                    paragraph inWateringSeason(now()) ? "✓ In season now (${wateringSeasonRangeString()})"
+                                                      : "❄ Out of season now — scheduled runs resume ${seasonDateString(settings.wateringSeasonStartMonth, settings.wateringSeasonStartDay)}"
+                }
+            }
+        }
+
         section("Quiet hours blackout") {
             paragraph "Block runs between these times. If a scheduled trigger falls in the quiet window, it's skipped. Optionally, an in-progress run is stopped when quiet hours begin (the rest of the plan is skipped — pick up next scheduled window)."
             input name: "quietHoursEnabled", type: "bool",
@@ -1170,7 +1202,7 @@ def restrictionsPage() {
 def previewPage() {
     dynamicPage(name: "previewPage", title: "Next 7 days preview") {
         section {
-            paragraph "Calendar view of the next 7 days. Shows when each window would run, after accounting for skip-next, forced rain delay, day-of-week filters, and quiet hours. (Weather rain-skip is dynamic and can't be predicted ahead of time.)"
+            paragraph "Calendar view of the next 7 days. Shows when each window would run, after accounting for skip-next, forced rain delay, day-of-week filters, the watering season, and quiet hours. (Weather rain-skip is dynamic and can't be predicted ahead of time.)"
         }
         section("Schedule") {
             paragraph previewNextSevenDaysHtml()
@@ -1330,6 +1362,15 @@ def aboutPage() {
             paragraph "v0.12.2 — Fixed pause sensors reporting \"0s remaining\" and skipping ahead when they fired during a soak or the gap between zones. The schedule now tracks soak and between-zone phases as pausable too, so a pause that lands mid-soak reports the real soak time left and resumes that soak (valves stay off) instead of jumping to the next zone."
             paragraph "v0.13.4 — Saving the app now sends a confirmation notification summarizing the schedule: when it will start, how many zones, and the estimated total run time (water + soak). It also doubles as proof the new code is active — if you save and don't get it, the update didn't take."
             paragraph "v0.13.3 — Fixes two scheduling problems. (1) Multiple start times now ALL work: each was scheduled on the same internal handler, so Hubitat overwrote all but the last — only your final start time ran. Each window now has its own handler. (2) A run can no longer start twice from a single trigger: a re-entrancy guard ignores a duplicate scheduled invocation within 15 seconds (and logs it), preventing the double \"starting\" / double watering seen after editing a program near its run time. Re-save each sprinkler app once after updating so the new per-window schedules register."
+            paragraph "v0.17.0 — New watering season on the Restrictions page: pick the dates scheduled watering is allowed between (for example May 1 to October 1, both days included). Outside that range scheduled runs are skipped quietly; Run now, the Run switch and turning a zone on by hand still work. A range can wrap over New Year. The 7-day preview, calendar export, next-run text, status line and 'schedule saved' notification all show the season. Two related fixes: a Run-now press that was held by a pause sensor now still counts as manual when it starts, so the season and every-N-days checks no longer drop it; and the pre-run 'starts in N minutes' warning is no longer sent on days that won't water (off-cycle days in every-N-days mode, or outside the season)."
+            paragraph "v0.16.10 — A run that dies before it finishes no longer blocks your other schedules. If a run stopped advancing — the hub restarted mid-run, or the app lost track of a run it had just started — nothing ever reached the end of the run, so the shared coordination switch stayed ON and every other schedule skipped with 'coordination switch held' until someone turned it off by hand (a schedule could even block itself). The app now checks every hour and before each scheduled start: a run that can no longer finish is ended the way Stop would end it — all valves closed, the Run switch turned off, the coordination switch released — and you get a 'run ended early' notification saying why. Saving the app's settings while a run is in progress now ends that run the same way, instead of leaving it half-stopped with the switch still held."
+            paragraph "v0.16.9 — Two fixes. (1) The end-of-run phantom manual run is closed for good: as a schedule finishes, the relays are still reporting their final OFF, and the app's tile-reconcile could echo a tile back on just as the 'run active' guard dropped — which got read as a hand-triggered zone and started a stray manual run (v0.16.4 narrowed this but a ~4s window could still lapse under load). There's now a 20-second grace window after a run ends during which any tile change is treated as reconcile, never a manual start. (2) The 'Keep this app's hourly auto-off verify + re-push ON' switch now saves the moment you toggle it (it previously needed a full page save, so turning it off could silently not take)."
+            paragraph "v0.16.8 — You can now hand the hardware auto-off entirely to the ZEN16 driver. Under Hardware safety there's a new switch, 'Keep this app's hourly auto-off verify + re-push ON'; turn it OFF and the app stops managing the relay auto-off (the ZEN16 driver owns it — it now defaults each relay to a 15-min auto-off), while the app still watches the controllers for going offline. This is the clean fix when two schedules share a controller: let the driver hold one value per relay instead of two apps pushing over each other. Leaving the switch ON keeps the previous behavior."
+            paragraph "v0.16.7 — The hardware auto-off is now a hard cap: the app pushes exactly the value you set and never changes it on its own. Two behaviors were removed — it no longer auto-raises the timer to cover a longer zone, and no longer ratchets it up to match another instance or a value already on the device (the 0.16.6 behavior). The timer only changes when you change the setting. Trade-off: if you set the cap BELOW a zone's actual run time the hardware will cut that run short and the app will only warn you, not fix it — so pick a value comfortably above your longest single watering cycle. If two schedules share one controller, set them to the SAME cap, or each will keep re-asserting its own."
+            paragraph "v0.16.6 — Fixed the hardware failsafe fighting itself when two schedule instances share a relay controller. The auto-off push writes to every relay on a controller, so if one instance drove a short cap and another a long one on the same device (e.g. a lawn schedule and a veggie schedule both on the same ZEN16), each would overwrite the other — and the new hourly self-heal turned that into an hourly tug-of-war with 'not set' alerts from both. The push now never lowers a relay below the value already on the device, so a shared controller settles on the longest cap any instance needs (safe for everyone; it just can't be lowered from the app without clearing the device's params first). If your schedules use separate controllers this changes nothing."
+            paragraph "v0.16.5 — Turning a zone OFF is now verified, not assumed. The app confirmed a valve OPENED (retry + alert) but trusted every OFF command blindly — so a single dropped Z-Wave OFF could leave a valve open with nothing to close it, watering until someone noticed. Now, after a run ends, a manual run stops, or you hit Stop, the app reads each relay back; if one still reports ON it re-sends OFF, and if it still won't close it raises a loud alert ('WATER MAY STILL BE RUNNING — check the valve'). Pairs with the relay hardware auto-off as the last line of defense. Uses the same verify settings as the ON check — nothing new to configure."
+            paragraph "v0.16.4 — Fixed a phantom manual run that could start right as a schedule finished. When a zone's relay was slow to report OFF at end of run, the app's own tile-reconcile turned the zone tile back on to match the relay — and the handler watching those tiles mistook that self-generated echo for someone turning the zone on by hand, launching a stray manual run (which then relied on the 10-minute auto-off to end). The suppression flag that marks the app's own tile changes is now written to immediately-durable storage, so the watching handler always sees it and never re-fires the app's own echo as a manual start. Same class of fix as v0.16.2, on the end-of-run path."
+            paragraph "v0.16.3 — The hardware relay auto-off failsafe is now self-checking. Before, the app pushed the relays' built-in auto-off timers once and reported that it sent them — but a Z-Wave write that the relay silently dropped (or a relay that later lost its config) would sit un-armed indefinitely while the page still read \"pushed OK\". The hourly relay watchdog now re-confirms the auto-off is actually set on every relay and re-pushes any that drifted, and the Hardware-safety page shows a plain, time-stamped status (\"armed, confirmed 4m ago\" vs \"last confirmed 93 days ago\") read from the last real verification, not from a stale send. A push notification no longer claims the timers are set until the hardware confirms it."
             paragraph "v0.16.2 — Fixed a start-up race that produced a phantom manual run and a duplicated \"starting\" notification. The app announced the run and switched on the first zone before it had finished recording that a run was under way. Because that record is only saved once the current step completes, the handlers watching your zone and Run switches still believed nothing was running, so they mistook the app's own switch-on for someone pressing the switch — starting a stray 10-minute manual run on the first zone and kicking off the schedule a second time. The run is now claimed before anything is announced or switched on. Also fixed: the Run switch could ignore a genuine OFF press, because a leftover internal marker from an earlier run was never cleared and swallowed the next one."
             paragraph "v0.13.2 — Pause sensors NEVER skip a run, even a manual one. Previously a manual run (the Run switch or \"Run schedule now\" button) with a pause sensor active (e.g. water heater on) reported \"skipped — pause sensor active\"; now it holds and auto-starts when the sensor clears, exactly like a scheduled run. (A wet rain sensor still skips.)"
             paragraph "v0.13.1 — Pause-sensor hold now applies on EVERY scheduled start regardless of the pause/stop mode (that setting only governs what happens mid-run). Previously a sensor set to 'stop' mode would still skip the cycle at the scheduled start instead of holding."
@@ -1561,11 +1602,20 @@ def initialize() {
     unsubscribe()
     state.zones = state.zones ?: [:]
     state.lastRunByZone = state.lastRunByZone ?: [:]
+    // updated() has just unscheduled every timer, so a run that was open (running, paused,
+    // or still starting) can never advance again. End it the way Stop would — valves, Run
+    // switch, shared coordination lock — instead of silently orphaning it. A run that had
+    // already died gets the sweep's own reason first.
+    runStallSweep()
+    if (state.running || state.paused || ((atomicState.runClaimMs ?: 0L) as long) > 0L) {
+        endStalledRun("settings were saved mid-run")
+    }
     state.running = false
     clearRunClaim()
     state.currentZoneIdx = 0
     state.zonesPlan = []
     state.deferredRunPending = false   // never carry a held-defer across re-init/reboot
+    state.deferredRunManual = false
     state.lastSchedEntryMs = 0L         // reset the double-start guard window
     state.pauseActiveSince = [:]        // per-sensor debounce clocks start fresh
 
@@ -1670,6 +1720,11 @@ def hsmChanged(evt) {
 def preRunNotify() {
     Integer lead = (settings.preRunLeadMinutes ?: 0) as int
     if (lead <= 0) return
+    // Warn only for a start that will actually water. The pre-run cron fires daily in interval mode and all year
+    // round, so check the start this warning is for against the cycle and the watering season.
+    long startMs = now() + lead * 60000L
+    if (isIntervalMode() && !isIntervalRunDayMs(startMs)) return
+    if (!inWateringSeason(startMs)) return
     String msg = "${app.label}: schedule starts in ${lead} minute${lead == 1 ? '' : 's'}"
     notify("pre-run", msg)
     if (descTextEnable) log.info msg
@@ -1798,7 +1853,7 @@ private void pauseRunningSchedule(String reason) {
 
     state.paused = true
     state.running = false  // schedule is no longer actively running
-    clearRunClaim()
+    // The run claim stays set: a paused run is still open and still owns the lock.
     state.pausedReason = reason
     state.pauseStartMs = now()   // for total-paused accounting at finish
 }
@@ -1822,6 +1877,10 @@ def doResumeAfterPause() {
     state.pauseStartMs = 0L
     state.paused = false
     state.running = true
+    // Stamp the resume as the latest step so runStallSweep() measures from now, not from
+    // before the pause (the no-zone / nothing-left paths below hand off without a phase).
+    state.currentPhaseStartMs = now()
+    state.currentPhaseDurationSec = 0
 
     if (zid == 0) {
         // No zone context — fall back to advancing the plan.
@@ -1971,13 +2030,55 @@ def preRunNotifyW3() { preRunNotify() }
 // Schedule entry — fires at the configured time
 // =========================================================================
 
-// True from the instant a run is claimed until state.running has certainly been persisted.
-// Bounded by time so a crashed start can never wedge it permanently.
+// atomicState.runClaimMs is stamped when a run is claimed and cleared only when the run
+// ends (finishRun / stopAllZones), so it also marks the run as open — runStallSweep() relies
+// on that. runClaimed() looks only at the first 60s: true from the claim until state.running
+// has certainly been persisted, bounded so a crashed start can never wedge it permanently.
 private boolean runClaimed() {
     Long c = (atomicState.runClaimMs ?: 0L) as long
     return (c > 0L) && ((now() - c) < 60000L)
 }
 private void clearRunClaim() { atomicState.runClaimMs = 0L }
+
+@groovy.transform.Field static final long STALL_GRACE_MS = 15L * 60L * 1000L
+
+// Find a run that stopped advancing but never ended. Either its state says idle while its
+// claim is still open (the run's own state write was lost — 2026-09-20), or it says running
+// but its current step is long overdue (a hub restart dropped the timer that would have
+// advanced it — 2026-09-09). No handler will ever move such a run forward or reach
+// finishRun(), so its valves, Run switch and the shared coordination lock stay as it left
+// them — and every schedule sharing the lock skips until someone clears it by hand.
+// Paused runs are left alone: they wait for their sensor by design and keep the lock.
+def runStallSweep() {
+    if (state.paused) return
+    if (state.running) {
+        long phaseEnd = ((state.currentPhaseStartMs ?: 0L) as long) + ((state.currentPhaseDurationSec ?: 0) as long) * 1000L
+        if (now() - phaseEnd < STALL_GRACE_MS) return
+        // Measure from the claim too: a run that just started hasn't stamped its first step.
+        long lastStep = Math.max(phaseEnd, (atomicState.runClaimMs ?: 0L) as long)
+        long overdueMs = now() - lastStep
+        if (overdueMs < STALL_GRACE_MS) return
+        endStalledRun("no step has advanced in ${fmtDuration((int) (overdueMs / 1000L))}")
+    } else {
+        Long claimMs = (atomicState.runClaimMs ?: 0L) as long
+        if (claimMs == 0L || runClaimed()) return
+        endStalledRun("it lost track of its own progress after starting")
+    }
+}
+
+private void endStalledRun(String why) {
+    log.warn "${app.label}: ending a run that can no longer finish — ${why}"
+    // When the state write was lost, the run record went with it. Rebuild a stub from the
+    // claim so the history shows when the dead run actually started.
+    Long claimMs = (atomicState.runClaimMs ?: 0L) as long
+    if (!state.currentRunRecord && claimMs > 0L) {
+        state.currentRunRecord = [startedAt: new Date(claimMs).format("yyyy-MM-dd HH:mm", location?.timeZone ?: TimeZone.getDefault()),
+                                  startedMs: claimMs, zoneSummaries: [], outcome: "running"]
+    }
+    stopAllZones()
+    recordRunFinish("aborted — ${why}")
+    notify("run.stalled", [reason: why])
+}
 
 def runSchedule(Map opts = [:]) {
     boolean manual = (opts?.manual == true)
@@ -1992,6 +2093,10 @@ def runSchedule(Map opts = [:]) {
         return
     }
     if (!manual) state.lastSchedEntryMs = nowMs
+    // A dead run of our own would otherwise block this one: it leaves the shared lock ON
+    // (the coordination check below would defer against ourselves) or leaves state.running
+    // set (the "previous run still active" skip). Clear it first.
+    runStallSweep()
     // Manual/on-demand runs bypass SCHEDULING holds (off-cycle day, quiet hours,
     // weather forecast, forced rain delay, pause-for-hours) but ALWAYS respect
     // ACTIVE SAFETY: pause sensors (wind/contacts), a wet rain sensor, mode/HSM.
@@ -2013,6 +2118,12 @@ def runSchedule(Map opts = [:]) {
     // on off-cycle days. A manual "Run now" (manual=true) bypasses this.
     if (!manual && isIntervalMode() && !isIntervalRunToday()) {
         if (descTextEnable) log.info "${app.label}: off-cycle day (every ${settings.scheduleIntervalDays ?: 2} days) — no run"
+        return
+    }
+    // Watering-season gate (Restrictions page). Quiet like an off-cycle day: the cron keeps firing all year, and a
+    // notification for every skipped day all winter would be noise. Manual runs and per-zone manual runs are exempt.
+    if (!manual && !inWateringSeason(now())) {
+        if (descTextEnable) log.info "${app.label}: outside the watering season (${wateringSeasonRangeString()}) — no run"
         return
     }
     Long rd = (state.forcedRainDelayUntilMs ?: 0L) as long
@@ -2066,6 +2177,9 @@ def runSchedule(Map opts = [:]) {
     if (externalPauseActive()) {
         String who = externalPauseReason()
         log.info "${app.label}: pause sensor active (${who}) — holding run until it clears"
+        // Remember a manual request (sticky if a scheduled trigger lands on top of it) so the held run relaunches
+        // as manual — otherwise the off-cycle and watering-season gates would silently drop a Run-now press.
+        state.deferredRunManual = manual || (state.deferredRunPending == true && state.deferredRunManual == true)
         state.deferredRunPending = true
         notify("schedule.defer", [sensor: who])
         return
@@ -2156,6 +2270,7 @@ def runSchedule(Map opts = [:]) {
                               estTotal: fmtDuration(est.total), estWater: fmtDuration(est.water),
                               estSoak: fmtDuration(est.soak)])
     state.deferredRunPending = false   // committing to a run clears any held-defer
+    state.deferredRunManual = false
     syncRunControlSwitch()   // reflect "running" on the HomeKit control switch
     recordRunStart(plan, seasonalMult)
     // Acquire the shared coordination lock for the duration of this run
@@ -2183,7 +2298,7 @@ def startDeferredRun() {
         return
     }
     log.info "${app.label}: launching held run — pause sensors clear"
-    runSchedule([:])
+    runSchedule([manual: (state.deferredRunManual == true)])
 }
 
 // =========================================================================
@@ -2403,6 +2518,7 @@ def finishRun() {
     }
     recordRunFinish("completed")
     state.running = false
+    atomicState.runEndedMs = now()   // open the post-run grace window (see zoneChildSwitchEvent)
     clearRunClaim()
     syncRunControlSwitch()   // reflect "idle" on the HomeKit control switch
     state.currentZoneIdx = 0
@@ -2415,6 +2531,11 @@ def finishRun() {
     }
     notify("schedule.finish", finCtx)
     runIn(3, "syncAllZoneChildren")   // clear every zone tile after the run
+    // Safety sweep: confirm EVERY zone valve actually closed at end of run. The last
+    // cycle's off is fire-and-forget; a dropped one would leave a valve open with the
+    // run "finished" and nothing left to close it.
+    Integer zn = (settings.zoneCountPref ?: 0) as int
+    for (int i = 1; i <= zn; i++) { if (settings."zone${i}Switch") armRelayOffConfirm(i, "finish") }
     publishDashboardState()
 }
 
@@ -2432,9 +2553,11 @@ def stopAllZones() {
         if (sw) try { sw.off() } catch (e) { log.warn "stop zone ${i}: ${e.message}" }
         unsubscribeZoneMoisture(i)
         setZoneChildSwitch(i, "off")
+        if (sw) armRelayOffConfirm(i, "stop")   // confirm every valve closed on a stop/abort
     }
     state.manualActive = [:]
     state.running = false
+    atomicState.runEndedMs = now()   // post-run grace window (see zoneChildSwitchEvent)
     clearRunClaim()
     state.paused = false
     state.pausedRemainingSec = 0
@@ -2856,6 +2979,7 @@ private void notifyScheduleSaved() {
     String when = times.join(" & ")
     String days = isIntervalMode() ? "every ${settings.scheduleIntervalDays ?: 2} days"
                                    : ((settings.scheduleDays ?: []) as List).join(", ")
+    if (wateringSeasonConfigured()) days += ", ${wateringSeasonRangeString()} only"
     List<Integer> plan = []
     Integer n = (settings.zoneCountPref ?: 0) as int
     for (int i = 1; i <= n; i++) {
@@ -3026,12 +3150,11 @@ def pushHardwareSafety() {
         // drives on the controller — that would let the hardware cut our own
         // watering short. Raise to the safe floor if the requested value is below.
         Integer floorMin = requiredAutoOffMinForController(dev.id as String)
-        Integer mins = Math.max(requested, floorMin)
-        // Cross-instance heads-up: if the device already holds a larger auto-off
-        // (e.g. another app instance set it higher for a longer relay on a shared
-        // controller), warn before we lower it.
-        Map cur = parseConfigVals(dev)
-        Integer curMax = ((autoOffParams.collect { cur[it as int] }.findAll { it != null } + [0]).max()) as Integer
+        // HARD CAP: push EXACTLY the value the operator set. No auto-raise to a floor, no ratchet
+        // up to another instance's or the device's current value — the timer changes ONLY when the
+        // operator changes the setting. floorMin is kept solely to WARN when the cap is below a
+        // zone's actual run time (which would let the hardware cut a real run short).
+        Integer mins = requested
         try {
             // Timer unit = minutes
             unitParams.each { p -> callSetParameter(dev, style, p as int, 1, 0) }
@@ -3043,8 +3166,8 @@ def pushHardwareSafety() {
             if (settings.hwForceDcMotorOff != false) {
                 try { callSetParameter(dev, style, 24, 1, 0) } catch (ignored) {}
             }
-            String note = (mins > requested) ? " — RAISED from ${requested}min (longest single cycle this instance drives here is ~${floorMin - 2}min)" : ""
-            String warn = (curMax > 0 && mins < curMax) ? " — ⚠ this lowers the device's current ${curMax}min; if another instance drives a longer relay on this controller, confirm this won't cut it short" : ""
+            String note = (floorMin > mins) ? " — ⚠ this cap (${mins}min) is BELOW the ~${floorMin - 2}min a zone on this controller runs; the hardware could cut a real run short — raise the cap" : ""
+            String warn = ""
             log_ << "${dev.displayName} (${model.name}, ${style} order): sent auto-off ${mins}min to P${autoOffParams.join('/P')}${note}${warn}"
             expectedByDev[dev.id as String] = mins
             ok++
@@ -3092,9 +3215,28 @@ def verifyHardwareSafety() {
         if (allok) { armed++; lines << "${dev.displayName}: ✓ auto-off ${vals.join('/')} min — armed" }
         else { gaps++; lines << "${dev.displayName}: ⚠ auto-off ${vals.join('/')} (want ${mins}) — did NOT take; flip the setParameter-order override above and push again" }
     }
+    boolean wasArmed = (state.hwArmed != false)   // true/unknown => previously considered OK
+    state.hwVerifiedAtMs = now()
+    state.hwArmed = (gaps == 0)
     state.hwLastPushSummary = "Verified @ ${nowString()} — ${armed} armed, ${gaps} with gaps\n" + lines.join("\n")
     log.info "${app.label}: hardware safety verify — ${armed} armed, ${gaps} gaps"
-    if (gaps > 0) notify("error", [detail: "hardware auto-off NOT set on ${gaps} relay controller(s) — open Hardware safety"])
+    // Alert only on the TRANSITION into a gap, so the hourly self-heal re-verify can't spam.
+    if (gaps > 0 && wasArmed) notify("error", [detail: "hardware auto-off NOT set on ${gaps} relay controller(s) — open Hardware safety"])
+    return gaps
+}
+
+// Honest, freshness-stamped headline for the Hardware-safety page. Reads from the last
+// VERIFY (not a push), so a stale "success" banner can never again read as current — the
+// exact trap where a 3-month-old push looked armed while a relay had silently drifted.
+private String hwStatusHeadline() {
+    if (settings.hwSelfHeal == false) return "ℹ Managed by the ZEN16 driver — this app no longer verifies or pushes the auto-off. Set it in each relay's driver preferences (driver default 15 min) and check the device's syncStatus."
+    Long vAt = state.hwVerifiedAtMs as Long
+    if (!vAt) return "⚠ NEVER CONFIRMED at the hardware — press Push; it self-verifies in ~15s."
+    long ageMin = (now() - vAt) / 60000L
+    String ago = ageMin < 60 ? "${ageMin}m ago" : (ageMin < 1440 ? "${(int)(ageMin / 60)}h ago" : "${(int)(ageMin / 1440)}d ago")
+    boolean stale = ageMin > 1560   // >26h: the hourly self-heal re-verify should refresh well within this
+    if (state.hwArmed == true) return stale ? "⚠ ARMED, but last confirmed ${ago} — re-checking hourly." : "✓ ARMED — all relays confirmed ${ago}."
+    return "⛔ NOT ARMED — a relay failed to confirm (last checked ${ago}). Self-heal is re-pushing."
 }
 
 // Parse the jtp10181 driver's "configVals" device data ("[1:1, 2:4, ...]")
@@ -3186,15 +3328,26 @@ def zoneChildSwitchEvent(evt) {
     // ignore an event that matches a command WE issued in the last few seconds.
     // A stale flag (e.g. left over from a previous run) can never swallow a real
     // user toggle, which is what made an off press get silently ignored before.
-    Map sup = (state.suppressZoneChild ?: [:]) as Map
+    // MUST be atomicState, not state: setZoneChildSwitch() sets the flag then commands
+    // the relay, and this handler fires from that command in a SEPARATE invocation. Plain
+    // `state` isn't persisted until the setting handler returns, so this read saw a stale
+    // map and mistook the app's own reconcile echo for a user toggle — the end-of-run
+    // phantom "MANUAL" run. atomicState writes through immediately, same as runClaimMs.
+    Map sup = (atomicState.suppressZoneChild ?: [:]) as Map
     long t = now()
     def entry = sup[zid.toString()]
     boolean suppressed = (entry instanceof List && entry[0] == evt.value && (t - (entry[1] as long)) < 4000)
     // Drop this zone's entry and prune any other expired ones so the map can't
     // accumulate stale flags.
     sup = sup.findAll { k, v -> k != zid.toString() && (v instanceof List) && (t - (v[1] as long)) < 4000 }
-    state.suppressZoneChild = sup
+    atomicState.suppressZoneChild = sup
     if (suppressed) return
+    // Grace window after a run ENDS: the relays are still settling their reported state, and the
+    // reconcile can echo a tile back on. Treat any change in this window as a reconcile, never a
+    // manual start — so an end-of-run echo can't fire a phantom manual run even when the per-event
+    // suppress flag's short (4s) window has already lapsed under end-of-run load (the actual cause
+    // of the 2026-09-18 phantom "MANUAL Back Play Area").
+    if ((now() - (atomicState.runEndedMs ?: 0L)) < 20000L) { runIn(2, "syncAllZoneChildren"); return }
     // During an active run the scheduler owns the relays. Don't fight per-event;
     // just reconcile every tile to its relay's real state shortly after.
     if (state.running || runClaimed()) { runIn(2, "syncAllZoneChildren"); return }
@@ -3207,9 +3360,9 @@ private void setZoneChildSwitch(int zid, String value) {
     def ch = getZoneChildVs(zid)
     if (!ch) return
     if (ch.currentValue("switch") == value) return  // no change needed
-    Map sup = (state.suppressZoneChild ?: [:]) as Map
+    Map sup = (atomicState.suppressZoneChild ?: [:]) as Map
     sup[zid.toString()] = [value, now()]   // value + timestamp, honored only while fresh
-    state.suppressZoneChild = sup
+    atomicState.suppressZoneChild = sup    // atomicState so zoneChildSwitchEvent (a separate handler) sees this BEFORE the ch.on()/off() echo lands
     try { if (value == "on") ch.on() else ch.off() }
     catch (e) { log.warn "setZoneChildSwitch(${zid}, ${value}): ${e.message}" }
 }
@@ -3293,6 +3446,7 @@ def manualZoneStop(int zid, boolean fromTimeout = false) {
     String zname = settings."zone${zid}Name" ?: "Zone ${zid}"
     if (sw) try { sw.off() } catch (e) { log.warn "manualZoneStop relay off: ${e.message}" }
     setZoneChildSwitch(zid, "off")
+    armRelayOffConfirm(zid, "manual")   // prove the valve actually closed — this is the path that ran ~16 min on 2026-09-16
     if (fromTimeout) {
         if (descTextEnable) log.info "${app.label}: MANUAL ■ ${zname} (timer)"
         notify("zone.manualTimeout", [zone: zname])
@@ -3348,6 +3502,10 @@ private void maintainDashboardChild() {
 }
 
 def publishDashboardState() {
+    // This is the hourly timer every installed instance already has scheduled — a new
+    // runEvery1Hour would only register once each app is re-saved. The sweep's in-run
+    // path reads nothing but state, so the many mid-run calls stay cheap.
+    runStallSweep()
     def ch = getDashboardChild()
     if (!ch) return
     String swState = state.running ? "on" : "off"
@@ -3624,8 +3782,11 @@ private String nextScheduledRunString() {
     // configured days + first window. Good enough for the dashboard.
     String t = settings.scheduleStartTime
     if (t?.contains("T")) t = t.tokenize("T")[1].substring(0,5)
-    if (isIntervalMode()) return "every ${settings.scheduleIntervalDays ?: 2} day(s)  @ ${t}"
-    return "${(settings.scheduleDays as List).join(',')}  @ ${t}"
+    String base = isIntervalMode() ? "every ${settings.scheduleIntervalDays ?: 2} day(s)  @ ${t}"
+                                   : "${(settings.scheduleDays as List).join(',')}  @ ${t}"
+    if (!wateringSeasonConfigured()) return base
+    if (inWateringSeason(now())) return "${base} · season ${wateringSeasonRangeString()}"
+    return "${base} · out of season until ${seasonDateString(settings.wateringSeasonStartMonth, settings.wateringSeasonStartDay)}"
 }
 
 // =========================================================================
@@ -3831,6 +3992,38 @@ private String currentWeekIso() {
 // Quiet hours / mode / HSM gating
 // =========================================================================
 
+// ---- Watering season (Restrictions page) ----
+@groovy.transform.Field static final Map MONTH_NAMES = ["1":"January", "2":"February", "3":"March", "4":"April",
+    "5":"May", "6":"June", "7":"July", "8":"August", "9":"September", "10":"October", "11":"November", "12":"December"]
+
+private boolean wateringSeasonConfigured() {
+    return settings.wateringSeasonEnabled && settings.wateringSeasonStartMonth && settings.wateringSeasonStartDay &&
+           settings.wateringSeasonEndMonth && settings.wateringSeasonEndDay
+}
+// month*100 + day, so dates compare as plain integers regardless of year.
+private int seasonKey(def month, def day) {
+    return ((month as String).toBigDecimal().intValue() * 100) + (day as String).toBigDecimal().intValue()
+}
+// True when the local date containing `ms` is in the watering season, or no season is set. Both ends are
+// included; a start later in the year than the end wraps over New Year.
+private boolean inWateringSeason(long ms) {
+    if (!wateringSeasonConfigured()) return true
+    Calendar c = Calendar.getInstance(location?.timeZone ?: TimeZone.getDefault())
+    c.setTimeInMillis(ms)
+    int today = seasonKey(c.get(Calendar.MONTH) + 1, c.get(Calendar.DAY_OF_MONTH))
+    int start = seasonKey(settings.wateringSeasonStartMonth, settings.wateringSeasonStartDay)
+    int end   = seasonKey(settings.wateringSeasonEndMonth, settings.wateringSeasonEndDay)
+    return (start <= end) ? (today >= start && today <= end) : (today >= start || today <= end)
+}
+private String seasonDateString(def month, def day) {
+    String m = (MONTH_NAMES[(month as String).toBigDecimal().intValue() as String] ?: "?") as String
+    return "${m.take(3)} ${(day as String).toBigDecimal().intValue()}"
+}
+private String wateringSeasonRangeString() {
+    return "${seasonDateString(settings.wateringSeasonStartMonth, settings.wateringSeasonStartDay)} – " +
+           "${seasonDateString(settings.wateringSeasonEndMonth, settings.wateringSeasonEndDay)}"
+}
+
 private boolean quietHoursActive() {
     if (!settings.quietHoursEnabled) return false
     if (!settings.quietStartTime || !settings.quietEndTime) return false
@@ -3913,6 +4106,7 @@ private String previewNextSevenDaysHtml() {
         String windowsStr = runsToday ? windows.join(", ") : "—"
         List<String> blockers = []
         if (!runsToday) blockers << (isIntervalMode() ? "off-cycle day" : "not a watering day")
+        if (runsToday && !inWateringSeason(day.getTime())) blockers << "outside watering season"
         if (d == 0 && skipNextArmed) blockers << "next-run will be skipped"
         if (skipUntilMs > day.getTime() && skipUntilMs > now()) {
             String until = new Date(skipUntilMs).format("yyyy-MM-dd HH:mm", location?.timeZone ?: TimeZone.getDefault())
@@ -4113,7 +4307,8 @@ private String renderCalendarIcs() {
 
     Calendar c = Calendar.getInstance(location?.timeZone ?: TimeZone.getDefault())
     for (int d = 0; d < 30; d++) {
-        if (isIntervalMode() ? isIntervalRunDayMs(c.getTimeInMillis()) : wantDow.contains(c.get(Calendar.DAY_OF_WEEK))) {
+        if ((isIntervalMode() ? isIntervalRunDayMs(c.getTimeInMillis()) : wantDow.contains(c.get(Calendar.DAY_OF_WEEK)))
+                && inWateringSeason(c.getTimeInMillis())) {
             String dateStr = c.getTime().format("yyyyMMdd", location?.timeZone ?: TimeZone.getDefault())
             windows.each { String iso ->
                 String hhmm = timeFmt(iso)
@@ -4174,6 +4369,11 @@ private String exportConfigJson() {
         rainPopThreshold:       settings.rainPopThreshold,
         rainAmountThreshold:    settings.rainAmountThreshold,
         seasonalEnabled:        settings.seasonalEnabled,
+        wateringSeasonEnabled:    settings.wateringSeasonEnabled,
+        wateringSeasonStartMonth: settings.wateringSeasonStartMonth,
+        wateringSeasonStartDay:   settings.wateringSeasonStartDay,
+        wateringSeasonEndMonth:   settings.wateringSeasonEndMonth,
+        wateringSeasonEndDay:     settings.wateringSeasonEndDay,
         seasonalMaxPct:         settings.seasonalMaxPct,
         quietHoursEnabled:      settings.quietHoursEnabled,
         quietStartTime:         settings.quietStartTime,
@@ -4320,6 +4520,23 @@ def zen16Watchdog() {
     }
     state.watchdogProbeAt = probeAt
     state.watchdogAlerted = alerted
+    // Failsafe ARM check (not just reachability): confirm the hardware auto-off is STILL set
+    // on every relay. A dropped param write, or a device that lost its config, would otherwise
+    // sit un-armed indefinitely — it did, for ~3 months, while the page still read "pushed OK".
+    // Re-verify hourly and self-heal by re-pushing, capped so a truly un-armable relay can't loop.
+    if (settings.hwSelfHeal != false && state.hwExpectedMins && settings.hwZen16Parents) {
+        Integer gaps = verifyHardwareSafety()
+        if (gaps != null && gaps > 0) {
+            int heals = (state.hwSelfHealCount ?: 0) as int
+            if (heals < 6) {
+                state.hwSelfHealCount = heals + 1
+                log.warn "${app.label}: hardware auto-off drifted on ${gaps} controller(s) — re-pushing (heal ${heals + 1}/6)"
+                pushHardwareSafety()
+            }
+        } else {
+            state.hwSelfHealCount = 0
+        }
+    }
 }
 
 // Record that the app successfully drove a relay, attributed to the controller
@@ -4410,6 +4627,69 @@ private String controllerKeyFor(sw) {
 // two manual zones running at once can't clobber each other's verification the
 // way a single shared state slot would. stage "poke" asks the relay to report,
 // stage "read" believes what it says.
+// ── OFF confirmation — prove the valve actually CLOSED ───────────────────────
+// The dangerous asymmetry that let a zone "run all day": ON was retried and
+// confirmed, but OFF was fire-and-forget. A dropped OFF (or a relay that ignores
+// it) left a valve open with nothing to close it. This mirrors the ON machinery —
+// poke → read → retry → LOUD alert — so a stuck-open valve pages you in seconds
+// instead of waiting on the hardware auto-off. Skips a zone that's legitimately on
+// again (a new run reached it, or a fresh manual start).
+private void armRelayOffConfirm(Integer zid, String ctx, Integer tries = 0, String stage = "poke") {
+    if (settings.relayVerifyEnable == false) return
+    if (!zid || !settings."zone${zid}Switch") return
+    Integer delay = (stage == "poke") ? 3 : relayVerifyDelaySec()
+    runIn(delay, "relayOffConfirmCheck",
+          [data: [zid: zid, ctx: ctx, tries: tries, stage: stage], overwrite: false])
+}
+
+def relayOffConfirmCheck(data) {
+    Integer zid = (data?.zid ?: 0) as int
+    if (zid <= 0) return
+    String ctx = (data?.ctx ?: "stop") as String
+    String stage = (data?.stage ?: "read") as String
+    def sw = settings."zone${zid}Switch"
+    if (!sw) return
+    String zname = settings."zone${zid}Name" ?: "Zone ${zid}"
+    Integer tries = (data?.tries ?: 0) as int
+
+    // Stale guard: the zone is legitimately ON again → this off-confirm is about a
+    // valve we deliberately opened; don't retry it off or false-alarm.
+    if (state.running == true && ((state.currentZoneId ?: 0) as int) == zid && state.currentPhaseType == "water") return
+    if (((state.manualActive ?: [:]) as Map).containsKey(zid.toString())) return
+
+    // Stage 1 — ask the relay to report its own state before we read it.
+    if (stage == "poke") { if (!relayPoke(sw, zname)) return; armRelayOffConfirm(zid, ctx, tries, "read"); return }
+
+    String reads = null
+    try { reads = sw.currentValue("switch") as String } catch (e) { reads = null }
+
+    if (reads == "off") {
+        if (tries > 0) {
+            log.warn "${app.label}: ${zname} relay confirmed OFF only after ${tries} retry(ies) — mesh is marginal"
+            notify("relay.offRecovered", [zone: zname, attempts: tries, device: sw.displayName])
+        }
+        return
+    }
+    if (reads == null) {
+        log.warn "${app.label}: ${zname} — ${sw.displayName} reported no switch state, so OFF can't be confirmed; skipped"
+        return
+    }
+
+    // reads == "on" — the valve did NOT close. Retry, then alarm LOUDLY.
+    Integer maxTries = Math.max(1, (settings.relayVerifyRetries ?: 2) as int)   // OFF always gets at least one retry
+    if (tries < maxTries) {
+        log.warn "${app.label}: ${zname} relay still reads 'on' after OFF — re-sending OFF (retry ${tries + 1}/${maxTries})"
+        try { sw.off() } catch (e) { log.warn "relay retry off: ${e.message}" }
+        setZoneChildSwitch(zid, "off")
+        armRelayOffConfirm(zid, ctx, tries + 1, "poke")
+        return
+    }
+
+    log.error "${app.label}: ${zname} relay did NOT confirm OFF — ${sw.displayName} still reads 'on' after ${maxTries + 1} attempt(s). WATER MAY STILL BE RUNNING."
+    notify("relay.offFailed", [zone: zname, device: sw.displayName, attempts: maxTries + 1])
+    try { sw.off() } catch (e) { }   // one final attempt; the hardware auto-off is the true last line
+}
+
 private void armRelayConfirm(Integer zid, String ctx, Integer tries = 0, String stage = "poke") {
     if (settings.relayVerifyEnable == false) return
     if (!zid || !settings."zone${zid}Switch") return
@@ -4662,6 +4942,7 @@ private String diagnosticsSummaryString() {
 
 private String restrictionsSummaryString() {
     List parts = []
+    if (wateringSeasonConfigured()) parts << "season ${wateringSeasonRangeString()}"
     if (settings.quietHoursEnabled) parts << "quiet ${timeFmt(settings.quietStartTime)}-${timeFmt(settings.quietEndTime)}"
     if (settings.pauseModes) parts << "mode-pause: ${(settings.pauseModes as List).join(',')}"
     if (settings.hsmPauseEnabled) parts << "HSM-pause"
