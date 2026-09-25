@@ -17,7 +17,7 @@ Map harness(boolean transport = false) {
     def variables = new Binding([
         state: context.state, settings: context.settings,
         RE_BACKOFF_SEC: [60, 120, 300], OFFLINE_AFTER_FAILS: 2,
-        SWEEP_INTERVAL_SEC: 1800, now: { -> 3600000L },
+        SWEEP_INTERVAL_SEC: 1800, RELOCATE_MAX_TRIES: 3, now: { -> 3600000L },
         log: [warn: { message -> }, error: { message -> throw new AssertionError(message.toString()) }],
         interfaces: [rawSocket: [close: { -> }]],
         device: [updateSetting: { key, value -> context.updates[key] = value.value }],
@@ -232,11 +232,6 @@ assert !emptyRelocation.scheduled.containsKey('relocateTimeout')
 assert emptyRelocation.connects == [38607]
 println 'PASS: empty or malformed first replies fail fast in both discovery callbacks'
 
-def relocation = harness()
-relocation.state.afterRelocate = 'live'
-relocation.core.relocateCallback(packet(upstairs.take(2)))
-assert !relocation.state.afterRelocate
-assert relocation.connects == [38607]
 def matchedRelocation = harness()
 matchedRelocation.state.afterRelocate = 'live'
 matchedRelocation.settings.ip = '192.0.2.99'
@@ -245,7 +240,7 @@ assert matchedRelocation.updates.ip == '192.0.2.53'
 assert matchedRelocation.updates.port == 46557
 assert matchedRelocation.connects == [46557]
 assert !matchedRelocation.state.afterRelocate
-println 'PASS: relocation treats a non-matching first reply as a miss and accepts a matching endpoint'
+println 'PASS: relocation accepts a matching endpoint'
 
 def wrappedReply = harness()
 wrappedReply.state.afterMdns = 'live'
@@ -374,16 +369,62 @@ assert legacyUnicast.connects.size() == 5
 assert legacyUnicast.core.mdnsSourceIp([ip: '999.1.1.1']) == null
 println 'PASS: IP-directed SRV-only replies work without weakening multicast identity checks'
 
-def pinnedIp = harness(true)
-pinnedIp.core.mdnsThen('live')
-pinnedIp.core.mdnsCallback(packet(accessory('ThermostatOne', 'thermostat-one.local', '192.0.2.99', 46557, '11:22:33:44:55:66')))
-assert pinnedIp.connects == [38607]
-assert !pinnedIp.updates
-pinnedIp.state.mdnsMulticast = true
-pinnedIp.core.mdnsCallback(packet(accessory('ThermostatOne', 'thermostat-one.local', '192.0.2.99', 46557, '11:22:33:44:55:66')))
-assert pinnedIp.connects == [38607]
-assert !pinnedIp.updates
-println 'PASS: ordinary unicast and targeted multicast discovery cannot rewrite the configured IP'
+def learnedName = harness(true)
+learnedName.settings.ip = '192.0.2.99'
+learnedName.state.mdnsInstance = 'thermostatone._hap._tcp.local'
+learnedName.core.mdnsThen('live')
+3.times { learnedName.core.mdnsTimeout() }
+assert learnedName.commands[3].options.destinationAddress == '224.0.0.251:5353'
+learnedName.core.mdnsCallback([ip: 'c0000235', payload: capturedUpstairs])
+assert learnedName.updates.ip == '192.0.2.53'
+assert learnedName.updates.port == 46557
+assert learnedName.connects == [46557]
+
+def manualName = harness(true)
+manualName.settings.ip = '192.0.2.99'
+manualName.settings.mdnsServiceName = 'ThermostatOne'
+manualName.core.mdnsThen('live')
+3.times { manualName.core.mdnsTimeout() }
+manualName.core.mdnsCallback([ip: 'c0000235', payload: capturedUpstairs])
+assert manualName.updates.ip == '192.0.2.53'
+assert manualName.updates.port == 46557
+assert manualName.connects == [46557]
+
+def unidentified = harness(true)
+unidentified.settings.ip = '192.0.2.99'
+unidentified.settings.remove('accPairingId')
+unidentified.core.mdnsThen('live')
+unidentified.core.mdnsCallback([ip: 'c0000235', payload: capturedUpstairs])
+assert !unidentified.updates
+unidentified.state.afterMdns = 'live'
+unidentified.settings.accPairingId = '11:22:33:44:55:66'
+unidentified.core.mdnsCallback([ip: 'c0000235', payload: capturedDownstairs])
+assert !unidentified.updates
+println 'PASS: a matching TXT id recovers a moved address; unidentifiable replies stay pinned to the configured IP'
+
+def losingRace = harness(true)
+losingRace.settings.ip = '192.0.2.99'
+losingRace.core.relocate('live')
+(1..2).each { attempt ->
+    losingRace.core.relocateCallback(homebridgeReply)
+    assert losingRace.commands.size() == attempt + 1
+    assert losingRace.state.afterRelocate == 'live'
+    assert !losingRace.connects
+}
+losingRace.core.relocateCallback(homebridgeReply)
+assert losingRace.commands.size() == 3
+assert !losingRace.state.afterRelocate
+assert losingRace.connects == [38607]
+
+def wonRace = harness(true)
+wonRace.settings.ip = '192.0.2.99'
+wonRace.core.relocate('live')
+wonRace.core.relocateCallback(homebridgeReply)
+wonRace.core.relocateCallback(capturedUpstairs)
+assert wonRace.commands.size() == 2
+assert wonRace.updates.ip == '192.0.2.53'
+assert wonRace.connects == [46557]
+println 'PASS: a lost relocation race re-browses within the sweep window instead of waiting it out'
 
 ['pairsetup', 'discover', 'read', 'write', 'unpair', 'live'].each { operation ->
     def caller = harness(true)
@@ -442,7 +483,7 @@ assert moved.commands.size() == 5
 assert moved.commands[4].action == '000000000002000000000000' + dnsName('old-name._hap._tcp.local').encodeHex().toString() + '00210001' + dnsName('old-name._hap._tcp.local').encodeHex().toString() + '00100001'
 assert moved.commands[4].options.callback == 'relocateCallback'
 assert moved.state.lastSweep == 3600000L
-moved.core.relocateCallback(capturedDownstairs)
+3.times { moved.core.relocateCallback(capturedDownstairs) }
 assert !moved.updates
 assert !moved.state.afterRelocate
 assert moved.connects == [38607]

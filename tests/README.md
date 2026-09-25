@@ -54,9 +54,11 @@ Version 0.10.17 retains the fixes with these compatibility constraints:
 	intentional fallback extension, not a replacement for IP-based behavior.
 - Unicast accepts a unique HAP SRV without TXT/A records when the callback sender
 	matches the configured IP. Conflicting identities and unrelated services are
-	still rejected; multicast retains strict identity/IP association.
-- Ordinary discovery only updates the port and learned instance, not the IP.
-	Only the existing paired-ID relocation path can change the IP. Relocation
+	still rejected.
+- A reply whose TXT id matches `accPairingId` is accepted wherever it arrived from
+	and updates both the port and the address, so a DHCP-moved accessory recovers
+	through the targeted query. Source and record address filtering applies only to
+	replies that carry no matching id, such as during initial pairing. Relocation
 	targets the configured or learned service name when available; the general
 	browse remains throttled to once per 30 minutes for unnamed accessories.
 - Cached-port precedence and fallback remain unchanged. Invalid optional names

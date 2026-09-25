@@ -29,10 +29,11 @@
  * Changelog:
  *  v0.10.17 - Improve HAP discovery and recovery: preserve configured-IP-first discovery with targeted multicast
  *            fallback; associate SRV, TXT, identity, and address records by service; target known service names
- *            during relocation and accept a matching paired identity at a new IP; treat Hubitat's first
- *            non-matching UDP response as an immediate miss; count handshake timeouts separately for periodic
- *            port rediscovery without changing offline health timing; retain learned service names and clear them
- *            when pairing is forgotten.
+ *            during relocation; accept any reply whose TXT id matches the paired accessory wherever it arrived
+ *            from, so a DHCP-moved accessory recovers its address, and apply source-address filtering only to
+ *            replies that cannot be identified; treat Hubitat's first non-matching UDP response as an immediate
+ *            miss; count handshake timeouts separately for periodic port rediscovery without changing offline
+ *            health timing; retain learned service names and clear them when pairing is forgotten.
  *  v0.10.16 - Reboot-changed-port recovery. A HomeKit accessory's HAP port is DYNAMIC and frequently changes when
  *            the accessory reboots (observed live: an ecobee came back on 42600 after being on 57857). 0.10.14/15's
  *            cheap-reconnect path connected straight to the last-known port and would never re-resolve it until the
@@ -143,6 +144,7 @@ StringBuilder plainbuf(){ if(PLAINBUF[device.id]==null) PLAINBUF[device.id]=new 
 // reconnects within 5 min instead of waiting out a 30-min backoff. Load protection comes from the sweep breaker,
 // not from starving the cheap retry.
 @Field static int SWEEP_INTERVAL_SEC = 1800      // the expensive /24 multicast subnet sweep runs at most this often (load protection)
+@Field static int RELOCATE_MAX_TRIES = 3         // browses per sweep, since the hub delivers only the first reply and another responder can win the race
 @Field static int OFFLINE_AFTER_FAILS = 2        // flip healthStatus=offline after this many failed reconnects (direct signal, not lastRx staleness)
 @Field static final String MDNS_PTR_QUERY = "000000000001000000000000045f686170045f746370056c6f63616c00000c8001"
 
@@ -311,7 +313,7 @@ def mdnsTimeout(){
     // sweeping every cycle. Between sweeps, just try the last-known port and let the backoff pace retries.
     long sinceSweep = now() - (state.lastSweep ?: 0L)
     if(settings.accPairingId && sinceSweep >= SWEEP_INTERVAL_SEC*1000L){
-        state.lastSweep = now()
+        state.lastSweep = now(); state.relocTries = 0
         log.warn "HAP: no matching mDNS reply - trying extended multicast discovery"
         relocate(op); return
     }
@@ -326,6 +328,7 @@ def relocate(String op){
     String q
     try{ q=(settings.mdnsServiceName || state.mdnsInstance) ? mdnsQuery() : MDNS_PTR_QUERY }
     catch(e){ log.warn "HAP: invalid mDNS service name; using general relocation search"; q=MDNS_PTR_QUERY }
+    state.relocTries = ((state.relocTries ?: 0) as int) + 1
     state.afterRelocate = op
     runIn(8,"relocateTimeout")
     sendHubCommand(new hubitat.device.HubAction(q, hubitat.device.Protocol.LAN,
@@ -354,7 +357,10 @@ def relocateCallback(message){
             unschedule("relocateTimeout")
             state.afterRelocate=null; dispatchOp(op)
         } else {
-            unschedule("relocateTimeout"); state.afterRelocate=null; dispatchOp(op)
+            unschedule("relocateTimeout")
+            // another HAP responder answered first and hid ours, so re-browse rather than burning the whole sweep window
+            if(((state.relocTries ?: 0) as int) < RELOCATE_MAX_TRIES){ relocate(op); return }
+            state.afterRelocate=null; dispatchOp(op)
         }
     }catch(e){
         log.error "relocateCallback: ${e}"
@@ -370,12 +376,21 @@ def mdnsCallback(message){
         if(!h){ def op=state.afterMdns; unschedule("mdnsTimeout"); state.afterMdns=null; rep "No DNS payload in mDNS callback"; if(op) dispatchOp(op); return }
         state.mdnsPayloads=((state.mdnsPayloads ?: 0) as int)+1
         String sourceIp=mdnsSourceIp(message)
-        if(sourceIp && sourceIp!=settings.ip){ def op=state.afterMdns; unschedule("mdnsTimeout"); state.afterMdns=null; rep "mDNS reply came from another IP"; if(op) dispatchOp(op); return }
-        def r = parseMdns(h, (settings.accPairingId ?: "").toString(), (settings.ip ?: "").toString(), state.mdnsMulticast ? "" : sourceIp)
-        if(r.ip && r.ip!=settings.ip){ def op=state.afterMdns; unschedule("mdnsTimeout"); state.afterMdns=null; rep "mDNS address differs from configured IP"; if(op) dispatchOp(op); return }
-        if(r.port) state.mdnsInstance=r.instance
-        if(r.port){ device.updateSetting("port",[value:r.port,type:"number"]); state.discoveredPort=r.port; state.mdnsTries=0; logInfo "HAP: detected port ${r.port}" }
-        else { def op=state.afterMdns; unschedule("mdnsTimeout"); state.afterMdns=null; rep "No matching HAP SRV in mDNS reply"; if(op) dispatchOp(op); return }
+        String want=(settings.accPairingId ?: "").toString().toUpperCase()
+        def r = parseMdns(h, want, (settings.ip ?: "").toString(), state.mdnsMulticast ? "" : sourceIp)
+        // A TXT id match IS the identity proof, so honour it wherever the reply arrived from — that is the only
+        // way a DHCP-moved accessory can be recovered. Address filtering is for replies we cannot identify.
+        boolean identified = want && r.id && r.id==want
+        if(!identified){
+            if(sourceIp && sourceIp!=settings.ip){ def op=state.afterMdns; unschedule("mdnsTimeout"); state.afterMdns=null; rep "unidentified mDNS reply came from another IP"; if(op) dispatchOp(op); return }
+            if(r.ip && r.ip!=settings.ip){ def op=state.afterMdns; unschedule("mdnsTimeout"); state.afterMdns=null; rep "unidentified mDNS address differs from configured IP"; if(op) dispatchOp(op); return }
+        }
+        if(!r.port){ def op=state.afterMdns; unschedule("mdnsTimeout"); state.afterMdns=null; rep "No matching HAP SRV in mDNS reply"; if(op) dispatchOp(op); return }
+        state.mdnsInstance=r.instance
+        if(identified && r.ip && r.ip!=settings.ip){
+            device.updateSetting("ip",[value:r.ip,type:"string"]); logInfo "HAP: accessory moved — IP updated to ${r.ip}"; sendEvent(name:"hapStatus", value:"IP updated to ${r.ip}")
+        }
+        device.updateSetting("port",[value:r.port,type:"number"]); state.discoveredPort=r.port; state.mdnsTries=0; logInfo "HAP: detected port ${r.port}"
         unschedule("mdnsTimeout")
         def op=state.afterMdns; state.afterMdns=null; if(op) dispatchOp(op)
     } catch(e){
@@ -858,15 +873,16 @@ void finish(){
 // ---- offline reconnect scheduling: one place that grows the retry gap on consecutive failures ----
 private int reBackoff(){ int n=(state.reFails?:0) as int; return RE_BACKOFF_SEC[ Math.min(n, RE_BACKOFF_SEC.size()-1) ] }
 // Every failed live reconnect funnels through here: count it, back off, and (after a couple) surface offline.
-private void reFail(String why, Integer retryDelay=null){
+private void reFail(String why){
     state.reFails = ((state.reFails?:0) as int) + 1
     if((state.reFails as int) >= OFFLINE_AFTER_FAILS) setHealth("offline")   // direct signal — don't wait on lastRx staleness
-    int d = retryDelay!=null ? retryDelay : reBackoff()
+    int d = reBackoff()
     logInfo "HAP: reconnect attempt ${state.reFails} failed (${why}) — next try in ${d}s"
     unschedule("startLive"); runIn(d, "startLive")
 }
 // A live session came up: clear the failure streak so the next outage starts from the short end of the ladder.
-private void reOK(){ if((state.reFails?:0) as int){ state.reFails=0 } }
+// The sweep window re-arms too — the accessory was just reachable, so a later move deserves an immediate browse.
+private void reOK(){ if((state.reFails?:0) as int){ state.reFails=0 }; state.lastSweep=0L; state.remove("relocTries") }
 // Try the CHEAP path first: known topology + cached port -> connect straight to the last-known ip:port (fails in
 // ms with NoRouteToHost when the accessory is offline). The expensive multicast /24 subnet sweep (relocate, via
 // mdnsThen) only runs when we have no port, or at most once per SWEEP_INTERVAL_SEC — so an offline accessory can't
