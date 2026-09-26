@@ -8,7 +8,10 @@
  *    Trigger    - an illuminance sensor reports at/below a lux threshold
  *                 (the original used the Hub Variable "LightValue" = 200).
  *    Time gate  - only acts when it is dark out, i.e. between
- *                 (sunset - offset) and sunrise.
+ *                 (sunset - offset) and sunrise. With that gate switched off
+ *                 the lux threshold alone decides, but never before midday:
+ *                 morning light rises through the threshold and would spend
+ *                 the day's single action at dawn.
  *    If the window is OPEN  -> notify, wait for the window to close, then
  *                              notify again and lower (close) the blind.
  *    If the window is CLOSED -> close the blind immediately, and turn on the
@@ -132,7 +135,7 @@ def illuminanceHandler(evt) {
     if (lux > (luxThreshold as Integer)) return
     if (state.actedTonight) return
     if (!isDark()) {
-        if (logEnable) log.debug "below threshold but not yet dusk (sunset-${sunsetOffset} to sunrise); ignoring"
+        if (logEnable) log.debug "below threshold but not acting yet (${settings.useSunsetGate == false ? 'light is low but it is still morning' : "not between sunset-${sunsetOffset} and sunrise"}); ignoring"
         return
     }
 
@@ -226,7 +229,7 @@ private String currentStatus() {
     boolean gateOff = (settings.useSunsetGate == false)
     boolean dark = lightSensors ? isDark() : false
     rows << row(gateOff ? "Dusk gate" : "Dark now (dusk gate)",
-                gateOff ? pill("off — lux only", "grey")
+                gateOff ? (dark ? pill("off — lux only, past midday", "grey") : pill("off — lux only, waiting for midday", "amber"))
                         : (lightSensors ? (dark ? pill("yes", "indigo") : pill("no", "amber")) : pill("—", "grey")))
 
     rows << row("Waiting for window to close",
@@ -352,11 +355,20 @@ private void notify(String msg) {
     if (msg) notifiers?.deviceNotification(msg)
 }
 
+// Midpoint between today's sunrise and sunset — the earliest the failing light can mean dusk rather than dawn.
+private long solarNoonMs() {
+    def sun = getSunriseAndSunset()
+    return (long)((sun.sunrise.time + sun.sunset.time) / 2L)
+}
+
 // Dark = NOT between sunrise and (sunset - offset). Handles the overnight wrap.
 private boolean isDark() {
-    // Sunset/before-sunset gate is optional: when off, the lux threshold alone decides,
-    // so the blind can lower whenever it's dark enough — at any time of day.
-    if (settings.useSunsetGate == false) return true
+    // Sunset/before-sunset gate is optional: when off, the lux threshold alone decides, so the blind can lower
+    // whenever it's dark enough — but only from midday onward. Dawn light climbs THROUGH the threshold, so a
+    // reading taken in the morning is indistinguishable from dusk, and the app only acts once a day: on
+    // 2026-09-25 the 07:00 re-arm was followed 14 seconds later by a sub-threshold reading, which spent the
+    // day's action closing an already-closed blind and left the real dusk unhandled.
+    if (settings.useSunsetGate == false) return now() >= solarNoonMs()
     // Negative offset moves sunset earlier, e.g. -15 => "15 minutes before sunset".
     def sun = getSunriseAndSunset(sunsetOffset: "-${(sunsetOffset ?: 0)}")
     def now = new Date()
