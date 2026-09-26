@@ -10,7 +10,7 @@
  *   - hand-rolled X25519 / Ed25519 / SRP6a in BigInteger (sandbox blocks the JCE
  *     KeyAgreement/Signature/SecureRandom paths; Hubitat is adding them in 2.5.1)
  *   - TLV8 encode/decode
- *   - mDNS unicast _hap._tcp port discovery (the HAP port is dynamic)
+ *   - IP-directed mDNS _hap._tcp port discovery with multicast fallback (the HAP port is dynamic)
  *   - persistent rawSocket session, event subscriptions, keepalive watchdog + reconnect
  *   - generic /accessories fetch and /characteristics read/write
  *
@@ -24,9 +24,16 @@
  * Include in a driver with:  #include RamSet.hapCore
  *
  * Author: RamSet
- * Version: 0.11.0
+ * Version: 0.11.1
  *
  * Changelog:
+ *  v0.11.1 - Improve HAP discovery and recovery: preserve configured-IP-first discovery with targeted multicast
+ *            fallback; associate SRV, TXT, identity, and address records by service; target known service names
+ *            during relocation; accept any reply whose TXT id matches the paired accessory wherever it arrived
+ *            from, so a DHCP-moved accessory recovers its address, and apply source-address filtering only to
+ *            replies that cannot be identified; treat Hubitat's first non-matching UDP response as an immediate
+ *            miss; count handshake timeouts separately for periodic port rediscovery without changing offline
+ *            health timing; retain learned service names and clear them when pairing is forgotten.
  *  v0.11.0 - Pairs accessories that reject the standard pair-setup method, and reads back accessories that frame
  *            their HTTP response in pieces. Three fixes, all found on an iSmartGate bridge (GitHub issue #1):
  *            (1) PAIR-SETUP METHOD: M1 goes out as Method 0 (Pair Setup) as before; if the accessory answers 0x01
@@ -101,84 +108,6 @@
  *            a WARN every few minutes for a link that's actually fine. Genuine unreachability is still surfaced
  *            (and stays a WARN) via healthStatus=offline, which only trips after several missed intervals. Turn
  *            on info logging to see the reconnects; the real fix (prevent the drop) needs TCP keepalive (blocked).
- *  v0.10.9 - REVERT of 0.10.8. Passing 2.5.1's TCP-keepalive options (tcpKeepIdle/Interval/Count) to
- *            interfaces.rawSocket.connect throws `java.lang.SecurityException: getMethod method not allowed`
- *            on the actual connect (2.5.1.138): the platform sets the extended socket options via reflection,
- *            which the driver sandbox blocks — so ANY fresh persistent/one-shot connect fails and the accessory
- *            can't link. Reverted to the historic [byteInterface:true] connect so connections work again.
- *            The keepalive connect options are unusable from a driver until Hubitat makes that path sandbox-safe;
- *            the app-level liveKeepalive() probe remains the liveness mechanism. (0.10.8 should not have shipped —
- *            it was "verified" against an already-open session that never re-connected through the new path.)
- *  v0.10.8 - (reverted by 0.10.9) TCP keepalive on the session socket via 2.5.1 rawSocket connect options.
- *  v0.10.7 - Log level: the "session desynced (decrypt failed) — reconnecting for fresh keys" line is now DEBUG,
- *            not WARN. It's a known self-healing re-key event (0.10.2 already moved it ERROR->WARN) that fires
- *            often on busy multi-sensor thermostats and needs no user action — the driver reconnects and recovers,
- *            and a reconnect that actually FAILS still logs separately. Turn on debug logging to see it again.
- *  v0.10.6 - RECOVERY LATCH FIX (the real overnight killer). ensureUp — the backstop that re-establishes a
- *            dropped session — guarded on a bare `!state.connInFlight`, so a STALE connInFlight left by a connect
- *            that died without clearing the flag blocked recovery FOREVER (observed live: a device dead ~4h with
- *            connInFlight stuck on "discover" and nothing scheduled to retry — the driver "believed" it was mid-
- *            connect). ensureUp now clears a connInFlight older than 20s and reconnects, so a wedged latch self-
- *            heals within one heartbeat instead of needing a manual Save. Also: pair-verify reconnect backoff
- *            capped at 120s (was 300s) so a door isn't unreported for minutes after the accessory frees its slot.
- *            Pairs with driver 0.13.2 (ensureUp heartbeat 10min -> 5min).
- *  v0.10.5 - New healthStatus attribute (online/offline): a stable, alertable device-health signal. Because the
- *            0.10.4 liveness probe keeps the last-received-frame timestamp fresh on a healthy held session, a
- *            STALE timestamp is a reliable "accessory unreachable" signal that doesn't false-trip on an idle
- *            accessory (the probe answers). A background check emits online/offline with hysteresis — offline only
- *            after ~4 missed probe intervals (floor 3 min; on-demand mode allows >2 poll cycles; probing-disabled
- *            uses the long-silence window) — so a routine reconnect blip doesn't flap it. Complements the self-
- *            heal: a transient wedge recovers silently, a genuine power/network outage shows offline for alerting.
- *            The INCLUDING DRIVER should declare:  attribute "healthStatus", "string".
- *  v0.10.4 - SELF-CORRECTING HELD SESSION (never trust the live flag). A silent half-open death leaves
- *            state.live=true forever and fires no socketStatus, so the old "reconnect after N seconds of
- *            silence" both (a) trusted a possibly-dead flag and (b) on an idle single-service device — e.g. a
- *            garage door that emits no events — degenerated into a perpetual reconnect-every-N loop that never
- *            actually held a session. Now the live watchdog holds ONE session and every interval sends a MINIMAL
- *            one-characteristic keepalive read: it keeps the pipe warm so a cheap chip (Meross mt7687) doesn't
- *            idle-close it (the effect Apple gets from TCP keepalive) AND proves liveness — an unanswered probe
- *            means the link is dead despite state.live, so it reconnects immediately. Instant ev:true events are
- *            unaffected; the probe reply also refreshes the primary characteristic as a bonus. settings.safetyRefreshSecs
- *            is now the PROBE INTERVAL (default 30s, floor 15s; 0 = disable probing -> legacy long-silence reconnect).
- *  v0.10.3 - Log level: the silence-triggered safety reconnect ("no update in Ns — reconnecting to reconcile")
- *            now logs at INFO, not WARN. It is the expected auto-refresh for a quiet/idle accessory (nothing to
- *            push), and the reconnect always succeeds — a WARN implied a fault where there was none, and on some
- *            setups it pushed a phone notification. A genuinely failed reconnect still logs separately. Pairs with
- *            a driver exposing safetyRefreshSecs so the silence window can sit above the background-refresh
- *            interval (then this fires only on a real stall). Behavior is otherwise unchanged.
- *  v0.10.2 - Quiet the expected self-healing desync. An AEADBadTag/Tag-mismatch on the live session is a known
- *            re-key event the driver already recovers from (reconnect for fresh keys), so it now logs at WARN,
- *            not ERROR — only genuinely unexpected exceptions log at error. Fixes the frequent scary red
- *            "parse: AEADBadTagException" spam on busy (multi-sensor) thermostats; behavior is unchanged.
- *  v0.10.1 - Persistent-mode SAFETY REFRESH: the live watchdog now reconnects (re-subscribe + fresh read of
- *            every characteristic) whenever no frame has arrived within a configurable window
- *            (settings.safetyRefreshSecs, default 120s, floor 20s; 0 = off). Silence-gated, so a live event
- *            stream keeps it quiet, but an idle accessory (garage door with nothing changing) refreshes every
- *            window — fixing state that went stale overnight when the event session silently died. Still no
- *            bare GET on the held session (that's what drops cheap chips); recovery is always a reconnect.
- *  v0.10.0 - Auto-follow IP: if the accessory stops answering at its saved IP (DHCP reassigned it), browse
- *            the subnet via multicast mDNS, match by the accessory's HomeKit id (accPairingId), update the IP,
- *            and reconnect — best-effort; a DHCP reservation is still the reliable fix. Also RESTORED pairErr
- *            (plain-English pairing errors), lost when the lib was overwritten from the dev copy. NOTE: hapCore
- *            is maintained ONLY in RamSet/hubitat — do not copy the dev repo over this or features drop again.
- *  v0.9.1 - Portability: generate entropy without java.security.KeyPairGenerator (and without SecureRandom).
- *           Both are blocked by the Groovy sandbox on some hub firmware versions, which failed the driver SAVE
- *           ("Expression not allowed: java.security.KeyPairGenerator.getInstance"). Now uses UUID.randomUUID()
- *           (SecureRandom-backed, but not a blocked class reference) mixed with time/counter/chain, so it saves
- *           on every hub. Existing pairings are unaffected (long-term keys are stored; this only makes new
- *           random bytes).
- *  v0.9.0 - Reconnect immediately on a decrypt/tag-mismatch (AEADBadTagException). When an accessory reboots
- *           or re-keys, the session desyncs and every frame fails to decrypt; previously this spammed errors
- *           until the ~30-min silence watchdog reconnected. Now it re-handshakes for fresh keys right away.
- *  v0.8.0 - Tracks the package release; engine helpers stable.
- *  v0.6.x - Added accessory-info parsing (accInfo), auto-recovery heartbeat (ensureUp), clean
- *           socket close handling.
- *  v0.5.0 - Tolerant keepalive watchdog (reconnect only after N consecutive misses).
- *  v0.4.x - On-demand mode plumbing (startSession/discoverOnce/pollRead), one-shot connect
- *           watchdog, serialized connects (connInFlight guard).
- *  v0.3.0 - RemovePairing (unpair) + clearLocalPairing.
- *  v0.1.0 - Initial: SRP-6a pair-setup, pair-verify, ChaCha20 session, X25519/Ed25519/TLV8,
- *           mDNS port discovery, persistent subscribed session, /accessories + /characteristics.
  *
  * Copyright 2026 RamSet — Apache License 2.0, provided as-is, no warranty.
  */
@@ -237,7 +166,9 @@ StringBuilder plainbuf(){ if(PLAINBUF[device.id]==null) PLAINBUF[device.id]=new 
 // reconnects within 5 min instead of waiting out a 30-min backoff. Load protection comes from the sweep breaker,
 // not from starving the cheap retry.
 @Field static int SWEEP_INTERVAL_SEC = 1800      // the expensive /24 multicast subnet sweep runs at most this often (load protection)
+@Field static int RELOCATE_MAX_TRIES = 3         // browses per sweep, since the hub delivers only the first reply and another responder can win the race
 @Field static int OFFLINE_AFTER_FAILS = 2        // flip healthStatus=offline after this many failed reconnects (direct signal, not lastRx staleness)
+@Field static final String MDNS_PTR_QUERY = "000000000001000000000000045f686170045f746370056c6f63616c00000c8001"
 
 boolean isPaired(){ return (state.paired==true || settings?.iosLtsk) ? true : false }
 // On-demand mode: connect → verify → read/write → close per action, plus periodic polling. No held
@@ -362,28 +293,50 @@ void dumpAcc(j){
 private void armOpClaim(String kind, String op){ OPCLAIM.put("${device.id}:${kind}".toString(), op) }
 private String takeOpClaim(String kind, def fallback){
     String prev = OPCLAIM.replace("${device.id}:${kind}".toString(), "")
-    if(prev == null) return (fallback ?: null) as String   // nothing armed since restart: use the saved state
-    return prev ?: null                                     // "" means another execution already took it
+    if(prev == null) return (fallback ?: null) as String
+    return prev ?: null
 }
 
+String mdnsQuery(){
+    String instance=(settings.mdnsServiceName ?: state.mdnsInstance ?: "").toString().trim()
+    if(!instance) return MDNS_PTR_QUERY
+    String suffix="._hap._tcp.local"
+    if(instance.toLowerCase().endsWith(suffix+".")) instance=instance.substring(0,instance.length()-1)
+    if(instance.toLowerCase().endsWith(suffix)) instance=instance.substring(0,instance.length()-suffix.length())
+    byte[] label=instance.getBytes("UTF-8")
+    if(label.length<1 || label.length>63) throw new IllegalArgumentException("HomeKit mDNS service name must be 1-63 UTF-8 bytes")
+    String owner=hx([label.length] as byte[])+hx(label)+"045f686170045f746370056c6f63616c00"
+    return "000000000002000000000000"+owner+"00210001"+owner+"00100001"
+}
 def mdnsThen(String op){
     if(!settings.ip){ log.warn "HAP: set IP first"; return }
+    state.mdnsTries=0; state.mdnsReplies=0; state.mdnsPayloads=0
     state.afterMdns = op; armOpClaim("mdns", op)
-    String q="000000000001000000000000045f686170045f746370056c6f63616c00000c8001"
+    mdnsSend(op, false)
+}
+void mdnsSend(String op, boolean multicast){
+    String q=multicast ? mdnsQuery() : MDNS_PTR_QUERY
+    state.afterMdns = op
+    armOpClaim("mdns", op)
+    state.mdnsMulticast=multicast
+    runIn(4,"mdnsTimeout") // unicast SRV reply is sub-second when the accessory is up; 4s is ample and halves the pre-sweep cost
     sendHubCommand(new hubitat.device.HubAction(q, hubitat.device.Protocol.LAN,
-        [destinationAddress:"${settings.ip}:5353",
+        [destinationAddress:multicast ? "224.0.0.251:5353" : "${settings.ip}:5353",
          type:hubitat.device.HubAction.Type.LAN_TYPE_UDPCLIENT,
          encoding:hubitat.device.HubAction.Encoding.HEX_STRING,
          timeout:4, callback:"mdnsCallback"]))
-    runIn(4,"mdnsTimeout")   // unicast SRV reply is sub-second when the accessory is up; 4s is ample and halves the pre-sweep cost
 }
 def mdnsTimeout(){
     def op=takeOpClaim("mdns", state.afterMdns); state.afterMdns=null; if(!op) return
     int tries=(state.mdnsTries?:0) as int
-    if(tries < 2){   // the port can change after a reboot/power-cycle, so getting the CURRENT one matters
+    if(!state.mdnsMulticast && tries < 2){   // the port can change after a reboot/power-cycle, so getting the CURRENT one matters
         state.mdnsTries=tries+1
         log.warn "HAP: mDNS port detect timed out — retry ${state.mdnsTries}/2"
-        mdnsThen(op); return
+        mdnsSend(op, false); return
+    }
+    if(!state.mdnsMulticast && (settings.mdnsServiceName || state.mdnsInstance)){
+        try{ mdnsSend(op, true); return }
+        catch(e){ log.warn "HAP: targeted mDNS unavailable (${e.message}); continuing recovery"; state.afterMdns=null }
     }
     state.mdnsTries=0
     // no reply at the pinned IP — the accessory may have a new DHCP address. The subnet SWEEP (relocate) is the
@@ -391,24 +344,29 @@ def mdnsTimeout(){
     // sweeping every cycle. Between sweeps, just try the last-known port and let the backoff pace retries.
     long sinceSweep = now() - (state.lastSweep ?: 0L)
     if(settings.accPairingId && sinceSweep >= SWEEP_INTERVAL_SEC*1000L){
-        state.lastSweep = now()
-        log.warn "HAP: no mDNS reply at ${settings.ip} — searching the subnet for the accessory (IP may have changed)…"
+        state.lastSweep = now(); state.relocTries = 0
+        log.warn "HAP: no matching mDNS reply - trying extended multicast discovery"
         relocate(op); return
     }
-    log.warn "HAP: mDNS port detect timed out; using last-known port"; dispatchOp(op)
+    log.warn "HAP: mDNS port detect timed out (${state.mdnsReplies ?: 0} callbacks, ${state.mdnsPayloads ?: 0} hex payloads); using last-known port"
+    if(!(settings.mdnsServiceName || state.mdnsInstance)) log.warn "HAP: set HomeKit mDNS service name to target this accessory; general browse may return another accessory first"
+    dispatchOp(op)
 }
 // Accessory not answering at its saved IP? Browse the whole subnet (multicast mDNS) and match OUR accessory
 // by its HomeKit id (accPairingId) to pick up a new DHCP-assigned IP, then reconnect. Best-effort — a DHCP
 // reservation is the reliable fix, but this recovers automatically when the address drifts.
 def relocate(String op){
+    String q
+    try{ q=(settings.mdnsServiceName || state.mdnsInstance) ? mdnsQuery() : MDNS_PTR_QUERY }
+    catch(e){ log.warn "HAP: invalid mDNS service name; using general relocation search"; q=MDNS_PTR_QUERY }
+    state.relocTries = ((state.relocTries ?: 0) as int) + 1
     state.afterRelocate = op; armOpClaim("relocate", op)
-    String q="000000000001000000000000045f686170045f746370056c6f63616c00000c8001"
+    runIn(8,"relocateTimeout")
     sendHubCommand(new hubitat.device.HubAction(q, hubitat.device.Protocol.LAN,
         [destinationAddress:"224.0.0.251:5353",
          type:hubitat.device.HubAction.Type.LAN_TYPE_UDPCLIENT,
          encoding:hubitat.device.HubAction.Encoding.HEX_STRING,
          timeout:6, callback:"relocateCallback"]))
-    runIn(8,"relocateTimeout")
 }
 def relocateTimeout(){
     def op=takeOpClaim("relocate", state.afterRelocate); state.afterRelocate=null; if(!op) return
@@ -418,54 +376,172 @@ def relocateTimeout(){
 def relocateCallback(message){
     try{
         if(!state.afterRelocate) return
-        def m=null; try{ m=parseLanMessage(message.toString()) }catch(ig){}
-        String h=((m?.payload ?: m?.body ?: message.toString()) ?: "").toString().toLowerCase().replaceAll("[^0-9a-f]","")
-        def r=parseMdns(h)
+        def op=state.afterRelocate
+        String h=mdnsPayload(message)
+        if(!h){ rep "No DNS payload in relocation callback"; unschedule("relocateTimeout"); state.afterRelocate=null; dispatchOp(op); return }
+        def r=parseMdns(h, (settings.accPairingId ?: "").toString())
         String want=(settings.accPairingId ?: "").toString().toUpperCase()
-        if(want && r.id && r.id==want){
+        if(want && r.id==want && r.ip && r.port){
+            state.mdnsInstance=r.instance
             if(r.ip && r.ip != settings.ip){ device.updateSetting("ip",[value:r.ip,type:"string"]); logInfo "HAP: accessory moved — IP updated to ${r.ip}"; sendEvent(name:"hapStatus", value:"IP updated to ${r.ip}") }
             if(r.port){ device.updateSetting("port",[value:r.port,type:"number"]); state.discoveredPort=r.port }
             unschedule("relocateTimeout")
-            def op=takeOpClaim("relocate", state.afterRelocate); state.afterRelocate=null; if(op) dispatchOp(op)
+            def claimed=takeOpClaim("relocate", state.afterRelocate); state.afterRelocate=null; if(claimed) dispatchOp(claimed)
+        } else {
+            unschedule("relocateTimeout")
+            // another HAP responder answered first and hid ours, so re-browse rather than burning the whole sweep window
+            if(((state.relocTries ?: 0) as int) < RELOCATE_MAX_TRIES){ relocate(op); return }
+            def claimed=takeOpClaim("relocate", state.afterRelocate); state.afterRelocate=null; if(claimed) dispatchOp(claimed)
         }
-        // else a different HAP accessory answered — ignore and keep waiting (relocateTimeout gives up)
-    }catch(e){ log.error "relocateCallback: ${e}" }
+    }catch(e){
+        log.error "relocateCallback: ${e}"
+        def op=takeOpClaim("relocate", state.afterRelocate); unschedule("relocateTimeout"); state.afterRelocate=null; if(op) dispatchOp(op)
+    }
 }
 def mdnsCallback(message){
     try {
+        if(!state.afterMdns) return
+        state.mdnsReplies=((state.mdnsReplies ?: 0) as int)+1
         String desc = message.toString(); if(settings.debugLog) log.debug "HAP mdns raw: ${desc}"
-        def m = null; try { m = parseLanMessage(desc) } catch(ig){}
-        String h = ((m?.payload ?: m?.body ?: desc) ?: "").toString().toLowerCase().replaceAll("[^0-9a-f]","")
-        def r = parseMdns(h)
-        if(r.port){ device.updateSetting("port",[value:r.port,type:"number"]); state.discoveredPort=r.port; state.mdnsTries=0; logInfo "HAP: detected port ${r.port}" }
-        else log.warn "HAP: no SRV in mDNS reply"
+        String h=mdnsPayload(message)
+        if(!h){ def op=takeOpClaim("mdns", state.afterMdns); unschedule("mdnsTimeout"); state.afterMdns=null; rep "No DNS payload in mDNS callback"; if(op) dispatchOp(op); return }
+        state.mdnsPayloads=((state.mdnsPayloads ?: 0) as int)+1
+        String sourceIp=mdnsSourceIp(message)
+        String want=(settings.accPairingId ?: "").toString().toUpperCase()
+        def r = parseMdns(h, want, (settings.ip ?: "").toString(), state.mdnsMulticast ? "" : sourceIp)
+        // A TXT id match IS the identity proof, so honour it wherever the reply arrived from — that is the only
+        // way a DHCP-moved accessory can be recovered. Address filtering is for replies we cannot identify.
+        boolean identified = want && r.id && r.id==want
+        if(!identified){
+            if(sourceIp && sourceIp!=settings.ip){ def op=takeOpClaim("mdns", state.afterMdns); unschedule("mdnsTimeout"); state.afterMdns=null; rep "unidentified mDNS reply came from another IP"; if(op) dispatchOp(op); return }
+            if(r.ip && r.ip!=settings.ip){ def op=takeOpClaim("mdns", state.afterMdns); unschedule("mdnsTimeout"); state.afterMdns=null; rep "unidentified mDNS address differs from configured IP"; if(op) dispatchOp(op); return }
+        }
+        if(!r.port){ def op=takeOpClaim("mdns", state.afterMdns); unschedule("mdnsTimeout"); state.afterMdns=null; rep "No matching HAP SRV in mDNS reply"; if(op) dispatchOp(op); return }
+        state.mdnsInstance=r.instance
+        if(identified && r.ip && r.ip!=settings.ip){
+            device.updateSetting("ip",[value:r.ip,type:"string"]); logInfo "HAP: accessory moved — IP updated to ${r.ip}"; sendEvent(name:"hapStatus", value:"IP updated to ${r.ip}")
+        }
+        device.updateSetting("port",[value:r.port,type:"number"]); state.discoveredPort=r.port; state.mdnsTries=0; logInfo "HAP: detected port ${r.port}"
         unschedule("mdnsTimeout")
         def op=takeOpClaim("mdns", state.afterMdns); state.afterMdns=null; if(op) dispatchOp(op)
-    } catch(e){ log.error "mdnsCallback: ${e}" }
+    } catch(e){
+        log.error "mdnsCallback: ${e}"
+        def op=takeOpClaim("mdns", state.afterMdns); unschedule("mdnsTimeout"); state.afterMdns=null; if(op) dispatchOp(op)
+    }
+}
+String mdnsSourceIp(def message){
+    def source=null
+    if(!(message instanceof CharSequence)){
+        try{ source=message.ip }catch(ignored){}
+        if(!source){ try{ message=message.description }catch(ignored){} }
+    }
+    if(!source && message instanceof CharSequence){
+        try{ source=parseLanMessage(message.toString())?.ip }catch(ignored){}
+    }
+    String value=source?.toString()
+    if(value==~/(?i)[0-9a-f]{8}/){
+        byte[] address=hex(value)
+        return address.collect{ it&0xff }.join(".")
+    }
+    if(value==~/[0-9]{1,3}(\.[0-9]{1,3}){3}/ && value.split(/\./).every{ it.toInteger()<=255 }) return value
+    return null
+}
+String mdnsPayload(def message){
+    def payload=null
+    if(!(message instanceof CharSequence)){
+        try{ payload=message.payload }catch(ignored){}
+        if(!payload){ try{ payload=message.body }catch(ignored){} }
+        if(!payload){ try{ message=message.description }catch(ignored){} }
+    }
+    if(!payload && message instanceof CharSequence){
+        String description=message.toString()
+        try{ def parsed=parseLanMessage(description); payload=parsed?.payload ?: parsed?.body }catch(ignored){}
+        if(!payload && description==~/(?i)(?:[0-9a-f]{2})+/) payload=description
+    }
+    String value=payload?.toString()?.trim()
+    return value && value==~/(?i)(?:[0-9a-f]{2})+/ ? value : null
 }
 // minimal mDNS/DNS answer walker -> [ip, port, sf, id]
-Map parseMdns(String h){
+Map parseMdns(String h, String wantId="", String wantIp="", String sourceIp=""){
     byte[] b; try { b=hex(h) } catch(e){ return [:] }
     def res=[ip:null, port:null, sf:-1, id:null]
-    if(b==null || b.length<12) return res
+    if(b==null || b.length<12 || (b[2]&0x80)==0 || (b[3]&0x0f)!=0) return res
     int qd=((b[4]&0xff)<<8)|(b[5]&0xff)
     int tot=(((b[6]&0xff)<<8)|(b[7]&0xff))+(((b[8]&0xff)<<8)|(b[9]&0xff))+(((b[10]&0xff)<<8)|(b[11]&0xff))
     int p=12
-    for(int i=0;i<qd;i++){ p=skipName(b,p); p+=4 }
-    for(int i=0;i<tot && p+10<=b.length;i++){
-        p=skipName(b,p); if(p+10>b.length) break
+    for(int question=0;question<qd;question++){
+        def name=mdnsName(b,p); if(!name || name.next+4>b.length) return res
+        p=name.next+4
+    }
+    def services=[:], addresses=[:]
+    for(int record=0;record<tot;record++){
+        def owner=mdnsName(b,p); if(!owner) return res
+        p=owner.next; if(p+10>b.length) return res
         int type=((b[p]&0xff)<<8)|(b[p+1]&0xff)
+        int recordClass=((b[p+2]&0x7f)<<8)|(b[p+3]&0xff)
+        boolean alive=(b[p+4]|b[p+5]|b[p+6]|b[p+7])!=0
         int rdlen=((b[p+8]&0xff)<<8)|(b[p+9]&0xff); int rd=p+10
-        if(type==0x21 && rd+6<=b.length){ res.port=((b[rd+4]&0xff)<<8)|(b[rd+5]&0xff) }
-        else if(type==0x01 && rdlen==4 && rd+4<=b.length){ res.ip="${b[rd]&0xff}.${b[rd+1]&0xff}.${b[rd+2]&0xff}.${b[rd+3]&0xff}" }
-        else if(type==0x10){
-            String t=""; int e=Math.min(rd+rdlen,b.length); for(int k=rd;k<e;k++) t+=(char)(b[k]&0xff); t=t.toLowerCase()
-            int si=t.indexOf("sf="); if(si>=0 && si+3<t.length()){ try{ res.sf=Integer.parseInt(t.substring(si+3,si+4)) }catch(ig){} }
-            int ii=t.indexOf("id="); if(ii>=0){ int j=ii+3; StringBuilder sb=new StringBuilder(); while(j<t.length()){ char ch=t.charAt(j); if((ch>='0'&&ch<='9')||(ch>='a'&&ch<='f')||ch==':'){ sb.append(ch); j++ } else break }; if(sb.length()>0) res.id=sb.toString().toUpperCase() }
+        if(rd+rdlen>b.length) return res
+        if(recordClass==1 && alive){
+            if(type==0x01 && rdlen==4){
+                addresses[owner.name]="${b[rd]&0xff}.${b[rd+1]&0xff}.${b[rd+2]&0xff}.${b[rd+3]&0xff}"
+            } else if(owner.name.endsWith("._hap._tcp.local")){
+                def service=services[owner.name] ?: [sf:-1, instance:owner.name]
+                if(type==0x21 && rdlen>=7){
+                    def target=mdnsName(b,rd+6)
+                    if(!target || target.next!=rd+rdlen) return res
+                    service.port=((b[rd+4]&0xff)<<8)|(b[rd+5]&0xff)
+                    service.target=target.name
+                } else if(type==0x10){
+                    int cursor=rd
+                    while(cursor<rd+rdlen){
+                        int length=b[cursor++]&0xff
+                        if(cursor+length>rd+rdlen) return res
+                        String entry=new String(b,cursor,length,"UTF-8")
+                        int separator=entry.indexOf("=")
+                        if(separator>0){
+                            String key=entry.substring(0,separator).toLowerCase()
+                            String value=entry.substring(separator+1)
+                            if(key=="id") service.id=value.toUpperCase()
+                            else if(key=="sf"){ try{ service.sf=Integer.parseInt(value) }catch(ignored){} }
+                        }
+                        cursor+=length
+                    }
+                }
+                services[owner.name]=service
+            }
         }
         p=rd+rdlen
     }
-    return res
+    String wanted=wantId.toUpperCase()
+    boolean fromConfiguredIp=wantIp && sourceIp==wantIp
+    def matches=services.values().findAll{ service->
+        boolean identityMatches=wanted ? (service.id ? service.id==wanted : fromConfiguredIp) : true
+        boolean addressMatches=wanted || !wantIp || addresses[service.target]==wantIp || (fromConfiguredIp && !addresses[service.target])
+        service.port && identityMatches && addressMatches
+    }
+    if(matches.size()!=1) return res
+    def selected=matches[0]
+    return [ip:addresses[selected.target], port:selected.port, sf:selected.sf, id:selected.id, instance:selected.instance]
+}
+Map mdnsName(byte[] packet, int offset){
+    def labels=[]
+    def visited=[] as Set
+    int cursor=offset, next=-1
+    while(cursor<packet.length && visited.add(cursor)){
+        int length=packet[cursor]&0xff
+        if(length==0) return [name:labels.join(".").toLowerCase(), next:next<0 ? cursor+1 : next]
+        if((length&0xc0)==0xc0){
+            if(cursor+1>=packet.length) return null
+            if(next<0) next=cursor+2
+            cursor=((length&0x3f)<<8)|(packet[cursor+1]&0xff)
+        } else {
+            if((length&0xc0)!=0 || cursor+1+length>packet.length) return null
+            labels << new String(packet,cursor+1,length,"UTF-8")
+            cursor+=1+length
+        }
+    }
+    return null
 }
 int skipName(byte[] b, int p){ while(p<b.length){ int l=b[p]&0xff; if(l==0) return p+1; if((l&0xC0)==0xC0) return p+2; p+=1+l }; return p }
 void dispatchOp(String op){ if(op=="pairsetup") pairConnect() else if(op=="live") liveConnect() else if(op in ["read","discover","write","unpair"]) hapStart(op, op=="write"? state.writeJson : null) }
@@ -629,7 +705,7 @@ void finishUnpair(byte[] resp){
 void clearLocalPairing(){
     state.paired=false; state.live=false
     ["iosLtsk","iosPairingId","accLtpk","accPairingId","setupCode"].each{ device.removeSetting(it) }
-    ["c2a","a2c","shared","services","discoveredPort","writeJson"].each{ state.remove(it) }
+    ["c2a","a2c","shared","services","discoveredPort","writeJson","mdnsInstance","afterMdns","afterRelocate","mdnsMulticast"].each{ state.remove(it) }
     unschedule()
 }
 // byte-level chunked de-coder (the /pairings TLV reply is binary, so we can't use the string path)
@@ -754,6 +830,24 @@ def socketStatus(String s){
     else if(!l.contains("close")) log.warn "socket: $s"
 }
 
+private void recoverDecryptFailure(){
+    String op=state.op
+    state.live=false; state.sess=false; state.connInFlight=null
+    state.probeAt=null; rxbuf().setLength(0); plainbuf().setLength(0)
+    try{ interfaces.rawSocket.close() }catch(ignored){}
+    unschedule("liveKeepalive"); unschedule("kaWatch"); unschedule("oneshotWatch"); unschedule("verifyWatch")
+    unschedule("retryEncrypted")
+    runIn(2,"retryEncrypted")
+    dlog("HAP: encrypted session reset after tag failure (${op})")
+}
+def retryEncrypted(){
+    if(!isPaired()) return
+    if(state.op=="live"){ startLive(); return }
+    if(state.op=="write" && state.writeJson){ hapStart("write", state.writeJson); return }
+    if(state.op in ["read","discover","unpair"]){ startSession(); return }
+    startSession()
+}
+
 // ===== socket receive + framing =====
 def parse(String message){
   try {
@@ -777,8 +871,10 @@ def parse(String message){
     if(state.live && (es.contains("AEADBadTag") || es.contains("Tag mismatch") || es.contains("BadPadding"))){
         dlog("HAP: session desynced (decrypt failed) — reconnecting for fresh keys")   // benign self-healing re-key; debug-only (fires often on busy multi-sensor thermostats)
         rep("ERR parse ${state.op}/${state.vstage}: ${e.class.simpleName}: ${e.message}")
-        state.live=false; state.sess=false; try{ interfaces.rawSocket.close() }catch(ig){}; state.connInFlight=null
-        unschedule("liveKeepalive"); unschedule("kaWatch"); runIn(2,"startLive")
+        recoverDecryptFailure()
+    } else if(es.contains("AEADBadTag") || es.contains("Tag mismatch") || es.contains("BadPadding")){
+        log.warn "parse: encrypted session desynchronized (${state.op}); reconnecting"
+        recoverDecryptFailure()
     } else {
         log.error "parse: ${e}"; rep("ERR parse ${state.op}/${state.vstage}: ${e.class.simpleName}: ${e.message}")
     }
@@ -878,7 +974,8 @@ private void reFail(String why){
     unschedule("startLive"); runIn(d, "startLive")
 }
 // A live session came up: clear the failure streak so the next outage starts from the short end of the ladder.
-private void reOK(){ if((state.reFails?:0) as int){ state.reFails=0 } }
+// The sweep window re-arms too — the accessory was just reachable, so a later move deserves an immediate browse.
+private void reOK(){ if((state.reFails?:0) as int){ state.reFails=0 }; state.lastSweep=0L; state.remove("relocTries") }
 // Try the CHEAP path first: known topology + cached port -> connect straight to the last-known ip:port (fails in
 // ms with NoRouteToHost when the accessory is offline). The expensive multicast /24 subnet sweep (relocate, via
 // mdnsThen) only runs when we have no port, or at most once per SWEEP_INTERVAL_SEC — so an offline accessory can't
@@ -888,11 +985,12 @@ def startLive(){
     unschedule("liveKeepalive"); unschedule("kaWatch")
     boolean haveTopo = (state.services!=null && hapPort()>0)
     int n = (state.reFails?:0) as int
+    int verifyFailures = (state.vtry?:0) as int
     // Fast path for a transient drop: reconnect straight to the last-known ip:port. But every 3rd consecutive
     // failure, re-resolve the port via unicast mDNS first — an accessory that rebooted often comes back on a NEW
     // dynamic HAP port, and hammering the stale cached port would never recover. Unicast mDNS is cheap when the host
     // is up; when it's down it times out and mdnsTimeout falls through to the SWEEP, which is itself gated to ≤1/30min.
-    boolean reresolve = !haveTopo || (n>0 && n % 3 == 0)
+    boolean reresolve = !haveTopo || (n>0 && n % 3 == 0) || (verifyFailures>0 && verifyFailures % 3 == 0)
     if(reresolve) mdnsThen(state.services==null ? "discover" : "live")
     else liveConnect()
 }
@@ -910,14 +1008,14 @@ void liveConnect(){
 }
 // pair-verify watchdog: if the handshake didn't reach a session, close + retry with capped backoff,
 // re-resolving the port via mDNS each time (the port and the single connection slot can both go stale).
+// counting failures so startLive periodically re-resolves the port as well as retrying the connection.
 def verifyWatch(){
     if(!state.sess){
-        // backoff to 2 min (was 5): a wedged accessory needs some quiet time, but 5-min gaps meant a door
-        // could sit unreported for minutes after the slot freed. Cap at 120s so retries stay reasonably frequent.
-        state.vtry=(state.vtry?:0)+1; int b=Math.min(120, 30*(state.vtry as int))
-        log.warn "HAP: pair-verify timed out (no M2) — retry ${state.vtry} in ${b}s"
+        state.vtry=(state.vtry?:0)+1
         try{ interfaces.rawSocket.close() }catch(e){}; state.connInFlight=null
-        runIn(b,"startLive")
+        int d=Math.min(120, 30*(state.vtry as int))
+        logInfo "HAP: pair-verify timed out (no M2) — next try in ${d}s"
+        unschedule("startLive"); runIn(d, "startLive")
     }
 }
 // HELD SESSION + LIVENESS PROBE (self-correcting — never trust the flag). A real HomeKit controller holds ONE

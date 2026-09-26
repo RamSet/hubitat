@@ -37,6 +37,8 @@
  *           advertising itself as pairable — is retried once with Method 1 (Pair Setup with Auth), and the
  *           method that worked is remembered. Nothing to configure: the new "Pair-setup method" preference
  *           (shown until the accessory is paired) only exists to pin one for support.
+ *  v0.15.0 - Reconnects itself after a hub reboot via Initialize capability. Add optional preference for mDNS
+ *           service name to improve connectivity fallback. Leverages improved hapCore session management.
  *  v0.14.0 - PURE LISTEN BY DEFAULT. The keepalive/liveness probe now defaults to 0 (off) instead of 30s.
  *           Rationale, and it is not a guess: hapCore 0.10.12 added real TCP keepalive to the session socket
  *           (SO_KEEPALIVE via the rawSocket connect options) behind a getMethod fallback, because the driver
@@ -153,6 +155,7 @@ import groovy.transform.Field
 metadata {
     definition(name: "HomeKit HAP Accessory", namespace: "RamSet", author: "RamSet", importUrl: "https://raw.githubusercontent.com/RamSet/hubitat/refs/heads/main/drivers/homekit-accessory/homekit-accessory.groovy") {
         capability "Refresh"
+        capability "Initialize"   // lets the hub restart the HomeKit session on reboot
         command "pair"
         command "unpair"            // HAP RemovePairing — cleanly release this accessory (like a Z-Wave exclude), then remove its children
         command "forget"            // local-only: clear our keys + children WITHOUT notifying the accessory (use if it's offline/dead)
@@ -169,6 +172,7 @@ metadata {
     }
     preferences {
         input "ip", "string", title: "Accessory IP address", required: true
+        input "mdnsServiceName", "string", title: "HomeKit mDNS service name (optional)", description: "Exact _hap._tcp service name. Enables targeted multicast fallback after IP-directed discovery fails. Leave blank to use a previously discovered name. The configured IP remains the primary endpoint.", required: false
         if (!(state.paired==true || settings?.iosLtsk)) {   // settings is null at code-save time -> MUST use safe-nav
             input "setupCode", "string", title: "HomeKit setup code — 8 digits, no dashes (e.g. 12345678). Enter and Save to pair.", required: false
             input "pairMethod", "enum", title: "Pair-setup method — leave on Automatic unless asked",
@@ -251,6 +255,14 @@ def updated(){
     if(settings.safetyRefreshSecs == null) device.updateSetting("safetyRefreshSecs",[value:"0",type:"number"])
     if(settings.setupCode && !isPaired()){ logInfo "HAP: setup code entered — pairing"; runIn(1,"pair") }
     else if(isPaired()){ runIn(2,"startSession"); runEvery5Minutes("ensureUp") }   // backstop (now clears stale connInFlight); verifyWatch backoff is the primary retry
+}
+// A rawSocket session cannot survive a hub reboot, so rebuild it on startup rather than waiting for ensureUp.
+def initialize(){
+    if(!isPaired()) return
+    try{ interfaces.rawSocket.close() }catch(e){}   // Initialize is also a UI command, so a live session may still be open
+    state.live=false; state.connInFlight=null
+    unschedule("ensureUp"); runEvery5Minutes("ensureUp")
+    runIn(2,"startSession")
 }
 // Decode a HomeKit setup QR payload (X-HM://<9 base36 chars><setup id>) to the 8-digit setup code. The
 // low 27 bits of the base36 payload are the code. Lets you pair accessories that only expose a QR / a

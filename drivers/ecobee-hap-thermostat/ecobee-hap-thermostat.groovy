@@ -17,12 +17,14 @@
  *   this driver (HPM does it automatically).
  *
  * Author: RamSet
- * Version: 0.19.6
+ * Version: 0.20.0
  * Date: 2026-08-12
  *
  * REQUIRES library: RamSet.hapCore (installed automatically by Hubitat Package Manager).
  *
  * Changelog:
+ *  v0.20.0 - Reconnects itself after a hub reboot via Initialize capability. Add optional preference for mDNS
+ *           service name to improve connectivity fallback. Leverages improved hapCore session management.
  *  v0.19.6 - Passive held session by default. The liveness-probe interval now defaults to 0 (off). With hapCore's
  *           TCP keepalive (Hubitat 2.5.1.145+) holding the socket, the frequent probe is no longer needed — and it
  *           was the cause of the ~10-minute silent-drop/reconnect cycle: proven that turning it off lets the
@@ -203,6 +205,7 @@ metadata {
         // Integration and silently drops out of the HomeKit export. Instead, the thermostat's built-in
         // sensor is exposed as its own child device (a motion/occupancy sensor) — see onAccessories().
         capability "Refresh"
+        capability "Initialize"   // lets the hub restart the HomeKit session on reboot
         command "setDesiredTemperature", [[name:"Desired temperature*",type:"NUMBER",description:"Target temperature to set on the thermostat"]]
         command "raiseSetpoint"
         command "lowerSetpoint"
@@ -239,6 +242,7 @@ metadata {
     }
     preferences {
         input "ip", "string", title: "Thermostat IP address", required: true
+        input "mdnsServiceName", "string", title: "HomeKit mDNS service name (optional)", description: "Exact _hap._tcp name, for example Upstairs or Downstairs. Enables targeted multicast fallback after IP-directed discovery fails. Leave blank to use a previously discovered name. The configured IP remains the primary endpoint.", required: false
         if (!(state.paired==true || settings?.iosLtsk)) {   // settings is null at code-save time -> MUST use safe-nav (settings?.) or it NPEs and the save fails
             input "setupCode", "string", title: "HomeKit setup code — 8 digits, no dashes (e.g. 12345678). Enter and Save to pair.", required: false
         }
@@ -280,6 +284,15 @@ def updated(){
     if(settings.debugLog) runIn(1800,"logsOff")   // debug is off by default and auto-disables after 30 min (it writes state on every frame — keeps the device's busy% + state size down)
     if(settings.setupCode && !isPaired()){ logInfo "HAP: setup code entered — pairing"; runIn(1,"pair") }
     else if(isPaired()){ runIn(2,"startSession"); runEvery10Minutes("ensureUp"); scheduleRefresh() }   // live event mode is the default once paired; ensureUp is a reconnect backstop; scheduleRefresh polls the no-event chars (comfort profile/hold-end/per-profile setpoints/alert/sensor timers) the pure-listen engine won't push
+}
+// A rawSocket session cannot survive a hub reboot, so rebuild it on startup rather than waiting for ensureUp.
+def initialize(){
+    if(!isPaired()) return
+    try{ interfaces.rawSocket.close() }catch(e){}   // Initialize is also a UI command, so a live session may still be open
+    state.live=false; state.connInFlight=null
+    unschedule("ensureUp"); runEvery10Minutes("ensureUp")
+    scheduleRefresh()
+    runIn(2,"startSession")
 }
 // schedule the background re-read of the no-event characteristics; interval is user-configurable (default 5 min, floor 30 s)
 def scheduleRefresh(){
