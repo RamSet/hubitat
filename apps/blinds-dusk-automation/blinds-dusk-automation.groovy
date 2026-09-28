@@ -94,6 +94,7 @@ def mainPage() {
         section("<b>Notifications</b>") {
             input "notifiers", "capability.notification",
                   title: "Notification device(s)", multiple: true, required: false
+            paragraph "Every message is sent as \"<instance name>: <message>\", so you can tell rooms apart."
             input "windowOpenMsg", "text", title: "Message when window is open",
                   defaultValue: "Window is open. Waiting for it to be closed in order to lower the blind."
             input "windowClosedMsg", "text", title: "Message when window has closed",
@@ -348,11 +349,15 @@ def confirmBlindsClosed(data) {
         return
     }
     log.error "${app.label}: blind(s) did NOT close after ${maxTries + 1} attempt(s): ${names.join(', ')}"
-    notify("⚠ ${app.label}: blind did NOT close — ${names.join(', ')} still up after ${maxTries + 1} tries. Check the shade.")
+    notify("⚠ blind did NOT close — ${names.join(', ')} still up after ${maxTries + 1} tries. Check the shade.")
 }
 
+// Every message carries this instance's name: one instance per room means the name
+// says which window/blind the message is about (the text alone did not).
 private void notify(String msg) {
-    if (msg) notifiers?.deviceNotification(msg)
+    if (!msg) return
+    String full = "${app.label}: ${msg}"
+    notifiers?.deviceNotification(full)
 }
 
 // Midpoint between today's sunrise and sunset — the earliest the failing light can mean dusk rather than dawn.
