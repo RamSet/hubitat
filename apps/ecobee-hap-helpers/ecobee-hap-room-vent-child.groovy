@@ -9,8 +9,11 @@
  *  Child of: Local Ecobee Helpers (RamSet)
  *
  *  Author: RamSet
- *  Version: 1.1.0 (2026-09-28)
+ *  Version: 1.1.1 (2026-09-28)
  *  Version history:
+ *    1.1.1 - The room-temperature pill is coloured by where the room sits against its target: blue below,
+ *            green within 0.5°, orange above. While idle the target is the setpoint of the thermostat mode
+ *            (both edges in auto); with the thermostat off there is no target and the pill is grey.
  *    1.1.0 - Current-status block at the top of the page: HVAC state, room temperature vs target, the vent
  *            level the app wants, each vent's actual level, when it last evaluated and when the periodic
  *            re-check is due (flags a timer that has stopped, so a stalled helper is visible).
@@ -132,16 +135,18 @@ private Map ventPlan() {
 
     boolean heating = opState in ["heating", "pending heat"]
     boolean cooling = opState in ["cooling", "pending cool"]
+    def heatSp = t.currentValue("heatingSetpoint")
+    def coolSp = t.currentValue("coolingSetpoint")
     double level
     def target = null
     String action
 
     if (heating || (alwaysAdjust && mode == "heat")) {
-        target = ((t.currentValue("heatingSetpoint") as double) + (heatOffset ?: 0.0))
+        target = ((heatSp as double) + (heatOffset ?: 0.0))
         level = scale((target as double) - (room as double), b, flr)   // room below target → open
         action = "heating"
     } else if (cooling || (alwaysAdjust && mode == "cool")) {
-        target = ((t.currentValue("coolingSetpoint") as double) + (coolOffset ?: 0.0))
+        target = ((coolSp as double) + (coolOffset ?: 0.0))
         level = scale((room as double) - (target as double), b, flr)   // room above target → open
         action = "cooling"
     } else {
@@ -149,9 +154,22 @@ private Map ventPlan() {
         action = "idle"
     }
     int pct = Math.max(0, Math.min(100, (int) Math.round(level)))
+
+    // Band the room temperature is coloured against: the active target while conditioning,
+    // otherwise the setpoint(s) of the thermostat mode (both edges in auto). Off → no band.
+    def lo = target, hi = target
+    if (target == null) {
+        if (mode == "heat" && heatSp != null)      { lo = hi = (heatSp as double) + (heatOffset ?: 0.0) }
+        else if (mode == "cool" && coolSp != null) { lo = hi = (coolSp as double) + (coolOffset ?: 0.0) }
+        else if (mode == "auto" && heatSp != null && coolSp != null) {
+            lo = (heatSp as double) + (heatOffset ?: 0.0)
+            hi = (coolSp as double) + (coolOffset ?: 0.0)
+        }
+    }
     return [ok: true, thermostat: t, room: room, opState: opState, mode: mode, action: action,
             conditioning: (action != "idle"), byThermostat: (heating || cooling),
-            target: target, level: level, pct: pct, floor: flr, band: b]
+            target: target, level: level, pct: pct, floor: flr, band: b,
+            lo: lo, hi: hi, roomColor: tempColor(room, lo, hi)]
 }
 
 def evaluateVent() {
@@ -171,8 +189,7 @@ private String currentStatus() {
         String lbl = p.action == "idle" ? (p.opState in [null, 'idle'] ? "idle" : "idle (${p.opState})")
                    : p.action + (p.byThermostat ? "" : " — always adjust, thermostat ${p.opState ?: 'idle'}")
         rows << row("HVAC", pill(lbl, actionColor(p.action)) + " <small>mode ${p.mode}</small>")
-        rows << row("Room temperature", pill("${fmt1(p.room)}°", "blue") +
-                    (p.target != null ? " <small>target ${fmt1(p.target)}° · fully open ${fmt1(p.band)}° from target</small>" : ""))
+        rows << row("Room temperature", pill("${fmt1(p.room)}°", p.roomColor) + " <small>${bandText(p)}</small>")
         rows << row("Vent target", pill("${p.pct}%", p.conditioning ? "green" : "grey") + " <small>floor ${p.floor as int}%</small>")
     }
     ventLevels?.each { v ->
@@ -197,8 +214,8 @@ private String currentStatus() {
 Map statusSummary() {
     Map p = ventPlan()
     String html = p.ok
-        ? pill(p.action, actionColor(p.action)) +
-          " <small>room ${fmt1(p.room)}°" + (p.target != null ? " → target ${fmt1(p.target)}°" : "") + " · vents ${p.pct}%</small>"
+        ? pill(p.action, actionColor(p.action)) + " " + pill("${fmt1(p.room)}°", p.roomColor) +
+          " <small>" + (p.target != null ? "target ${fmt1(p.target)}° · " : "") + "vents ${p.pct}%</small>"
         : pill(p.why, "red")
     return [kind: "Room Vent", html: html]
 }
@@ -208,6 +225,23 @@ private String actionColor(String action) {
 }
 
 private String fmt1(x) { x == null ? "?" : String.format("%.1f", x as double) }
+
+// blue = colder than the band, green = within 0.5° of it, amber (orange) = warmer; grey = no band
+private String tempColor(room, lo, hi) {
+    if (room == null || lo == null || hi == null) return "grey"
+    double r = room as double
+    if (r < (lo as double) - 0.5d) return "blue"
+    if (r > (hi as double) + 0.5d) return "amber"
+    return "green"
+}
+
+private String bandText(Map p) {
+    String legend = " — blue below · green on target · orange above"
+    if (p.target != null) return "target ${fmt1(p.target)}° · fully open ${fmt1(p.band)}° from target" + legend
+    if (p.lo == null) return "no target — thermostat mode ${p.mode ?: 'unknown'}"
+    if (p.lo == p.hi) return "target ${fmt1(p.lo)}° while idle" + legend
+    return "comfort band ${fmt1(p.lo)}°–${fmt1(p.hi)}° (auto)" + legend
+}
 
 // "45s" / "3 min" / "2 h 5 min" between now and a past or future instant
 private String span(long ms) {
