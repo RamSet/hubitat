@@ -13,8 +13,10 @@
  *  Child of: Local Ecobee Helpers (RamSet)
  *
  *  Author: RamSet
- *  Version: 1.0.0 (2026-06-24)
+ *  Version: 1.1.0 (2026-09-28)
  *  Version history:
+ *    1.1.0 - Current-status block at the top of the page: the humidifier decision and why, each outlet's
+ *            actual state, heater state, humidity vs the effective maximum, outdoor temperature.
  *    1.0.0 - Initial release. Heater-gated humidifier socket, max desired humidity, optional frost control, C/F auto-detect.
  *
  *  DISCLAIMER: Provided as-is, without warranty of any kind. You are solely
@@ -39,6 +41,9 @@ preferences {
 
 def mainPage() {
     dynamicPage(name: "mainPage", title: "Humidity", install: true, uninstall: true) {
+        section("<b>Current status</b>") {
+            paragraph currentStatus()
+        }
         section("Hardware") {
             label title: "Name for this Humidity helper", required: true
             input "humidifier", "capability.switch", title: "Humidifier switch / powered socket", multiple: true, required: true
@@ -107,17 +112,70 @@ Integer effectiveMax() {
     return m
 }
 
-def apply() {
+// One computation for both the control loop and the status page, so the page shows
+// exactly what apply() would do.
+private Map decide() {
     def t = parent?.getThermostat()
-    boolean heating = (t?.currentValue("thermostatOperatingState") == "heating")
+    String op = t?.currentValue("thermostatOperatingState")
+    boolean heating = (op == "heating")
     def rh = measuredHumidity()
     int maxH = effectiveMax()
+    boolean on = heating && rh != null && (rh as int) < maxH
+    String why = !t ? "no thermostat selected in the parent" :
+                 !heating ? "heater not running (${op ?: 'unknown'})" :
+                 rh == null ? "no humidity reading" :
+                 on ? "heater on, ${rh}% < ${maxH}%" : "${rh}% is at or above the ${maxH}% maximum"
+    return [thermostat: t, op: op, heating: heating, rh: rh, maxH: maxH, on: on, why: why]
+}
 
-    if (heating && rh != null && (rh as int) < maxH) {
+def apply() {
+    Map d = decide()
+    if (d.on) {
         humidifier?.on()
-        log.info "Humidity '${app.label}': heater on, ${rh}% < ${maxH}% → humidifier ON"
+        log.info "Humidity '${app.label}': ${d.why} → humidifier ON"
     } else {
         humidifier?.off()
-        log.debug "Humidity '${app.label}': humidifier OFF (heating=${heating}, rh=${rh}, max=${maxH})"
+        log.debug "Humidity '${app.label}': humidifier OFF (${d.why})"
     }
+}
+
+// --- current status (page top) ---
+private String currentStatus() {
+    Map d = decide()
+    def rows = []
+    rows << row("Humidifier", d.on ? pill("ON — ${d.why}", "green") : pill("OFF — ${d.why}", d.thermostat ? "grey" : "red"))
+    humidifier?.each { h ->
+        String sw = h.currentValue('switch') ?: 'unknown'
+        rows << row("Outlet — ${h.displayName}", pill(sw, sw == 'on' ? 'green' : 'grey'))
+    }
+    rows << row("Heater", d.thermostat ? pill(d.heating ? "running" : "not running (${d.op ?: 'unknown'})", d.heating ? "amber" : "grey")
+                                       : pill("no thermostat selected in the parent", "red"))
+    int cfg = (maxHumidity ?: 50) as int
+    rows << row("Humidity", (d.rh != null ? pill("${d.rh}%", "blue") : pill("no reading", "red")) +
+                " <small>max ${d.maxH}%" + (d.maxH < cfg ? " (frost control lowered it from ${cfg}%)" : "") + "</small>")
+    if (frostControl && outdoorSensor) {
+        rows << row("Outdoor — ${outdoorSensor.displayName}",
+                    pill("${outdoorSensor.currentValue('temperature')}°${getTemperatureScale()}", "blue"))
+    }
+    return rows.join("<br>")
+}
+
+// called by the parent app for its overview line
+Map statusSummary() {
+    Map d = decide()
+    String rh = d.rh != null ? "${d.rh}%" : "no reading"
+    return [kind: "Humidity",
+            html: (d.on ? pill("humidifier ON", "green") : pill("humidifier off", d.thermostat ? "grey" : "red")) +
+                  " <small>${rh} / max ${d.maxH}%</small>"]
+}
+
+// --- status helpers (same look as the Blinds Dusk Automation status block) ---
+private String row(String label, String value) {
+    "<b>${label}:</b> ${value}"
+}
+
+private String pill(String text, String color) {
+    def bg = [green:'#2e7d32', red:'#c62828', amber:'#ef6c00',
+              blue:'#1565c0', indigo:'#4527a0', grey:'#616161'][color] ?: '#616161'
+    "<span style='background:${bg};color:#fff;padding:2px 8px;border-radius:10px;font-size:0.85em;white-space:nowrap'>${text}</span>"
 }

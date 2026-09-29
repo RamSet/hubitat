@@ -9,8 +9,11 @@
  *  Child of: Local Ecobee Helpers (RamSet)
  *
  *  Author: RamSet
- *  Version: 1.0.0 (2026-06-24)
+ *  Version: 1.1.0 (2026-09-28)
  *  Version history:
+ *    1.1.0 - Current-status block at the top of the page: HVAC state, room temperature vs target, the vent
+ *            level the app wants, each vent's actual level, when it last evaluated and when the periodic
+ *            re-check is due (flags a timer that has stopped, so a stalled helper is visible).
  *    1.0.0 - Initial release. Proportional vent control with adjustable periodic re-evaluation.
  *
  *  DISCLAIMER: Provided as-is, without warranty of any kind. You are solely
@@ -35,6 +38,9 @@ preferences {
 
 def mainPage() {
     dynamicPage(name: "mainPage", title: "Room Vent", install: true, uninstall: true) {
+        section("<b>Current status</b>") {
+            paragraph currentStatus()
+        }
         section("Naming & sensors") {
             label title: "Name for this Room Vent", required: true
             input "tempSensors", "capability.temperatureMeasurement", title: "Room temperature sensor(s)", multiple: true, required: true, submitOnChange: true
@@ -87,6 +93,7 @@ def initialize() {
 
 private void schedulePeriodic() {
     int mins = Math.max(1, (reEvalMinutes ?: 5) as int)
+    state.nextEvalMs = now() + mins * 60000L
     runIn(mins * 60, periodicEval)
 }
 
@@ -109,11 +116,13 @@ private avgTemp() {
     return (temps.sum() / temps.size())
 }
 
-def evaluateVent() {
+// One computation for both the control loop and the status page, so the page shows
+// exactly what evaluateVent() would do.
+private Map ventPlan() {
     def t = parent?.getThermostat()
-    if (!t) return
+    if (!t) return [ok: false, why: "no thermostat selected in the parent"]
     def room = avgTemp()
-    if (room == null) { log.warn "Room Vent '${app.label}': no room temperature yet"; return }
+    if (room == null) return [ok: false, why: "no room temperature yet", thermostat: t]
 
     def opState = t.currentValue("thermostatOperatingState")
     String mode = t.currentValue("thermostatMode")
@@ -124,21 +133,101 @@ def evaluateVent() {
     boolean heating = opState in ["heating", "pending heat"]
     boolean cooling = opState in ["cooling", "pending cool"]
     double level
-    boolean conditioning = heating || cooling
+    def target = null
+    String action
 
     if (heating || (alwaysAdjust && mode == "heat")) {
-        double target = ((t.currentValue("heatingSetpoint") as double) + (heatOffset ?: 0.0))
-        level = scale(target - (room as double), b, flr)   // room below target → open
-        conditioning = true
+        target = ((t.currentValue("heatingSetpoint") as double) + (heatOffset ?: 0.0))
+        level = scale((target as double) - (room as double), b, flr)   // room below target → open
+        action = "heating"
     } else if (cooling || (alwaysAdjust && mode == "cool")) {
-        double target = ((t.currentValue("coolingSetpoint") as double) + (coolOffset ?: 0.0))
-        level = scale((room as double) - target, b, flr)   // room above target → open
-        conditioning = true
+        target = ((t.currentValue("coolingSetpoint") as double) + (coolOffset ?: 0.0))
+        level = scale((room as double) - (target as double), b, flr)   // room above target → open
+        action = "cooling"
     } else {
         level = flr                                         // idle/off → close to floor
-        conditioning = false
+        action = "idle"
     }
-    applyLevel(level, conditioning)
+    int pct = Math.max(0, Math.min(100, (int) Math.round(level)))
+    return [ok: true, thermostat: t, room: room, opState: opState, mode: mode, action: action,
+            conditioning: (action != "idle"), byThermostat: (heating || cooling),
+            target: target, level: level, pct: pct, floor: flr, band: b]
+}
+
+def evaluateVent() {
+    Map p = ventPlan()
+    state.lastEvalMs = now()
+    if (!p.ok) { if (p.thermostat) log.warn "Room Vent '${app.label}': ${p.why}"; return }
+    applyLevel(p.level as double, p.conditioning as boolean)
+}
+
+// --- current status (page top) ---
+private String currentStatus() {
+    Map p = ventPlan()
+    def rows = []
+    if (!p.ok) {
+        rows << row("HVAC", pill(p.why, "red"))
+    } else {
+        String lbl = p.action == "idle" ? (p.opState in [null, 'idle'] ? "idle" : "idle (${p.opState})")
+                   : p.action + (p.byThermostat ? "" : " — always adjust, thermostat ${p.opState ?: 'idle'}")
+        rows << row("HVAC", pill(lbl, actionColor(p.action)) + " <small>mode ${p.mode}</small>")
+        rows << row("Room temperature", pill("${fmt1(p.room)}°", "blue") +
+                    (p.target != null ? " <small>target ${fmt1(p.target)}° · fully open ${fmt1(p.band)}° from target</small>" : ""))
+        rows << row("Vent target", pill("${p.pct}%", p.conditioning ? "green" : "grey") + " <small>floor ${p.floor as int}%</small>")
+    }
+    ventLevels?.each { v ->
+        def lv = v.currentValue('level')
+        rows << row("Vent — ${v.displayName}", pill(lv != null ? "${lv}%" : "unknown", "indigo"))
+    }
+    ventSwitches?.each { v ->
+        String sw = v.currentValue('switch') ?: 'unknown'
+        rows << row("Vent — ${v.displayName}", pill(sw, sw == 'on' ? 'green' : 'grey'))
+    }
+    if (!ventLevels && !ventSwitches) rows << row("Vents", pill("none selected", "grey"))
+    long last = (state.lastEvalMs ?: 0L) as long
+    long next = (state.nextEvalMs ?: 0L) as long
+    rows << row("Last evaluated", last ? pill("${span(last)} ago", "grey") : pill("not yet", "grey"))
+    rows << row("Next periodic re-check",
+                (next + 60000L) > now() ? pill("in ${span(next)}", "grey")
+                    : pill(next ? "overdue — press Done to restart the timer" : "not scheduled yet — press Done", "amber"))
+    return rows.join("<br>")
+}
+
+// called by the parent app for its overview line
+Map statusSummary() {
+    Map p = ventPlan()
+    String html = p.ok
+        ? pill(p.action, actionColor(p.action)) +
+          " <small>room ${fmt1(p.room)}°" + (p.target != null ? " → target ${fmt1(p.target)}°" : "") + " · vents ${p.pct}%</small>"
+        : pill(p.why, "red")
+    return [kind: "Room Vent", html: html]
+}
+
+private String actionColor(String action) {
+    action == "heating" ? "amber" : (action == "cooling" ? "blue" : "grey")
+}
+
+private String fmt1(x) { x == null ? "?" : String.format("%.1f", x as double) }
+
+// "45s" / "3 min" / "2 h 5 min" between now and a past or future instant
+private String span(long ms) {
+    long secs = Math.abs(now() - ms).intdiv(1000L)
+    if (secs < 60) return "${secs}s"
+    long mins = secs.intdiv(60L)
+    if (mins < 60) return "${mins} min"
+    long rem = mins % 60
+    return "${mins.intdiv(60L)} h" + (rem ? " ${rem} min" : "")
+}
+
+// --- status helpers (same look as the Blinds Dusk Automation status block) ---
+private String row(String label, String value) {
+    "<b>${label}:</b> ${value}"
+}
+
+private String pill(String text, String color) {
+    def bg = [green:'#2e7d32', red:'#c62828', amber:'#ef6c00',
+              blue:'#1565c0', indigo:'#4527a0', grey:'#616161'][color] ?: '#616161'
+    "<span style='background:${bg};color:#fff;padding:2px 8px;border-radius:10px;font-size:0.85em;white-space:nowrap'>${text}</span>"
 }
 
 private double scale(double delta, double band, double flr) {
