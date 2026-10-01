@@ -240,33 +240,87 @@ def rangeText() {
     "${MONTHS()[startMonth]} ${startDay} &ndash; ${MONTHS()[endMonth]} ${endDay}"
 }
 
-def summaryHtml() {
-    if (!configured()) return "<span style='color:#e67e22;font-size:1.1em'>&#9679;</span> <b>${app.label}</b> &nbsp;·&nbsp; <i>not finished — open it and complete the setup</i>"
+// id -> name, for the parent's shared-device overlap check
+def deviceMap() {
+    (devices ?: []).collectEntries { [(it.id as String): it.displayName] }
+}
 
+def summaryHtml() {
+    if (!configured()) return pill("not finished — open it and complete the setup", "amber")
     def want = desired()
-    def col  = want ? "#27ae60" : "#95a5a6"
-    def bits = ["<b>${app.label}</b>", rangeText()]
-    bits << (want ? "<b>on</b>" : "off — ${offReason()}")
-    bits << (weatherProtected() ? "weather-protected" : "indoor")
+    String main = want ? pill("on", "green") : pill("off — ${idleReason()}", offColor())
+    def bits = [rangeText(), weatherProtected() ? "weather-protected" : "indoor"]
     if (devices) bits << "${devices.size()} device${devices.size() == 1 ? '' : 's'}"
-    return "<span style='color:${col};font-size:1.1em'>&#9679;</span> ${bits.join(' &nbsp;·&nbsp; ')}"
+    return main + " <small>${bits.join(' · ')}</small>"
 }
 
 def statusHtml() {
-    def rows = [
-        ["Right now", desired() ? "<b>should be on</b>" : "should be off — ${offReason()}"],
-        ["Season",    "${rangeText()} &nbsp;·&nbsp; <b>${inSeason() ? 'in season' : 'out of season'}</b>"],
-        ["Weather",   weatherProtected()
-            ? (parent.weatherUnsafe() ? "wind/rain protected — <b>currently unsafe</b>" : "wind/rain protected — clear")
-            : "<i>ignores wind and rain (indoor)</i>"],
-    ]
+    def rows = []
+    def want = desired()
+    rows << row("Right now", want ? pill("should be on", "green") : pill("should be off — ${idleReason()}", offColor()))
+    rows << row("Season", pill(inSeason() ? "in season" : "out of season", inSeason() ? "green" : "grey") + " <small>${rangeText()}</small>")
+    rows << row("Evening", "<small>${onText()} · off at ${fmtTime(offTime)}</small>")
+    rows << row("Weather", weatherProtected()
+        ? (parent.weatherUnsafe() ? pill("unsafe — held off", "amber") : pill("clear", "green"))
+        : pill("ignored — indoor", "grey"))
+    if (hsmOff) {
+        rows << row("Security", hsmBlocked() ? pill("held off — ${location.hsmStatus}", "amber")
+                                             : pill("${location.hsmStatus ?: 'unknown'} — ok", "green"))
+    }
     devices?.each { d ->
-        rows << [rows.any { it[0] == "Devices" } ? "" : "Devices", "${d.displayName}: <b>${d.currentValue('switch')}</b>"]
+        boolean isOn = d.currentValue("switch") == "on"
+        String txt = isOn ? "on" : "off"
+        String col = isOn ? "green" : "grey"
+        if (want != isOn) { txt += " — expected ${want ? 'on' : 'off'}"; col = "amber" }
+        rows << row("Device — ${d.displayName}", pill(txt, col))
     }
-    def s = new StringBuilder("<table style='border-collapse:collapse'>")
-    rows.each {
-        s << "<tr><td style='padding:3px 14px 3px 0;white-space:nowrap;vertical-align:top;opacity:.6'>${it[0]}</td>"
-        s << "<td style='padding:3px 0'>${it[1]}</td></tr>"
+    return rows.join("<br>")
+}
+
+// grey = the normal off states, amber = held off by a veto
+def offColor() {
+    if (!inSeason()) return "grey"
+    if (weatherProtected() && parent.weatherUnsafe()) return "amber"
+    if (hsmBlocked()) return "amber"
+    return "grey"
+}
+
+// For the page only: "end of the evening" is also what offReason() says all day before the
+// decorations come on, so say when they will instead. Announcements keep offReason().
+def idleReason() {
+    String r = offReason()
+    if (r != "end of the evening") return r
+    def on = onMoment()
+    if (on == null) return "not dark yet"
+    if (new Date() < on) return "comes on at ${on.format('h:mm a', location.timeZone)}"
+    return r
+}
+
+def onText() {
+    switch (mode()) {
+        case "time":
+            return "on at ${fmtTime(onTime)}"
+        case "sunset":
+            int off = (sunsetOffset ?: 0) as Integer
+            String rel = off == 0 ? "at sunset" : (off < 0 ? "${-off} min before sunset" : "${off} min after sunset")
+            return "on ${rel}" + (notBefore ? ", not before ${fmtTime(notBefore)}" : "")
+        default:
+            return "on when it gets dark, not before ${notBefore ? fmtTime(notBefore) : 'noon'}"
     }
-    return (s << "</table>").toString()
+}
+
+def fmtTime(t) {
+    if (!t) return "?"
+    try { return timeToday(t as String, location.timeZone).format("h:mm a", location.timeZone) } catch (ignored) { return t as String }
+}
+
+// --- status helpers (same look as the Blinds Dusk Automation status block) ---
+def row(String label, String value) {
+    "<b>${label}:</b> ${value}"
+}
+
+def pill(String text, String color) {
+    def bg = [green:'#2e7d32', red:'#c62828', amber:'#ef6c00',
+              blue:'#1565c0', indigo:'#4527a0', grey:'#616161'][color] ?: '#616161'
+    "<span style='background:${bg};color:#fff;padding:2px 8px;border-radius:10px;font-size:0.85em;white-space:nowrap'>${text}</span>"
 }

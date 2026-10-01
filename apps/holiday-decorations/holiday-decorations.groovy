@@ -167,7 +167,6 @@ def announce(String msg) {
 def statusHtml() {
     def rows = []
 
-    def unsafe = weatherUnsafe()
     def why = []
     if (rainSensors?.any  { it.currentValue("water")   == "wet" })  why << "rain"
     if (windContacts?.any { it.currentValue("contact") == "open" }) why << "high wind"
@@ -175,56 +174,67 @@ def statusHtml() {
         def w = toBigDecimal(windSpeed.currentValue("illuminance"))
         if (w != null && w >= windMax) why << "wind ${w}"
     }
-    if (!why && unsafe) why << "settling"
-
-    rows << ["Weather", unsafe
-        ? "${dot('#e74c3c')} <b>unsafe</b> — protected decorations held off (${why.join(', ')})"
-        : "${dot('#27ae60')} clear"]
-
-    if (windSpeed) rows << ["Wind speed", "${windSpeed.currentValue('illuminance')} (unsafe at ${windMax})"]
+    if (why) {
+        rows << row("Weather", pill("unsafe — ${why.join(', ')}", "red") + " <small>protected decorations held off</small>")
+    } else if (weatherUnsafe()) {
+        long left = (state.lastUnsafeAt as long) + ((allClear ?: 0) as Integer) * 60000L - now()
+        int mins = (int) Math.ceil(left / 60000.0d)
+        rows << row("Weather", pill("settling — clear again in ${mins} min", "amber"))
+    } else {
+        rows << row("Weather", pill("clear", "green"))
+    }
+    if (windSpeed) {
+        rows << row("Wind speed — ${windSpeed.displayName}",
+                    pill("${windSpeed.currentValue('illuminance')}", "blue") + " <small>unsafe at ${windMax}</small>")
+    }
     if (luxSensors) {
         def readings = luxSensors.collect { toInt(it.currentValue("illuminance")) }.findAll { it != null }
-        rows << ["Light", readings
-            ? "${dot(isDark() ? '#8e44ad' : '#f1c40f')} ${readings.max()} lux — <b>${isDark() ? 'dark' : 'daylight'}</b> (dark at or below ${darkBelow})"
-            : "<i>no reading</i>"]
+        rows << row("Light", readings
+            ? pill("${readings.max()} lux — ${isDark() ? 'dark' : 'daylight'}", isDark() ? "indigo" : "amber") +
+              " <small>dark at or below ${darkBelow ?: 40}</small>"
+            : pill("no reading", "grey"))
+    } else {
+        rows << row("Light", pill("no light sensors — always counts as dark", "amber"))
     }
-    rows << ["Security", "${location.hsmStatus ?: 'unknown'}"]
+    rows << row("Security", pill(location.hsmStatus ?: "unknown", "grey"))
 
     def kids = childApps
     if (!kids) {
-        rows << ["Schedules", "<i>none yet — add one below</i>"]
+        rows << row("Schedules", pill("none yet — add one below", "grey"))
     } else {
-        kids.eachWithIndex { kid, i -> rows << [i == 0 ? "Schedules" : "", kid.summaryHtml()] }
-        def clash = overlaps(kids)
-        if (clash) rows << ["<b>Warning</b>", "${dot('#e67e22')} overlapping date ranges: <b>${clash.join('; ')}</b> — both run on the shared days"]
+        kids.each { kid -> rows << row("Schedule — ${kid.label}", kid.summaryHtml()) }
+        overlaps(kids).each { rows << row("Warning", pill(it, "amber")) }
     }
-
-    return tableHtml(rows)
+    return rows.join("<br>")
 }
 
-// Two schedules claiming the same calendar day will fight over any device they share.
-// Easy to do by accident when one season is set to end on the day the next begins.
+// Two schedules claiming the same calendar day fight over any device they share. Easy to
+// do by accident when one season ends on the day the next begins. Schedules that overlap
+// in dates but drive different devices are fine, so only a shared device is flagged.
 def overlaps(kids) {
     def clashes = []
     kids.each { a ->
         kids.each { b ->
-            if (a.id < b.id && a.overlapsWith(b)) clashes << "${a.label} & ${b.label}"
+            if (a.id < b.id && a.overlapsWith(b)) {
+                def am = a.deviceMap(), bm = b.deviceMap()
+                def shared = am.keySet().findAll { bm.containsKey(it) }
+                if (shared) clashes << "${a.label} and ${b.label} overlap in dates and both drive ${shared.collect { am[it] }.join(', ')}"
+            }
         }
     }
     return clashes
 }
 
-def tableHtml(List rows) {
-    def s = new StringBuilder("<table style='border-collapse:collapse'>")
-    rows.each {
-        s << "<tr><td style='padding:3px 14px 3px 0;white-space:nowrap;vertical-align:top;opacity:.6'>${it[0]}</td>"
-        s << "<td style='padding:3px 0'>${it[1]}</td></tr>"
-    }
-    s << "</table>"
-    return s.toString()
+// --- status helpers (same look as the Blinds Dusk Automation status block) ---
+def row(String label, String value) {
+    "<b>${label}:</b> ${value}"
 }
 
-def dot(String color) { "<span style='color:${color};font-size:1.1em'>&#9679;</span>" }
+def pill(String text, String color) {
+    def bg = [green:'#2e7d32', red:'#c62828', amber:'#ef6c00',
+              blue:'#1565c0', indigo:'#4527a0', grey:'#616161'][color] ?: '#616161'
+    "<span style='background:${bg};color:#fff;padding:2px 8px;border-radius:10px;font-size:0.85em;white-space:nowrap'>${text}</span>"
+}
 
 def toInt(v) {
     if (v == null) return null
