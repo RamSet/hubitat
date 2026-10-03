@@ -23,6 +23,16 @@
  *  Author: RamSet — https://github.com/RamSet/hubitat
  *
  *  Changelog:
+ *    0.6.0 - Managed parameters are now ENFORCED, not just written once. A battery change
+ *            resets the sensor's configuration (sensitivity went back to 2), but the driver
+ *            only wrote parameters from configure(), and configure() skipped any parameter
+ *            whose CACHED value already matched — so a reset sensor was never corrected.
+ *            Now every Configuration Report is compared with the managed value and a
+ *            mismatch is rewritten (at most once per 10 minutes per parameter, so a sensor
+ *            that refuses a value cannot cause a write loop). Reads are triggered by a
+ *            battery level jump of 10+ points (a fresh battery), by a Power Management
+ *            notification, and every 6 hours regardless. Motion Sensitivity (8) now
+ *            defaults to 3 on every sensor unless the preference says otherwise.
  *    0.5.0 - Expose the configuration parameters. Labels for 4 (LED Indicator) and 8
  *            (Motion Sensitivity, 0-4) are taken from Hubitat's built-in driver, which
  *            was written against the real device; labels for 1, 2 and 3 are from Ring's
@@ -62,7 +72,7 @@
 
 import groovy.transform.Field
 
-@Field static final String VERSION = "0.5.0"
+@Field static final String VERSION = "0.6.0"
 
 // Ring G2 advertises Notification v8. Keep the versions the device actually speaks;
 // asking zwave.parse() for a version the device does not support silently drops frames.
@@ -83,6 +93,9 @@ import groovy.transform.Field
 @Field static final Integer EVT_CLEARED         = 0x00
 @Field static final Integer EVT_TAMPER          = 0x03   // product covering removed
 @Field static final Integer EVT_MOTION          = 0x08   // intrusion / motion detected
+@Field static final Integer NOTIF_POWER_MGMT    = 8      // Power Management (e.g. power applied)
+@Field static final Integer BATTERY_JUMP        = 10     // a rise this big means a fresh battery
+@Field static final Long    ENFORCE_GAP_MS      = 600000L
 
 // Parameter table. `title` is only filled in where the meaning is actually known:
 //   1, 2, 3  - Ring's manual, and the values read back off firmware 1.09 match it exactly.
@@ -91,8 +104,9 @@ import groovy.transform.Field
 //              on the sizes and defaults of 5, 6, 8 and 11, so it cannot be trusted for
 //              the ones the built-in driver does not cover. Exposed raw so they can be
 //              experimented with; the observed factory value is quoted for each.
-// `applyDefault` means "write this even if the user never picked a value" — set only on
-// parameter 2, because that one is the actual fix for stuck-active.
+// `applyDefault` means "write this even if the user never picked a value": parameter 2
+// because it is the actual fix for stuck-active, parameter 8 because the factory 2 gives
+// false motion on these sensors. Every managed value is re-enforced when a read disagrees.
 @Field static final List<Map> PARAMS = [
     [num:1,  size:1, title:"Heartbeat interval (minutes)",  type:"number", range:"1..70",
      note:"How often the sensor sends a battery report. Factory 70."],
@@ -104,8 +118,8 @@ import groovy.transform.Field
      options:["0":"Disable","1":"Motion","2":"Motion and idle"],
      note:"Factory 1; your sensors read 0."],
     [num:8,  size:1, title:"Motion Sensitivity",            type:"enum",
-     options:["0":"0 (least sensitive)","1":"1","2":"2 (factory)","3":"3","4":"4 (most sensitive)"],
-     note:"Five levels. Factory 2."],
+     options:["0":"0 (least sensitive)","1":"1","2":"2 (factory)","3":"3 (driver default)","4":"4 (most sensitive)"], applyDefault:3,
+     note:"Five levels. Factory 2. Left blank, this driver keeps it at 3 and puts it back if the sensor resets."],
     [num:5,  size:1, title:"Parameter 5 (unlabelled)",      type:"number", range:"0..255",
      note:"Meaning unknown on firmware 1.09. Observed factory value: 3."],
     [num:6,  size:1, title:"Parameter 6 (unlabelled)",      type:"number", range:"0..255",
@@ -197,9 +211,7 @@ void configure() {
     List<String> writes = []
     List<String> changed = []
     PARAMS.each { pm ->
-        def chosen = settings["configParam${pm.num}" as String]
-        Integer target = (chosen != null) ? (chosen as Integer)
-                       : (pm.applyDefault != null ? (pm.applyDefault as Integer) : null)
+        Integer target = targetFor(pm)
         if (target == null) return
         def known = state."param${pm.num}"
         if (known != null && (known as Integer) == target) return
@@ -301,6 +313,11 @@ void zwaveEvent(hubitat.zwave.commands.supervisionv1.SupervisionGet cmd) {
 
 void zwaveEvent(hubitat.zwave.commands.notificationv8.NotificationReport cmd) {
     logDebug "notification report: type=${cmd.notificationType} event=${cmd.event} param=${cmd.eventParameter}"
+    if ((cmd.notificationType as Integer) == NOTIF_POWER_MGMT) {
+        logInfo "power management notification (event ${cmd.event}) — re-checking managed parameters"
+        runIn(5, "verifyConfig", [overwrite: true])
+        return
+    }
     if ((cmd.notificationType as Integer) != NOTIF_HOME_SECURITY) {
         logDebug "ignoring notification type ${cmd.notificationType}"
         return
@@ -337,7 +354,12 @@ void zwaveEvent(hubitat.zwave.commands.batteryv1.BatteryReport cmd) {
     if (lvl == 0xFF) { lvl = 1; desc = "${device.displayName} battery is LOW" }
     else             { desc = "${device.displayName} battery is ${lvl}%" }
     if (txtEnable) log.info desc
+    def prev = device.currentValue("battery")
     sendEvent(name: "battery", value: lvl, unit: "%", descriptionText: desc)
+    if (prev != null && lvl >= (prev as Integer) + BATTERY_JUMP) {
+        logInfo "battery rose ${prev}% → ${lvl}% — new battery, re-checking managed parameters"
+        runIn(5, "verifyConfig", [overwrite: true])
+    }
 }
 
 void zwaveEvent(hubitat.zwave.commands.configurationv1.ConfigurationReport cmd) {
@@ -345,6 +367,48 @@ void zwaveEvent(hubitat.zwave.commands.configurationv1.ConfigurationReport cmd) 
     // whole point of the sweep, and it needs to be visible without debug logging on.
     log.info "${device.displayName} parameter ${cmd.parameterNumber} (size ${cmd.size}) = ${cmd.scaledConfigurationValue}"
     state."param${cmd.parameterNumber}" = cmd.scaledConfigurationValue
+    enforce(cmd.parameterNumber as Integer, cmd.scaledConfigurationValue as Integer)
+}
+
+/*******************************************************************
+ ***** Parameter enforcement
+ ********************************************************************/
+
+// The value this driver manages for a parameter: the preference if set, else applyDefault.
+// null = unmanaged, never written.
+private Integer targetFor(Map pm) {
+    def chosen = settings["configParam${pm.num}" as String]
+    if (chosen != null && chosen != "") return chosen as Integer
+    return (pm.applyDefault != null) ? (pm.applyDefault as Integer) : null
+}
+
+// Called on every Configuration Report: the sensor's own answer is the only trustworthy
+// value, so a reset (battery change) is caught whenever a read happens, whatever caused it.
+private void enforce(Integer num, Integer reported) {
+    Map pm = PARAMS.find { (it.num as Integer) == num }
+    if (pm == null) return
+    Integer target = targetFor(pm)
+    if (target == null || reported == target) return
+    Map last = (state.enforcedAt ?: [:]) as Map
+    Long prev = (last["${num}" as String] ?: 0L) as Long
+    if (now() - prev < ENFORCE_GAP_MS) {
+        logWarn "parameter ${num} is ${reported}, expected ${target}, and was rewritten less than 10 min ago — the sensor is not keeping it; not retrying yet"
+        return
+    }
+    last["${num}" as String] = now()
+    state.enforcedAt = last
+    logWarn "parameter ${num} reads ${reported}, expected ${target} — the sensor reset it; rewriting"
+    sendCmds([secureCmd(zwave.configurationV1.configurationSet(parameterNumber: num, size: pm.size as Integer, scaledConfigurationValue: target)),
+              secureCmd(zwave.configurationV1.configurationGet(parameterNumber: num))], 1000)
+}
+
+// Read only the managed parameters; enforce() handles any drift in the replies.
+void verifyConfig(data = null) {
+    List<String> cmds = PARAMS.findAll { targetFor(it) != null }.collect {
+        secureCmd(zwave.configurationV1.configurationGet(parameterNumber: it.num as Integer))
+    }
+    logDebug "verifyConfig — reading ${cmds.size()} managed parameter(s)"
+    sendCmds(cmds, 1000)
 }
 
 void zwaveEvent(hubitat.zwave.commands.versionv2.VersionReport cmd) {
@@ -455,6 +519,9 @@ void watchdogSweep(data = null) {
 private void startSweep() {
     // runEvery5Minutes is overwrite-by-name, so calling this repeatedly is safe.
     runEvery5Minutes("watchdogSweep")
+    // Fixed cron, so re-asserting it on traffic never pushes it back. Catches a reset
+    // that arrived with no battery jump or notification to announce it.
+    schedule("0 ${(device.id as Integer) % 60} */6 * * ?", "verifyConfig")
 }
 
 private Long motionAgeSecs() {
