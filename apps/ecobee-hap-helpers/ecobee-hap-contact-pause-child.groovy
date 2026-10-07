@@ -9,8 +9,15 @@
  *  Child of: Local Ecobee Helpers (RamSet)
  *
  *  Author: RamSet
- *  Version: 1.2.0 (2026-09-28)
+ *  Version: 1.3.0 (2026-10-06)
  *  Version history:
+ *    1.3.0 - Enforces the thermostat's mode instead of trusting its own "paused" flag. On 2026-10-06 the app
+ *            turned the thermostat off at 07:36 with windows open; at 16:40 something outside the app set it back
+ *            to cool and it ran three cooling cycles while the page still said PAUSED, because the 5-minute
+ *            re-sync only re-ran doPause(), which returns early once paused. Now: while paused, any mode other
+ *            than off is turned off again (immediately on the thermostat's mode event, and on every 5-minute
+ *            re-sync), with a notification. After a resume, the restored mode is checked for 15 minutes and
+ *            re-sent if the thermostat did not take it. Long pause durations now read "12 h 25 min".
  *    1.2.0 - Current-status block at the top of the page (HVAC paused/running, a pending pause or resume
  *            with its countdown, the thermostat, delays, one line per contact). A pending delay used to
  *            show as "open but NOT paused — press Done", which was wrong while the delay was still running.
@@ -70,6 +77,8 @@ def updated()   { unsubscribe(); unschedule(); initialize() }
 
 def initialize() {
     subscribe(contacts, "contact", contactHandler)
+    def t = parent?.getThermostat()
+    if (t) subscribe(t, "thermostatMode", modeHandler)
     seedContactStates()          // seed from live values on (re)install
     runEvery5Minutes("resync")   // self-heal: recover if a contact event is ever missed
     evaluatePause()              // sync to current state now
@@ -92,8 +101,42 @@ def contactHandler(evt) {
     evaluatePause()
 }
 
-// periodic safety net: re-read live values and re-evaluate, so a missed event still gets corrected
-def resync() { seedContactStates(); evaluatePause() }
+// periodic safety net: re-read live values and re-evaluate, so a missed event still gets corrected,
+// then check the thermostat itself — the app's own flag is not proof the thermostat obeyed.
+def resync() { seedContactStates(); evaluatePause(); enforceMode() }
+
+// The thermostat reported a mode change: correct it right away if it contradicts what we want.
+def modeHandler(evt) { enforceMode() }
+
+@groovy.transform.Field static final long RESUME_VERIFY_MS = 15 * 60000L
+@groovy.transform.Field static final long RESEND_GAP_MS    = 60000L
+
+// Make the thermostat's actual mode match the intended one.
+//   paused            -> must be off; anything else is overridden back to off.
+//   just resumed      -> for 15 min, must be the restored mode; re-sent if it did not take.
+//   otherwise         -> hands off: a mode the user picks while all contacts are closed is theirs.
+private void enforceMode() {
+    def t = parent?.getThermostat()
+    if (!t) return
+    String mode = t.currentValue("thermostatMode")
+    long nowMs = now()
+    if (nowMs - ((state.lastEnforceMs ?: 0L) as long) < RESEND_GAP_MS) return
+    if (state.paused) {
+        if (!anyOpen() || mode == "off") return
+        state.lastEnforceMs = nowMs
+        log.warn "Open-Contact Pause '${app.label}': thermostat is '${mode}' while paused (${openContactNames()} open) — turning it off again"
+        t.off()
+        sendNote("Thermostat was switched back to ${mode} while ${openContactNames()} open. Turned it OFF again.")
+        return
+    }
+    String want = state.resumeMode
+    long since = (state.resumedAtMs ?: 0L) as long
+    if (!want) return
+    if (mode == want || nowMs - since > RESUME_VERIFY_MS) { state.resumeMode = null; return }
+    state.lastEnforceMs = nowMs
+    log.warn "Open-Contact Pause '${app.label}': resumed to '${want}' but thermostat reports '${mode}' — re-sending"
+    t.setThermostatMode(want)
+}
 
 private boolean anyOpen() {
     def m = state.contactOpen ?: [:]
@@ -124,6 +167,7 @@ def doPause() {
     state.paused = true
     state.pausedAtMs = now()
     state.pauseDueMs = null
+    state.resumeMode = null
     t.off()
     log.info "Open-Contact Pause '${app.label}': contact open → HVAC off (was ${state.priorMode})"
     String dur = toSeconds(openDelay) > 0 ? " for ${humanDelay(openDelay)}" : ""
@@ -139,6 +183,8 @@ def doResume() {
     state.paused = false
     state.pausedAtMs = null
     state.resumeDueMs = null
+    state.resumeMode = m
+    state.resumedAtMs = now()
     t.setThermostatMode(m)
     log.info "Open-Contact Pause '${app.label}': all closed → restored ${m}"
     sendNote("All contacts closed. Thermostat is back ON (${m}).")
@@ -152,6 +198,11 @@ private int toSeconds(mins) {
 private String humanDelay(mins) {
     int secs = toSeconds(mins)
     if (secs < 60) return "${secs}s"
+    if (secs >= 3600) {
+        int total = (int) Math.round(secs / 60.0d)
+        int rem = total % 60
+        return "${total.intdiv(60)} h" + (rem ? " ${rem} min" : "")
+    }
     double m = secs / 60.0d
     return (m == Math.floor(m)) ? "${m as int} min" : "${Math.round(m * 10.0d) / 10.0d} min"
 }
@@ -199,6 +250,8 @@ private String hvacPill() {
         if (!open && resumeDue > nowMs) return pill("PAUSED — resuming in ${leftIn(resumeDue)}", "amber")
         long since = (state.pausedAtMs ?: 0L) as long
         String dur = since > 0L ? " for ${humanDelay((nowMs - since) / 60000.0d)}" : ""
+        String actual = parent?.getThermostat()?.currentValue("thermostatMode")
+        if (open && actual && actual != "off") return pill("PAUSED but thermostat is ${actual} — turning it off", "red")
         return pill("PAUSED${dur} — was ${state.priorMode}", "amber")
     }
     if (open) {
