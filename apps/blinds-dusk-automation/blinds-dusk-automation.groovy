@@ -121,27 +121,42 @@ def updated() {
 }
 
 def initialize() {
-    state.actedTonight = state.actedTonight ?: false
+    state.remove("actedTonight")   // replaced by actedAt; a stale flag must not block tonight
     state.waitingForWindow = false
     subscribe(lightSensors, "illuminance", illuminanceHandler)
     def reset = toDateTime(resetTime)
     schedule("0 ${reset.format('m', location.timeZone)} ${reset.format('H', location.timeZone)} * * ?", resetHandler)
-    if (logEnable) log.debug "initialized: armed=${!state.actedTonight}, threshold=${luxThreshold} lux"
+    runEvery5Minutes("periodicCheck")
+    runIn(5, "periodicCheck")
+    if (logEnable) log.debug "initialized: armed=${!actedToday()}, threshold=${luxThreshold} lux"
 }
 
 def illuminanceHandler(evt) {
     Integer lux = (evt.value as BigDecimal).intValue()
     if (logEnable) log.debug "illuminance ${lux} lux from ${evt.displayName}"
+    evaluateLux(lux)
+}
 
+// Sensors only report on change, so darkness that is already there produces no event:
+// at 0 lux nothing arrives all night, and a reading that dropped before the sunset gate
+// opened is never repeated after it opens. Check the current values on a timer too.
+def periodicCheck() {
+    def vals = lightSensors?.collect { it.currentValue("illuminance") }?.findAll { it != null }
+    if (!vals) return
+    evaluateLux(vals.collect { (it as BigDecimal).intValue() }.min())
+}
+
+private void evaluateLux(Integer lux) {
     if (lux > (luxThreshold as Integer)) return
-    if (state.actedTonight) return
+    if (actedToday()) return
     if (!isDark()) {
-        if (logEnable) log.debug "below threshold but not acting yet (${settings.useSunsetGate == false ? 'light is low but it is still morning' : "not between sunset-${sunsetOffset} and sunrise"}); ignoring"
+        if (logEnable) log.debug "below threshold but not acting yet (${now() < solarNoonMs() ? 'it is still morning' : "before sunset-${sunsetOffset}"}); ignoring"
         return
     }
 
     // From here we act exactly once for the evening.
-    state.actedTonight = true
+    state.actedAt = now()
+    state.remove("actedTonight")
 
     if (windowSensor && windowSensor.currentValue("contact") == "open") {
         if (logEnable) log.debug "window open: notifying and waiting for it to close"
@@ -176,7 +191,7 @@ def windowClosedHandler(evt) {
 
 def resetHandler() {
     if (logEnable) log.debug "re-arming for the next evening"
-    state.actedTonight = false
+    state.remove("actedTonight")
     if (state.waitingForWindow) {
         state.waitingForWindow = false
         unschedule("windowWaitReminder")
@@ -223,7 +238,7 @@ def windowWaitReminder() {
 private String currentStatus() {
     def rows = []
 
-    boolean armed = !(state.actedTonight)
+    boolean armed = !actedToday()
     rows << row("Armed for tonight",
                 armed ? pill("yes", "green") : pill("no — already acted", "grey"))
 
@@ -367,16 +382,23 @@ private long solarNoonMs() {
 }
 
 // Dark = NOT between sunrise and (sunset - offset). Handles the overnight wrap.
+// Dusk can only be in the afternoon or evening. Dawn light climbs through the threshold
+// exactly the way dusk light falls through it, and the app acts once a day, so a morning
+// reading must never count, whatever the gate setting. Bitten twice: 2026-09-25 with the
+// gate off, and 2026-10-10 with it on, once sunrise moved past the 07:00 re-arm and
+// "before sunrise" still counted as dark.
 private boolean isDark() {
-    // Sunset/before-sunset gate is optional: when off, the lux threshold alone decides, so the blind can lower
-    // whenever it's dark enough — but only from midday onward. Dawn light climbs THROUGH the threshold, so a
-    // reading taken in the morning is indistinguishable from dusk, and the app only acts once a day: on
-    // 2026-09-25 the 07:00 re-arm was followed 14 seconds later by a sub-threshold reading, which spent the
-    // day's action closing an already-closed blind and left the real dusk unhandled.
-    if (settings.useSunsetGate == false) return now() >= solarNoonMs()
+    if (now() < solarNoonMs()) return false
+    if (settings.useSunsetGate == false) return true
     // Negative offset moves sunset earlier, e.g. -15 => "15 minutes before sunset".
     def sun = getSunriseAndSunset(sunsetOffset: "-${(sunsetOffset ?: 0)}")
-    def now = new Date()
-    boolean daytime = now.after(sun.sunrise) && now.before(sun.sunset)
-    return !daytime
+    return !new Date().before(sun.sunset)
+}
+
+// "Acted tonight" is derived, not a flag: true only if the app acted since today's midday.
+// A flag set by a mistaken morning action would otherwise block the real dusk until the
+// next re-arm, and nothing but the re-arm could clear it.
+private boolean actedToday() {
+    Long at = state.actedAt as Long
+    return at != null && at >= solarNoonMs()
 }
