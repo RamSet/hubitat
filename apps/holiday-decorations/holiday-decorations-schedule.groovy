@@ -43,8 +43,6 @@ def mainPage() {
             label title: "Name this schedule (e.g. Halloween)", required: true
             input "devices", "capability.switch", title: "Decorations to switch", multiple: true, required: true, submitOnChange: true
             input "oppositeLights", "capability.switch", title: "Lights to turn OFF while these decorations are on (optional)",
-                  description: "E.g. a porch light that washes out the inflatables. Turned off when the decorations come on, and back on when they go off " +
-                               "for any reason (end of the evening, wind, rain, security) - but only once it is dark, so a daytime weather hold never lights it.",
                   multiple: true, required: false
         }
         section("Season") {
