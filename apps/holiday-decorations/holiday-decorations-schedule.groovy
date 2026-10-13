@@ -42,6 +42,10 @@ def mainPage() {
         section("What") {
             label title: "Name this schedule (e.g. Halloween)", required: true
             input "devices", "capability.switch", title: "Decorations to switch", multiple: true, required: true, submitOnChange: true
+            input "oppositeLights", "capability.switch", title: "Lights to turn OFF while these decorations are on (optional)",
+                  description: "E.g. a porch light that washes out the inflatables. Turned off when the decorations come on, and back on when they go off " +
+                               "for any reason (end of the evening, wind, rain, security) - but only once it is dark, so a daytime weather hold never lights it.",
+                  multiple: true, required: false
         }
         section("Season") {
             paragraph "The days of the year this schedule is live. A range may wrap the new year " +
@@ -145,10 +149,23 @@ def evaluate() {
     }
 
     if (changed) {
+        switchOppositeLights(want, state.lastWanted == null)
         if (state.lastWanted != null && announceChanges != false) {
             parent.announce("${app.label}: turning ${want ? 'on' : 'off'}${want ? '' : ' — ' + offReason()}")
         }
         state.lastWanted = want
+    }
+}
+
+// The opposite of the decorations, on transitions only, so a manual change sticks until the next one.
+// Lights go back on only when it is dark: a daytime wind hold must not light the porch. After a
+// (re)install the previous decision is unknown, so only the safe half (off while decorations run) is applied.
+def switchOppositeLights(boolean want, boolean firstRun) {
+    if (!oppositeLights) return
+    if (want) {
+        oppositeLights.each { if (it.currentValue("switch") != "off") it.off() }
+    } else if (!firstRun && parent.isDark()) {
+        oppositeLights.each { if (it.currentValue("switch") != "on") it.on() }
     }
 }
 
@@ -242,7 +259,7 @@ def rangeText() {
 
 // id -> name, for the parent's shared-device overlap check
 def deviceMap() {
-    (devices ?: []).collectEntries { [(it.id as String): it.displayName] }
+    ((devices ?: []) + (oppositeLights ?: [])).collectEntries { [(it.id as String): it.displayName] }
 }
 
 def summaryHtml() {
@@ -273,6 +290,13 @@ def statusHtml() {
         String col = isOn ? "green" : "grey"
         if (want != isOn) { txt += " — expected ${want ? 'on' : 'off'}"; col = "amber" }
         rows << row("Device — ${d.displayName}", pill(txt, col))
+    }
+    oppositeLights?.each { l ->
+        boolean isOn = l.currentValue("switch") == "on"
+        String txt = isOn ? "on" : "off"
+        String col = isOn ? "amber" : "grey"
+        if (want && isOn) { txt += " — expected off while decorations run"; col = "red" }
+        rows << row("Opposite light — ${l.displayName}", pill(txt, col))
     }
     return rows.join("<br>")
 }
