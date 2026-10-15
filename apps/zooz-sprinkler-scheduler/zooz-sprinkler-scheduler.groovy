@@ -62,7 +62,7 @@ mappings {
     path("/calendar.ics")  { action: [GET: "apiCalendar"] }
 }
 
-String getAppVersion() { return "v0.17.0 (2026-09)" }
+String getAppVersion() { return "v0.18.0 (2026-10)" }
 
 // Simple vs Advanced interface. Simple shows only zones, schedule, weather and
 // hardware safety; Advanced exposes everything (moisture, learning, sensors,
@@ -118,6 +118,10 @@ private String  wApiUnit()  { return isMetric() ? "kmh"     : "mph" }
     "pre-run"          : [section: "Lifecycle",  default: '${app}: schedule starts in ${minutes} minute(s) — clear the yard'],
     "error"            : [section: "Lifecycle",  default: '${app}: error — ${detail}'],
     "run.stalled"      : [section: "Lifecycle",  default: '${app}: ⚠ run ended early — ${reason}. All valves closed.'],
+    "blowout.start"    : [section: "Blowout",    default: '${app}: 💨 blowout starting — ${zones} line(s), ${count} cycle(s), ${duration} air each, ${minutes} min between · ~${estTotal} total'],
+    "blowout.done"     : [section: "Blowout",    default: '${app}: 💨 blowout complete — ${elapsed}. All valves closed.'],
+    "blowout.stopped"  : [section: "Blowout",    default: '${app}: 💨 blowout stopped — ${reason}. All valves closed.'],
+    "blowout.refused"  : [section: "Blowout",    default: '${app}: 💨 blowout not started — ${reason}'],
 
     // Skips
     "skip.manual"      : [section: "Skips",      default: '${app}: skipped — manual pause'],
@@ -211,6 +215,7 @@ preferences {
     page(name: "moisturePage")
     page(name: "aboutPage")
     page(name: "exposurePage")
+    page(name: "blowoutPage")
 }
 
 // --- Live status shown at the top of the main page (snapshot on page open) ---
@@ -225,7 +230,9 @@ private String statusHtml() {
     boolean paused  = (state.paused == true)
     boolean held    = (state.deferredRunPending == true)
 
-    if (running) {
+    if (blowoutActive()) {
+        out << sPill("\ud83d\udca8 BLOWOUT", BLUE) << sPill(blowoutStatusText(), GREY)
+    } else if (running) {
         Integer zid = (state.currentZoneId ?: 0) as int
         String zname = zid ? (settings."zone${zid}Name" ?: "Zone ${zid}") : "starting\u2026"
         String phase = state.currentPhaseType ?: "water"
@@ -384,6 +391,9 @@ def mainPage() {
             input name: "btnRunNow",  type: "button", title: "Run schedule now"
             input name: "btnStopAll", type: "button", title: "Stop all zones now"
             paragraph "Status: ${runStatusString()}"
+            href name: "blowoutPage", title: "Sprinkler blowout (winterize)", page: "blowoutPage",
+                 image: openmoji("1F4A8"),
+                 description: blowoutActive() ? "RUNNING — ${blowoutStatusText()}" : "Pulse each line with compressed air, cycle after cycle"
             input name: "pauseHours", type: "number", title: "Pause schedule for N hours (0 = active)",
                   range: "0..72", required: false, defaultValue: 0, submitOnChange: true
         }
@@ -1090,6 +1100,41 @@ def dashboardPage() {
     }
 }
 
+def blowoutPage() {
+    dynamicPage(name: "blowoutPage", title: "Sprinkler blowout (winterize)") {
+        section("Status") {
+            paragraph blowoutActive() ? "<b>RUNNING</b> — ${blowoutStatusText()}" : "Idle."
+            if (blowoutActive()) input name: "btnBlowoutStop", type: "button", title: "■ Stop the blowout now"
+            if (!blowoutActive() && blowoutRestorePending()) {
+                paragraph "<b>⚠ The relays' auto-off from the blowout has not been confirmed restored.</b> Watering runs are blocked until it is."
+                input name: "btnBlowoutRestore", type: "button", title: "Restore auto-off now"
+            }
+        }
+        section("Timing") {
+            paragraph "Connect the compressor, then start. Each line is opened for the air time, closed, and the app waits the rest time " +
+                      "so the compressor can recover before the next line. After the last line it starts the next cycle. " +
+                      "Only one line is ever open: before each line opens, every line must report closed. " +
+                      "Before starting, each relay controller's hardware auto-off is set to the air time + ${BLOWOUT_FAILSAFE_MARGIN_SEC}s, " +
+                      "so a valve closes itself even if the hub stops; the previous auto-off is restored when the blowout ends. " +
+                      "The pump / master valve is never turned on. Rest and cycles can be changed while it runs; the air time is fixed at start because the failsafe is set to match it."
+            input name: "blowoutAirSec",   type: "number", title: "Air time per line (seconds)", range: "5..600", defaultValue: 30, required: true, submitOnChange: true
+            input name: "blowoutRestMin",  type: "number", title: "Rest between lines (minutes)", range: "0..60", defaultValue: 3, required: true, submitOnChange: true
+            input name: "blowoutCycles",   type: "number", title: "Cycles", range: "1..10", defaultValue: 2, required: true, submitOnChange: true
+            input name: "blowoutExtraRelays", type: "capability.switch", title: "Also blow out these relays (optional — e.g. a line another schedule drives)",
+                  multiple: true, required: false, submitOnChange: true
+            List t = blowoutTargets()
+            paragraph "Order: ${t.collect { blowoutTargetName(it) }.join(' → ') ?: 'no lines'}<br>" +
+                      "Estimated total: <b>${fmtDuration(blowoutEstimateSec(t.size()))}</b>"
+            paragraph "<b>Pre-flight</b><br>" + blowoutPreflight(t)
+        }
+        section {
+            if (!blowoutActive()) input name: "btnBlowoutStart", type: "button", title: "💨 Start blowout"
+            paragraph "<small>Stop it any time with the button above, or with <b>Stop all zones now</b> on the main page. " +
+                      "While it runs, scheduled and manual watering runs are refused and the coordination lock is held, so another schedule sharing it waits.</small>"
+        }
+    }
+}
+
 def diagnosticsPage() {
     dynamicPage(name: "diagnosticsPage", title: "Diagnostics & test runs") {
         section("Health check") {
@@ -1362,6 +1407,7 @@ def aboutPage() {
             paragraph "v0.12.2 — Fixed pause sensors reporting \"0s remaining\" and skipping ahead when they fired during a soak or the gap between zones. The schedule now tracks soak and between-zone phases as pausable too, so a pause that lands mid-soak reports the real soak time left and resumes that soak (valves stay off) instead of jumping to the next zone."
             paragraph "v0.13.4 — Saving the app now sends a confirmation notification summarizing the schedule: when it will start, how many zones, and the estimated total run time (water + soak). It also doubles as proof the new code is active — if you save and don't get it, the update didn't take."
             paragraph "v0.13.3 — Fixes two scheduling problems. (1) Multiple start times now ALL work: each was scheduled on the same internal handler, so Hubitat overwrote all but the last — only your final start time ran. Each window now has its own handler. (2) A run can no longer start twice from a single trigger: a re-entrancy guard ignores a duplicate scheduled invocation within 15 seconds (and logs it), preventing the double \"starting\" / double watering seen after editing a program near its run time. Re-save each sprinkler app once after updating so the new per-window schedules register."
+            paragraph "v0.18.0 — Sprinkler blowout for winterizing, on its own page linked from the main page. With the compressor connected, it opens each line for the air time, closes it, waits the rest time so the compressor recovers, moves to the next line, and repeats for the number of cycles. Only one line is ever open: each line opens only after every line reports closed, and never sooner than 6 seconds after the previous one closed, by which time that valve's own hardware auto-off has fired even if every message was lost. Before the first line, each relay controller's hardware auto-off is set to the air time plus 5 seconds, so a valve closes itself even if the hub stops, and the previous auto-off is restored and confirmed when the blowout ends; watering is blocked until it is. Rest and cycles can be changed while it runs; the air time is fixed at start. You can add relays another schedule drives, so one blowout covers every line. Stop it with its own button or with Stop all zones now. While it runs, the pump / master valve stays off, watering runs are refused, and the coordination lock is held so a schedule sharing it waits."
             paragraph "v0.17.0 — New watering season on the Restrictions page: pick the dates scheduled watering is allowed between (for example May 1 to October 1, both days included). Outside that range scheduled runs are skipped quietly; Run now, the Run switch and turning a zone on by hand still work. A range can wrap over New Year. The 7-day preview, calendar export, next-run text, status line and 'schedule saved' notification all show the season. Two related fixes: a Run-now press that was held by a pause sensor now still counts as manual when it starts, so the season and every-N-days checks no longer drop it; and the pre-run 'starts in N minutes' warning is no longer sent on days that won't water (off-cycle days in every-N-days mode, or outside the season)."
             paragraph "v0.16.10 — A run that dies before it finishes no longer blocks your other schedules. If a run stopped advancing — the hub restarted mid-run, or the app lost track of a run it had just started — nothing ever reached the end of the run, so the shared coordination switch stayed ON and every other schedule skipped with 'coordination switch held' until someone turned it off by hand (a schedule could even block itself). The app now checks every hour and before each scheduled start: a run that can no longer finish is ended the way Stop would end it — all valves closed, the Run switch turned off, the coordination switch released — and you get a 'run ended early' notification saying why. Saving the app's settings while a run is in progress now ends that run the same way, instead of leaving it half-stopped with the switch still held."
             paragraph "v0.16.9 — Two fixes. (1) The end-of-run phantom manual run is closed for good: as a schedule finishes, the relays are still reporting their final OFF, and the app's tile-reconcile could echo a tile back on just as the 'run active' guard dropped — which got read as a hand-triggered zone and started a stray manual run (v0.16.4 narrowed this but a ~4s window could still lapse under load). There's now a 20-second grace window after a run ends during which any tile change is treated as reconcile, never a manual start. (2) The 'Keep this app's hourly auto-off verify + re-push ON' switch now saves the moment you toggle it (it previously needed a full page save, so turning it off could silently not take)."
@@ -2184,6 +2230,12 @@ def runSchedule(Map opts = [:]) {
         notify("schedule.defer", [sensor: who])
         return
     }
+    if (blowoutActive() || blowoutRestorePending()) {
+        String r = blowoutActive() ? "sprinkler blowout in progress" : "relay auto-off not yet restored after the blowout"
+        log.warn "${app.label}: ${r} — not starting a watering run"
+        recordRunSkip(r)
+        return
+    }
     if (state.running) {
         log.warn "${app.label}: previous run still active (zone ${state.currentZoneIdx}). Skipping new trigger."
         return
@@ -2541,6 +2593,7 @@ def finishRun() {
 
 def stopAllZones() {
     log.warn "${app.label}: stop-all invoked"
+    if (blowoutActive()) blowoutEnd("stopped with Stop all zones")
     unschedule("startNextZone")
     unschedule("zoneCyclePhaseDone")
     unschedule("zoneCycleResume")
@@ -3696,6 +3749,322 @@ def advanceTestAll() {
 }
 
 // =========================================================================
+// Sprinkler blowout (winterize)
+// =========================================================================
+// All progress lives in atomicState: an execution that switches devices can lose its
+// plain `state` writes to a parallel handler (see runStallSweep's notes, 2026-09-20).
+
+@groovy.transform.Field static final int BLOWOUT_FAILSAFE_MARGIN_SEC = 5
+@groovy.transform.Field static final int BLOWOUT_VERIFY_SEC = 20
+
+private boolean blowoutActive() { return ((atomicState.blowout ?: [:]) as Map).active == true }
+private boolean blowoutRestorePending() { return ((atomicState.blowoutHw ?: [:]) as Map).restorePending == true }
+
+private Integer blowoutAirSec()  { return Math.max(5, Math.min(600, ((settings.blowoutAirSec  == null ? 30 : settings.blowoutAirSec)  as int))) }
+private Integer blowoutRestMin() { return Math.max(0, Math.min(60,  ((settings.blowoutRestMin == null ? 3  : settings.blowoutRestMin) as int))) }
+private Integer blowoutCycles()  { return Math.max(1, Math.min(10,  ((settings.blowoutCycles  == null ? 2  : settings.blowoutCycles)  as int))) }
+
+// "z:<zoneId>" for this schedule's zones, "x:<deviceId>" for extra relays (deduplicated).
+private List blowoutTargets() {
+    List t = []
+    Set seen = [] as Set
+    for (int i = 1; i <= zoneCount(); i++) {
+        def sw = settings."zone${i}Switch"
+        if (sw && seen.add(sw.id.toString())) t << "z:${i}".toString()
+    }
+    settings.blowoutExtraRelays?.each { d -> if (seen.add(d.id.toString())) t << "x:${d.id}".toString() }
+    return t
+}
+
+private def blowoutDevice(String target) {
+    if (target?.startsWith("z:")) return settings."zone${target.substring(2) as int}Switch"
+    return settings.blowoutExtraRelays?.find { it.id.toString() == target?.substring(2) }
+}
+
+private String blowoutTargetName(String target) {
+    if (target?.startsWith("z:")) { int z = target.substring(2) as int; return settings."zone${z}Name" ?: "Zone ${z}" }
+    return blowoutDevice(target)?.displayName ?: "relay ${target?.substring(2)}"
+}
+
+// One line per target: its controller and that controller's current hardware auto-off, as the device reports it.
+private String blowoutPreflight(List t) {
+    Map parents = (settings.hwZen16Parents ?: []).collectEntries { [(it.id as String): it] }
+    Map unitName = [0: "min", 1: "s", 2: "h"]
+    return t.collect { tg ->
+        def d = blowoutDevice(tg as String)
+        String key = d ? controllerKeyFor(d) : null
+        def par = key ? parents[key] : null
+        if (!par) return "⚠ ${blowoutTargetName(tg as String)} — no controller under Hardware safety; the blowout will refuse to start"
+        Map model = (ZOOZ_RELAY_MODELS[settings."hwModel_${par.id}" ?: "3"] ?: ZOOZ_RELAY_MODELS["3"]) as Map
+        Map cur = parseConfigVals(par)
+        List times = (model.autoOff ?: []) as List, units = (model.unitParam ?: []) as List
+        String ao = (0..<times.size()).collect { i -> "${cur[times[i] as int] ?: '?'}${unitName[cur[units[i] as int]] ?: '?'}" }.join("/")
+        "✓ ${blowoutTargetName(tg as String)} — ${par.displayName}, auto-off now ${ao}"
+    }.join("<br>")
+}
+
+private Integer blowoutEstimateSec(int lines) {
+    int steps = lines * blowoutCycles()
+    int air = blowoutActive() ? ((((atomicState.blowout ?: [:]) as Map).airSec ?: blowoutAirSec()) as int) : blowoutAirSec()
+    return steps <= 0 ? 0 : steps * air + (steps - 1) * Math.max(BLOWOUT_FAILSAFE_MARGIN_SEC + 1, blowoutRestMin() * 60)
+}
+
+private String blowoutStatusText() {
+    Map b = (atomicState.blowout ?: [:]) as Map
+    List t = (b.targets ?: []) as List
+    int idx = (b.idx ?: 0) as int
+    String line = idx < t.size() ? blowoutTargetName(t[idx] as String) : "?"
+    long left = (((b.phaseEndsMs ?: 0L) as long) - now()).intdiv(1000L)
+    if (left < 0L) left = 0L
+    if (b.phase == "arming") return "setting the relays' ${(b.airSec ?: blowoutAirSec()) + BLOWOUT_FAILSAFE_MARGIN_SEC}s failsafe before the first line"
+    String phase = b.phase == "air" ? "air on ${line}, ${fmtDuration(left as int)} left"
+                                    : "resting, next ${line} in ${fmtDuration(left as int)}"
+    return "cycle ${b.cycle}/${blowoutCycles()} · line ${idx + 1}/${t.size()} · ${phase}"
+}
+
+def blowoutStart() {
+    if (blowoutActive()) { log.warn "${app.label}: blowout already running"; return }
+    String why = null
+    if (state.running || state.paused) why = "a watering run is active — stop it first"
+    else if (settings.coordSwitch && settings.coordSwitch.currentValue("switch") == "on") why = "the coordination lock is held — another schedule is running"
+    List t = blowoutTargets()
+    if (!why && !t) why = "no zone relays are configured"
+    if (why) {
+        log.warn "${app.label}: blowout refused — ${why}"
+        notify("blowout.refused", [reason: why])
+        return
+    }
+    if (!why && blowoutRestorePending()) why = "the relays' auto-off from the last blowout has not been restored yet — check Hardware safety"
+    Map snap = [:]
+    if (!why) {
+        // Every line must sit on a controller whose auto-off we can set AND read back, or there is
+        // no hardware failsafe for it and no known value to restore afterwards.
+        Map parents = (settings.hwZen16Parents ?: []).collectEntries { [(it.id as String): it] }
+        t.each { tg ->
+            if (why) return
+            def d = blowoutDevice(tg as String)
+            String key = d ? controllerKeyFor(d) : null
+            def par = key ? parents[key] : null
+            if (!par) { why = "${blowoutTargetName(tg as String)} is not on a relay controller listed under Hardware safety, so its failsafe can't be set"; return }
+            if (snap.containsKey(key)) return
+            if (!par.hasCommand("setParameter")) { why = "${par.displayName} can't take setParameter, so its failsafe can't be set"; return }
+            Map model = (ZOOZ_RELAY_MODELS[settings."hwModel_${par.id}" ?: "3"] ?: ZOOZ_RELAY_MODELS["3"]) as Map
+            Map cur = parseConfigVals(par)
+            Map keep = [:]
+            (((model.autoOff ?: []) as List) + ((model.unitParam ?: []) as List)).each { pn ->
+                if (cur[pn as int] == null) why = "${par.displayName} has not reported parameter ${pn}, so its current auto-off can't be restored afterwards"
+                else keep[(pn as int).toString()] = cur[pn as int]
+            }
+            snap[key] = keep
+        }
+    }
+    if (why) {
+        log.warn "${app.label}: blowout refused — ${why}"
+        notify("blowout.refused", [reason: why])
+        return
+    }
+    // Any test pulse in flight would overlap the first line.
+    unschedule("advanceTestAll"); unschedule("testZoneRunStop")
+    state.testAllQueue = []
+    stopPumpIfNeeded()                       // the master valve must stay shut while air is in the lines
+    t.each { tg -> def d = blowoutDevice(tg as String); if (d) try { d.off() } catch (e) { log.warn "blowout pre-off: ${e.message}" } }
+    if (settings.coordSwitch) { try { settings.coordSwitch.on() } catch (e) { log.warn "coordSwitch.on(): ${e.message}" } }
+    int air = blowoutAirSec()
+    atomicState.blowoutHw = [snapshot: snap, failsafeSec: air + BLOWOUT_FAILSAFE_MARGIN_SEC, restorePending: false, tries: 0]
+    atomicState.blowout = [active: true, targets: t, idx: 0, cycle: 1, phase: "arming", phaseEndsMs: now() + BLOWOUT_VERIFY_SEC * 1000L,
+                           startedMs: now(), airSec: air, closeTries: 0]
+    log.info "${app.label}: BLOWOUT ▶ ${t.size()} line(s) × ${blowoutCycles()} cycle(s), ${air}s air, ${blowoutRestMin()} min rest — arming ${air + BLOWOUT_FAILSAFE_MARGIN_SEC}s failsafe on ${snap.size()} controller(s)"
+    notify("blowout.start", [zones: t.size(), count: blowoutCycles(), duration: fmtDuration(air),
+                             minutes: blowoutRestMin(), estTotal: fmtDuration(blowoutEstimateSec(t.size()))])
+    blowoutWriteHw(false)
+    runIn(BLOWOUT_VERIFY_SEC, "blowoutArmCheck")
+}
+
+// Write either the blowout failsafe (seconds) or the snapshot taken before it.
+private void blowoutWriteHw(boolean restore) {
+    Map hw = (atomicState.blowoutHw ?: [:]) as Map
+    Map snap = (hw.snapshot ?: [:]) as Map
+    int fs = (hw.failsafeSec ?: 0) as int
+    Map parents = (settings.hwZen16Parents ?: []).collectEntries { [(it.id as String): it] }
+    snap.each { key, keep ->
+        def par = parents[key as String]
+        if (!par) { log.warn "${app.label}: blowout — controller ${key} is no longer listed; can't write its auto-off"; return }
+        Map model = (ZOOZ_RELAY_MODELS[settings."hwModel_${par.id}" ?: "3"] ?: ZOOZ_RELAY_MODELS["3"]) as Map
+        String style = detectSetParameterStyle(par)
+        List<Integer> times = (model.autoOff ?: []) as List<Integer>
+        List<Integer> units = (model.unitParam ?: []) as List<Integer>
+        try {
+            if (restore) {
+                // Time first, then unit: between the two writes a relay holds e.g. "35 minutes", never "15 seconds".
+                times.each { pn -> callSetParameter(par, style, pn as int, 4, ((keep as Map)[(pn as int).toString()]) as int) }
+                units.each { pn -> callSetParameter(par, style, pn as int, 1, ((keep as Map)[(pn as int).toString()]) as int) }
+            } else {
+                times.each { pn -> callSetParameter(par, style, pn as int, 4, fs) }
+                units.each { pn -> callSetParameter(par, style, pn as int, 1, 1) }   // 1 = seconds
+            }
+        } catch (e) { log.warn "${app.label}: blowout auto-off write to ${par.displayName}: ${e.message}" }
+    }
+}
+
+// Which controllers do not (yet) report what we wrote. Empty list = all confirmed.
+private List<String> blowoutHwMismatches(boolean restore) {
+    Map hw = (atomicState.blowoutHw ?: [:]) as Map
+    Map snap = (hw.snapshot ?: [:]) as Map
+    int fs = (hw.failsafeSec ?: 0) as int
+    Map parents = (settings.hwZen16Parents ?: []).collectEntries { [(it.id as String): it] }
+    List<String> bad = []
+    snap.each { key, keep ->
+        def par = parents[key as String]
+        if (!par) { bad << "controller ${key}"; return }
+        Map model = (ZOOZ_RELAY_MODELS[settings."hwModel_${par.id}" ?: "3"] ?: ZOOZ_RELAY_MODELS["3"]) as Map
+        Map cur = parseConfigVals(par)
+        boolean ok = true
+        ((model.autoOff ?: []) as List).each { pn -> if (cur[pn as int] != (restore ? ((keep as Map)[(pn as int).toString()] as int) : fs)) ok = false }
+        ((model.unitParam ?: []) as List).each { pn -> if (cur[pn as int] != (restore ? ((keep as Map)[(pn as int).toString()] as int) : 1)) ok = false }
+        if (!ok) bad << par.displayName
+    }
+    return bad
+}
+
+def blowoutArmCheck() {
+    Map b = (atomicState.blowout ?: [:]) as Map
+    if (b.active != true || b.phase != "arming") return
+    List<String> bad = blowoutHwMismatches(false)
+    if (!bad) {
+        log.info "${app.label}: BLOWOUT failsafe confirmed on every controller — starting the first line"
+        runIn(1, "blowoutAir")
+        return
+    }
+    Map hw = (atomicState.blowoutHw ?: [:]) as Map
+    int tries = ((hw.tries ?: 0) as int) + 1
+    hw.tries = tries
+    atomicState.blowoutHw = hw
+    if (tries >= 3) { blowoutEnd("the failsafe did not take on ${bad.join(', ')}"); return }
+    log.warn "${app.label}: BLOWOUT failsafe not confirmed yet on ${bad.join(', ')} — re-sending (${tries}/2)"
+    blowoutWriteHw(false)
+    runIn(BLOWOUT_VERIFY_SEC, "blowoutArmCheck")
+}
+
+def blowoutRestoreCheck() {
+    Map hw = (atomicState.blowoutHw ?: [:]) as Map
+    if (hw.restorePending != true) return
+    List<String> bad = blowoutHwMismatches(true)
+    if (!bad) {
+        atomicState.blowoutHw = [restorePending: false]
+        log.info "${app.label}: BLOWOUT — previous auto-off restored and confirmed on every controller"
+        return
+    }
+    int tries = ((hw.tries ?: 0) as int) + 1
+    hw.tries = tries
+    atomicState.blowoutHw = hw
+    if (tries >= 3) {
+        log.error "${app.label}: BLOWOUT — auto-off NOT restored on ${bad.join(', ')}; watering runs stay blocked until it is"
+        notify("error", [detail: "after the blowout the relays' auto-off was not restored on ${bad.join(', ')} — they still close after ${hw.failsafeSec}s, so watering is blocked. Open the blowout page and press Restore auto-off."])
+        return
+    }
+    log.warn "${app.label}: BLOWOUT — auto-off restore not confirmed on ${bad.join(', ')}, re-sending (${tries}/2)"
+    blowoutWriteHw(true)
+    runIn(BLOWOUT_VERIFY_SEC, "blowoutRestoreCheck")
+}
+
+def blowoutRestoreNow() {
+    Map hw = (atomicState.blowoutHw ?: [:]) as Map
+    if (hw.restorePending != true || blowoutActive()) return
+    hw.tries = 0
+    atomicState.blowoutHw = hw
+    blowoutWriteHw(true)
+    runIn(BLOWOUT_VERIFY_SEC, "blowoutRestoreCheck")
+}
+
+def blowoutAir() {
+    Map b = (atomicState.blowout ?: [:]) as Map
+    if (b.active != true) return
+    List t = (b.targets ?: []) as List
+    // One line at a time: every line must report closed before the next opens.
+    // skipCache: the cached value can still say "on" seconds after the relay reported off.
+    List openNow = t.findAll { x -> blowoutDevice(x as String)?.currentValue("switch", true) == "on" }
+    if (openNow) {
+        int tries = ((b.closeTries ?: 0) as int) + 1
+        String names = openNow.collect { blowoutTargetName(it as String) }.join(", ")
+        if (tries > 3) { blowoutEnd("${names} would not report closed"); return }
+        log.warn "${app.label}: BLOWOUT — ${names} still reports open; closing it before the next line (${tries}/3)"
+        openNow.each { x ->
+            def od = blowoutDevice(x as String)
+            try { od.off(); if (od.hasCommand("refresh")) od.refresh() } catch (e) { log.warn "blowout close ${x}: ${e.message}" }
+        }
+        b.closeTries = tries
+        atomicState.blowout = b
+        runIn(5, "blowoutAir")
+        return
+    }
+    b.closeTries = 0
+    String tg = t[(b.idx ?: 0) as int] as String
+    def d = blowoutDevice(tg)
+    int air = (b.airSec ?: blowoutAirSec()) as int
+    b.phase = "air"; b.phaseEndsMs = now() + air * 1000L
+    atomicState.blowout = b
+    if (d) {
+        log.info "${app.label}: BLOWOUT cycle ${b.cycle}/${blowoutCycles()} — air on ${blowoutTargetName(tg)} for ${air}s"
+        try { d.on() } catch (e) { log.warn "blowout on ${blowoutTargetName(tg)}: ${e.message}" }
+    } else {
+        log.warn "${app.label}: BLOWOUT — ${tg} no longer has a relay, skipping"
+    }
+    runIn(air, "blowoutAirDone")
+}
+
+def blowoutAirDone() {
+    Map b = (atomicState.blowout ?: [:]) as Map
+    if (b.active != true) return
+    List t = (b.targets ?: []) as List
+    int idx = (b.idx ?: 0) as int
+    String tg = t[idx] as String
+    def d = blowoutDevice(tg)
+    if (d) try { d.off() } catch (e) { log.warn "blowout off ${blowoutTargetName(tg)}: ${e.message}" }
+    if (tg?.startsWith("z:")) armRelayOffConfirm(tg.substring(2) as Integer, "blowout")
+    idx++
+    int cycle = (b.cycle ?: 1) as int
+    if (idx >= t.size()) { idx = 0; cycle++ }
+    if (cycle > blowoutCycles()) { blowoutEnd(null); return }
+    // Never sooner than the failsafe margin: by then the previous valve's own hardware auto-off
+    // (air + margin) has expired, so two lines cannot be open together even if every
+    // close command and every report were lost.
+    int gap = Math.max(BLOWOUT_FAILSAFE_MARGIN_SEC + 1, blowoutRestMin() * 60)
+    b.idx = idx; b.cycle = cycle; b.phase = "rest"; b.phaseEndsMs = now() + gap * 1000L
+    atomicState.blowout = b
+    runIn(gap, "blowoutAir")
+}
+
+// reason == null: finished normally. Otherwise: stopped early, reason says why.
+private void blowoutEnd(String reason) {
+    Map b = (atomicState.blowout ?: [:]) as Map
+    if (b.active != true) return
+    atomicState.blowout = [active: false]
+    unschedule("blowoutAir"); unschedule("blowoutAirDone")
+    ((b.targets ?: []) as List).each { tg ->
+        def d = blowoutDevice(tg as String)
+        if (d) try { d.off() } catch (e) { log.warn "blowout end off: ${e.message}" }
+        if ((tg as String).startsWith("z:")) armRelayOffConfirm((tg as String).substring(2) as Integer, "stop")
+    }
+    if (settings.coordSwitch) { try { settings.coordSwitch.off() } catch (e) { log.warn "coordSwitch.off(): ${e.message}" } }
+    unschedule("blowoutArmCheck")
+    Map hw = (atomicState.blowoutHw ?: [:]) as Map
+    if (hw.snapshot) {
+        hw.restorePending = true; hw.tries = 0
+        atomicState.blowoutHw = hw
+        blowoutWriteHw(true)
+        runIn(BLOWOUT_VERIFY_SEC, "blowoutRestoreCheck")
+    }
+    String elapsed = fmtDuration((int) ((now() - ((b.startedMs ?: now()) as long)) / 1000L))
+    if (reason == null) {
+        log.info "${app.label}: BLOWOUT ■ complete after ${elapsed}"
+        notify("blowout.done", [elapsed: elapsed])
+    } else {
+        log.warn "${app.label}: BLOWOUT ■ stopped — ${reason}"
+        notify("blowout.stopped", [reason: reason])
+    }
+}
+
+// =========================================================================
 // Health check & validation
 // =========================================================================
 
@@ -4646,6 +5015,10 @@ def relayOffConfirmCheck(data) {
     Integer zid = (data?.zid ?: 0) as int
     if (zid <= 0) return
     String ctx = (data?.ctx ?: "stop") as String
+    if (ctx == "blowout") {
+        Map b = (atomicState.blowout ?: [:]) as Map
+        if (b.active == true && b.phase == "air" && ((b.targets ?: []) as List)[(b.idx ?: 0) as int] == "z:${zid}".toString()) return
+    }
     String stage = (data?.stage ?: "read") as String
     def sw = settings."zone${zid}Switch"
     if (!sw) return
@@ -4984,6 +5357,7 @@ private String notifyEventsSummaryString() {
 }
 
 private String runStatusString() {
+    if (blowoutActive()) return "BLOWOUT — ${blowoutStatusText()}"
     if (state.running) {
         Integer zid = (state.currentZoneId ?: 0) as int
         String zname = settings."zone${zid}Name" ?: "Zone ${zid}"
@@ -5045,6 +5419,15 @@ def appButtonHandler(String btn) {
             break
         case "btnTestAllZones":
             testAllZones()
+            break
+        case "btnBlowoutStart":
+            blowoutStart()
+            break
+        case "btnBlowoutStop":
+            blowoutEnd("stopped by you")
+            break
+        case "btnBlowoutRestore":
+            blowoutRestoreNow()
             break
         case "btnSkipNext":
             skipNext()
