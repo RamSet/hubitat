@@ -9,8 +9,11 @@
  *  Child of: Local Ecobee Helpers (RamSet)
  *
  *  Author: RamSet
- *  Version: 1.2.1 (2026-11-05)
+ *  Version: 1.2.2 (2026-11-05)
  *  Version history:
+ *    1.2.2 - Removed the transition setting. Tested live: Keen vents move at a fixed ~1 s speed whatever transition time
+ *            the Zigbee Move to Level command carries (built-in driver and a test driver with a real transition field
+ *            both sounded the same as an instant move), so the setting could not do anything.
  *    1.2.1 - Removed the stepped ramp: on Keen vents each step is its own motor start, so a 5-step move was five
  *            sharp noises instead of one. The transition time is now handed to the vent driver as setLevel's
  *            duration (a real hardware fade, if the driver and vent support it); default 0. Change-only sending stays.
@@ -69,10 +72,6 @@ def mainPage() {
             input "band",       "decimal", title: "Proportional band — degrees from target at which the vent is fully open", defaultValue: 2.0, required: true
             input "alwaysAdjust", "bool",  title: "Always adjust (modulate on room temp even when the thermostat is idle)", defaultValue: false
             input "reEvalMinutes", "number", title: "Re-evaluation interval (minutes) — periodic safety re-check even when sensors are quiet", defaultValue: 5, range: "1..120", required: true
-        }
-        section("Movement") {
-            input "transitionSec", "number", title: "Transition time passed to the vent driver (seconds, 0 = none) — only works if the vent's driver and firmware support a timed move",
-                  defaultValue: 0, range: "0..60", required: true
         }
         section("Minimum open floor") {
             input "floor", "number", title: "Per-vent minimum open % (0–100)", defaultValue: 10, range: "0..100", required: true, submitOnChange: true
@@ -302,9 +301,8 @@ private void moveVent(v, int target) {
     if (last[id] != null && (last[id] as int) == target && !drifted) return
     last[id] = target
     atomicState.ventCmd = last
-    int secs = Math.max(0, ((transitionSec == null ? 0 : transitionSec) as int))
-    log.debug "Room Vent '${app.label}': ${v.displayName} ${from ?: '?'}% → ${target}%${secs ? " (driver transition ${secs}s)" : ''}"
-    if (secs > 0) v.setLevel(target, secs) else v.setLevel(target)
+    log.debug "Room Vent '${app.label}': ${v.displayName} ${from ?: '?'}% → ${target}%"
+    v.setLevel(target)
 }
 
 // No longer scheduled (1.2.1); kept so a ramp step queued by 1.2.0 does not throw.
