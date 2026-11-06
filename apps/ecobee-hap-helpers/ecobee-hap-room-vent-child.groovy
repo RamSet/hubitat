@@ -9,8 +9,14 @@
  *  Child of: Local Ecobee Helpers (RamSet)
  *
  *  Author: RamSet
- *  Version: 1.1.1 (2026-09-28)
+ *  Version: 1.2.0 (2026-11-05)
  *  Version history:
+ *    1.2.0 - Quieter vents. Moves are spread over an adjustable transition time (default 5 s, 0 = instant) as a
+ *            series of small steps, so a vent no longer slams from the floor to fully open when the furnace starts.
+ *            Done in the app because the Keen driver's own duration argument did not produce a timed move in a
+ *            live test. A vent is only commanded when its target changes, or when it has drifted more than 10%
+ *            from the last command; before, every 5-minute re-check re-sent the level and the vents (which settle
+ *            3-4% off target) ran their motors again for nothing.
  *    1.1.1 - The room-temperature pill is coloured by where the room sits against its target: blue below,
  *            green within 0.5°, orange above. While idle the target is the setpoint of the thermostat mode
  *            (both edges in auto); with the thermostat off there is no target and the pill is grey.
@@ -60,6 +66,10 @@ def mainPage() {
             input "band",       "decimal", title: "Proportional band — degrees from target at which the vent is fully open", defaultValue: 2.0, required: true
             input "alwaysAdjust", "bool",  title: "Always adjust (modulate on room temp even when the thermostat is idle)", defaultValue: false
             input "reEvalMinutes", "number", title: "Re-evaluation interval (minutes) — periodic safety re-check even when sensors are quiet", defaultValue: 5, range: "1..120", required: true
+        }
+        section("Movement") {
+            input "transitionSec", "number", title: "Transition time (seconds) — spread each move into small steps to keep the vents quiet (0 = move at once)",
+                  defaultValue: 5, range: "0..60", required: true
         }
         section("Minimum open floor") {
             input "floor", "number", title: "Per-vent minimum open % (0–100)", defaultValue: 10, range: "0..100", required: true, submitOnChange: true
@@ -271,9 +281,44 @@ private double scale(double delta, double band, double flr) {
     return Math.round(flr + (100.0d - flr) * frac) as double
 }
 
+@groovy.transform.Field static final int DRIFT_RESEND_PCT = 10
+
 private applyLevel(double level, boolean conditioning) {
     int lv = Math.max(0, Math.min(100, (int) Math.round(level)))
-    ventLevels?.each { it.setLevel(lv) }
+    ventLevels?.each { moveVent(it, lv) }
     ventSwitches?.each { (conditioning && lv > 0) ? it.on() : it.off() }
-    log.debug "Room Vent '${app.label}': vents → ${lv}% (conditioning=${conditioning})"
+}
+
+// Command a vent only when its target changed, or when it has drifted well away from the last command.
+// The move is ramped: small steps spread over the transition time, each step a short, quieter motor run.
+// A newer move cancels the remaining steps of an older one through the per-vent generation counter.
+private void moveVent(v, int target) {
+    String id = v.id as String
+    Map last = (atomicState.ventCmd ?: [:]) as Map
+    def reported = v.currentValue("level")
+    Integer from = (reported != null) ? (reported as BigDecimal).intValue() : (last[id] as Integer)
+    boolean drifted = (reported != null && Math.abs(from - target) > DRIFT_RESEND_PCT)
+    if (last[id] != null && (last[id] as int) == target && !drifted) return
+    last[id] = target
+    atomicState.ventCmd = last
+    Map gens = (atomicState.rampGen ?: [:]) as Map
+    int gen = ((gens[id] ?: 0) as int) + 1
+    gens[id] = gen
+    atomicState.rampGen = gens
+    int secs = Math.max(0, ((transitionSec == null ? 5 : transitionSec) as int))
+    int steps = (from == null || secs <= 0) ? 1 : Math.max(1, Math.min(secs, Math.abs(target - from).intdiv(5)))
+    log.debug "Room Vent '${app.label}': ${v.displayName} ${from ?: '?'}% → ${target}% in ${steps} step(s) over ${steps > 1 ? secs : 0}s"
+    if (steps == 1) { v.setLevel(target); return }
+    long stepMs = (secs * 1000L).intdiv(steps)
+    for (int i = 1; i <= steps; i++) {
+        int lvl = (i == steps) ? target : (int) Math.round(from + (target - from) * i / (double) steps)
+        if (i == 1) v.setLevel(lvl)
+        else runInMillis(stepMs * (i - 1), "rampStep", [data: [id: id, level: lvl, gen: gen], overwrite: false])
+    }
+}
+
+def rampStep(Map data) {
+    if (((atomicState.rampGen ?: [:]) as Map)[data.id as String] != data.gen) return   // superseded by a newer move
+    def v = ventLevels?.find { (it.id as String) == (data.id as String) }
+    if (v) v.setLevel(data.level as int)
 }
