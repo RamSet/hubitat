@@ -9,8 +9,11 @@
  *  Child of: Local Ecobee Helpers (RamSet)
  *
  *  Author: RamSet
- *  Version: 1.2.0 (2026-11-05)
+ *  Version: 1.2.1 (2026-11-05)
  *  Version history:
+ *    1.2.1 - Removed the stepped ramp: on Keen vents each step is its own motor start, so a 5-step move was five
+ *            sharp noises instead of one. The transition time is now handed to the vent driver as setLevel's
+ *            duration (a real hardware fade, if the driver and vent support it); default 0. Change-only sending stays.
  *    1.2.0 - Quieter vents. Moves are spread over an adjustable transition time (default 5 s, 0 = instant) as a
  *            series of small steps, so a vent no longer slams from the floor to fully open when the furnace starts.
  *            Done in the app because the Keen driver's own duration argument did not produce a timed move in a
@@ -68,8 +71,8 @@ def mainPage() {
             input "reEvalMinutes", "number", title: "Re-evaluation interval (minutes) — periodic safety re-check even when sensors are quiet", defaultValue: 5, range: "1..120", required: true
         }
         section("Movement") {
-            input "transitionSec", "number", title: "Transition time (seconds) — spread each move into small steps to keep the vents quiet (0 = move at once)",
-                  defaultValue: 5, range: "0..60", required: true
+            input "transitionSec", "number", title: "Transition time passed to the vent driver (seconds, 0 = none) — only works if the vent's driver and firmware support a timed move",
+                  defaultValue: 0, range: "0..60", required: true
         }
         section("Minimum open floor") {
             input "floor", "number", title: "Per-vent minimum open % (0–100)", defaultValue: 10, range: "0..100", required: true, submitOnChange: true
@@ -290,35 +293,19 @@ private applyLevel(double level, boolean conditioning) {
 }
 
 // Command a vent only when its target changed, or when it has drifted well away from the last command.
-// The move is ramped: small steps spread over the transition time, each step a short, quieter motor run.
-// A newer move cancels the remaining steps of an older one through the per-vent generation counter.
 private void moveVent(v, int target) {
     String id = v.id as String
     Map last = (atomicState.ventCmd ?: [:]) as Map
     def reported = v.currentValue("level")
-    Integer from = (reported != null) ? (reported as BigDecimal).intValue() : (last[id] as Integer)
-    boolean drifted = (reported != null && Math.abs(from - target) > DRIFT_RESEND_PCT)
+    Integer from = (reported != null) ? (reported as BigDecimal).intValue() : null
+    boolean drifted = (from != null && Math.abs(from - target) > DRIFT_RESEND_PCT)
     if (last[id] != null && (last[id] as int) == target && !drifted) return
     last[id] = target
     atomicState.ventCmd = last
-    Map gens = (atomicState.rampGen ?: [:]) as Map
-    int gen = ((gens[id] ?: 0) as int) + 1
-    gens[id] = gen
-    atomicState.rampGen = gens
-    int secs = Math.max(0, ((transitionSec == null ? 5 : transitionSec) as int))
-    int steps = (from == null || secs <= 0) ? 1 : Math.max(1, Math.min(secs, Math.abs(target - from).intdiv(5)))
-    log.debug "Room Vent '${app.label}': ${v.displayName} ${from ?: '?'}% → ${target}% in ${steps} step(s) over ${steps > 1 ? secs : 0}s"
-    if (steps == 1) { v.setLevel(target); return }
-    long stepMs = (secs * 1000L).intdiv(steps)
-    for (int i = 1; i <= steps; i++) {
-        int lvl = (i == steps) ? target : (int) Math.round(from + (target - from) * i / (double) steps)
-        if (i == 1) v.setLevel(lvl)
-        else runInMillis(stepMs * (i - 1), "rampStep", [data: [id: id, level: lvl, gen: gen], overwrite: false])
-    }
+    int secs = Math.max(0, ((transitionSec == null ? 0 : transitionSec) as int))
+    log.debug "Room Vent '${app.label}': ${v.displayName} ${from ?: '?'}% → ${target}%${secs ? " (driver transition ${secs}s)" : ''}"
+    if (secs > 0) v.setLevel(target, secs) else v.setLevel(target)
 }
 
-def rampStep(Map data) {
-    if (((atomicState.rampGen ?: [:]) as Map)[data.id as String] != data.gen) return   // superseded by a newer move
-    def v = ventLevels?.find { (it.id as String) == (data.id as String) }
-    if (v) v.setLevel(data.level as int)
-}
+// No longer scheduled (1.2.1); kept so a ramp step queued by 1.2.0 does not throw.
+def rampStep(Map data) { }
